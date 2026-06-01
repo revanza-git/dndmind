@@ -43,12 +43,16 @@ class PartyCharacter(BaseModel):
     id: UUID
     campaignId: UUID
     name: str
-    className: str
-    race: str
+    className: str | None = None
+    race: str | None = None
     level: int
-    hpCurrent: int
-    hpMax: int
-    armorClass: int
+    hpCurrent: int | None = None
+    hpMax: int | None = None
+    tempHp: int | None = None
+    armorClass: int | None = None
+    initiativeModifier: int | None = None
+    passivePerception: int | None = None
+    conditions: list[str] = Field(default_factory=list)
     notes: str | None = None
 
 
@@ -341,7 +345,7 @@ def mock_chat_response(request: ChatRequest) -> ChatResponse:
     party_line = "No party members are registered yet."
     if request.party:
         party_line = ", ".join(
-            f"{pc.name} the level {pc.level} {pc.race} {pc.className}"
+            _format_party_member(pc)
             for pc in request.party
         )
 
@@ -370,6 +374,19 @@ def mock_chat_response(request: ChatRequest) -> ChatResponse:
         structuredOutput=structured_output,
         suggestedActions=suggested_actions,
     )
+
+
+def _format_party_member(pc: PartyCharacter) -> str:
+    ancestry = f" {pc.race}" if pc.race else ""
+    class_name = f" {pc.className}" if pc.className else ""
+    hp = ""
+    if pc.hpCurrent is not None and pc.hpMax is not None:
+        hp = f", HP {pc.hpCurrent}/{pc.hpMax}"
+        if pc.tempHp:
+            hp += f" +{pc.tempHp} temp"
+    ac = f", AC {pc.armorClass}" if pc.armorClass is not None else ""
+    notes = f", notes: {pc.notes}" if pc.notes else ""
+    return f"{pc.name} level {pc.level}{ancestry}{class_name}{hp}{ac}{notes}"
 
 
 def _format_tool_section(tool_calls: list[dict[str, Any]]) -> str:

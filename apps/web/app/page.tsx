@@ -10,16 +10,23 @@ import {
   Citation,
   KnowledgeDocument,
   PartyCharacter,
+  PartyCharacterEvent,
+  PartyCharacterInput,
   Session,
   StructuredOutput,
   SuggestedAction,
   ToolCall,
+  createPartyCharacter,
+  createPartyCharacterEvent,
   createSession,
+  deletePartyCharacter,
   executeTool,
   getCampaignMemory,
   getCampaigns,
   getDocuments,
   getParty,
+  getPartyCharacterEvents,
+  getRecentPartyEvents,
   getSessions,
   ingestDocument,
   saveEncounter,
@@ -28,6 +35,9 @@ import {
   saveQuest,
   sendChat,
   summarizeSession,
+  updatePartyCharacter,
+  updatePartyCharacterHp,
+  updatePartyCharacterLevel,
   updateSession,
   uploadDocument
 } from "../lib/api";
@@ -78,10 +88,23 @@ type ResultEnhancements = {
   suggestedActions: SuggestedAction[];
 };
 
+type PartyPanelMode = "add" | "edit" | "hp" | "history";
+
+type ActivePartyPanel = {
+  mode: PartyPanelMode;
+  character: PartyCharacter | null;
+};
+
 export default function Home() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [campaignId, setCampaignId] = useState<string>("");
   const [party, setParty] = useState<PartyCharacter[]>([]);
+  const [partyEvents, setPartyEvents] = useState<PartyCharacterEvent[]>([]);
+  const [activePartyPanel, setActivePartyPanel] = useState<ActivePartyPanel | null>(null);
+  const [characterEvents, setCharacterEvents] = useState<PartyCharacterEvent[]>([]);
+  const [isSavingParty, setIsSavingParty] = useState(false);
+  const [isLoadingPartyHistory, setIsLoadingPartyHistory] = useState(false);
+  const [partyStatus, setPartyStatus] = useState<string | null>(null);
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -149,6 +172,9 @@ export default function Home() {
 
     getParty(campaignId)
       .then(setParty)
+      .catch((err: Error) => setError(err.message));
+    getRecentPartyEvents(campaignId)
+      .then(setPartyEvents)
       .catch((err: Error) => setError(err.message));
     getDocuments(campaignId)
       .then(setDocuments)
@@ -428,6 +454,147 @@ export default function Home() {
       setError(err instanceof Error ? err.message : "Dice roll failed.");
     } finally {
       setIsRolling(false);
+    }
+  }
+
+  async function refreshParty() {
+    if (!campaignId) {
+      return;
+    }
+    const [updatedParty, updatedEvents] = await Promise.all([
+      getParty(campaignId),
+      getRecentPartyEvents(campaignId)
+    ]);
+    setParty(updatedParty);
+    setPartyEvents(updatedEvents);
+  }
+
+  async function handleSavePartyCharacter(input: PartyCharacterInput) {
+    if (!campaignId) {
+      return;
+    }
+
+    setIsSavingParty(true);
+    setPartyStatus(null);
+    setError(null);
+    try {
+      if (activePartyPanel?.mode === "edit" && activePartyPanel.character) {
+        await updatePartyCharacter(activePartyPanel.character.id, input);
+        setPartyStatus("Character updated");
+      } else {
+        await createPartyCharacter(campaignId, input);
+        setPartyStatus("Character added");
+      }
+      await refreshParty();
+      setActivePartyPanel(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Party update failed.");
+    } finally {
+      setIsSavingParty(false);
+    }
+  }
+
+  async function handleDeletePartyCharacter(character: PartyCharacter) {
+    if (!window.confirm(`Archive ${character.name}? Their history will stay in the campaign log.`)) {
+      return;
+    }
+
+    setIsSavingParty(true);
+    setError(null);
+    try {
+      await deletePartyCharacter(character.id);
+      await refreshParty();
+      setActivePartyPanel(null);
+      setPartyStatus("Character archived");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Character archive failed.");
+    } finally {
+      setIsSavingParty(false);
+    }
+  }
+
+  async function handleSavePartyHp(input: { hpCurrent: number | null; tempHp: number | null; note: string }) {
+    if (!activePartyPanel?.character) {
+      return;
+    }
+
+    setIsSavingParty(true);
+    setError(null);
+    try {
+      await updatePartyCharacterHp({
+        characterId: activePartyPanel.character.id,
+        hpCurrent: input.hpCurrent,
+        tempHp: input.tempHp,
+        note: input.note
+      });
+      await refreshParty();
+      setActivePartyPanel(null);
+      setPartyStatus("HP updated");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "HP update failed.");
+    } finally {
+      setIsSavingParty(false);
+    }
+  }
+
+  async function handleQuickLevelChange(character: PartyCharacter, nextLevel: number) {
+    setIsSavingParty(true);
+    setError(null);
+    try {
+      await updatePartyCharacterLevel({
+        characterId: character.id,
+        level: nextLevel,
+        note: `Level set from ${character.level} to ${nextLevel}.`
+      });
+      await refreshParty();
+      setPartyStatus(`${character.name} is now level ${nextLevel}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Level update failed.");
+    } finally {
+      setIsSavingParty(false);
+    }
+  }
+
+  async function handleCreatePartyNote(input: { title: string; description: string }) {
+    if (!activePartyPanel?.character) {
+      return;
+    }
+
+    setIsSavingParty(true);
+    setError(null);
+    try {
+      await createPartyCharacterEvent({
+        characterId: activePartyPanel.character.id,
+        eventType: "note_added",
+        title: input.title,
+        description: input.description,
+        sessionId: activeSessionId
+      });
+      const [events, updatedEvents] = await Promise.all([
+        getPartyCharacterEvents(activePartyPanel.character.id),
+        getRecentPartyEvents(campaignId)
+      ]);
+      setCharacterEvents(events);
+      setPartyEvents(updatedEvents);
+      setPartyStatus("Progress note added");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Progress note failed.");
+    } finally {
+      setIsSavingParty(false);
+    }
+  }
+
+  async function openPartyHistory(character: PartyCharacter) {
+    setActivePartyPanel({ mode: "history", character });
+    setCharacterEvents([]);
+    setIsLoadingPartyHistory(true);
+    setError(null);
+    try {
+      setCharacterEvents(await getPartyCharacterEvents(character.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Character history failed to load.");
+    } finally {
+      setIsLoadingPartyHistory(false);
     }
   }
 
@@ -874,25 +1041,25 @@ export default function Home() {
           </section>
 
           <section>
-            <h2 className="mt-7 text-sm font-semibold uppercase tracking-[0.18em] text-copper">Party</h2>
-            <div className="mt-3 space-y-3">
-              {party.length === 0 && <p className="rounded-md border border-moss/15 p-3 text-sm text-moss/70">No party members yet.</p>}
-              {party.map((character) => (
-                <div key={character.id} className="rounded-lg border border-moss/15 bg-white p-3 shadow-sm">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold">{character.name}</p>
-                      <p className="text-sm text-moss/75">
-                        Level {character.level} {character.race} {character.className}
-                      </p>
-                    </div>
-                    <span className="rounded-full bg-mist px-2.5 py-1 text-xs font-semibold text-moss">AC {character.armorClass}</span>
-                  </div>
-                  <p className="mt-2 text-sm text-moss">HP {character.hpCurrent}/{character.hpMax}</p>
-                  {character.notes && <p className="mt-2 text-xs leading-5 text-moss/70">{character.notes}</p>}
-                </div>
-              ))}
-            </div>
+            <PartyPanel
+              party={party}
+              recentEvents={partyEvents}
+              activePanel={activePartyPanel}
+              characterEvents={characterEvents}
+              isSaving={isSavingParty}
+              isLoadingHistory={isLoadingPartyHistory}
+              status={partyStatus}
+              onAdd={() => setActivePartyPanel({ mode: "add", character: null })}
+              onEdit={(character) => setActivePartyPanel({ mode: "edit", character })}
+              onHp={(character) => setActivePartyPanel({ mode: "hp", character })}
+              onHistory={openPartyHistory}
+              onClose={() => setActivePartyPanel(null)}
+              onSaveCharacter={handleSavePartyCharacter}
+              onDeleteCharacter={handleDeletePartyCharacter}
+              onSaveHp={handleSavePartyHp}
+              onLevelChange={handleQuickLevelChange}
+              onCreateNote={handleCreatePartyNote}
+            />
           </section>
 
           <section id="campaign-memory" className="scroll-mt-4 mt-7">
@@ -1148,6 +1315,465 @@ function MemoryGroup({
   );
 }
 
+function PartyPanel({
+  party,
+  recentEvents,
+  activePanel,
+  characterEvents,
+  isSaving,
+  isLoadingHistory,
+  status,
+  onAdd,
+  onEdit,
+  onHp,
+  onHistory,
+  onClose,
+  onSaveCharacter,
+  onDeleteCharacter,
+  onSaveHp,
+  onLevelChange,
+  onCreateNote
+}: {
+  party: PartyCharacter[];
+  recentEvents: PartyCharacterEvent[];
+  activePanel: ActivePartyPanel | null;
+  characterEvents: PartyCharacterEvent[];
+  isSaving: boolean;
+  isLoadingHistory: boolean;
+  status: string | null;
+  onAdd: () => void;
+  onEdit: (character: PartyCharacter) => void;
+  onHp: (character: PartyCharacter) => void;
+  onHistory: (character: PartyCharacter) => void;
+  onClose: () => void;
+  onSaveCharacter: (input: PartyCharacterInput) => void;
+  onDeleteCharacter: (character: PartyCharacter) => void;
+  onSaveHp: (input: { hpCurrent: number | null; tempHp: number | null; note: string }) => void;
+  onLevelChange: (character: PartyCharacter, nextLevel: number) => void;
+  onCreateNote: (input: { title: string; description: string }) => void;
+}) {
+  return (
+    <div>
+      <div className="mt-7 flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-copper">Party</h2>
+        <button
+          type="button"
+          onClick={onAdd}
+          className="rounded-md bg-copper px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-white shadow-sm transition hover:bg-ember"
+        >
+          Add Character
+        </button>
+      </div>
+
+      <div className="mt-3 space-y-3">
+        {party.length === 0 && (
+          <div className="rounded-lg border border-dashed border-moss/25 bg-white p-4 text-sm leading-6 text-moss/75">
+            <p>No party members yet. Add your first player character so DNDMind can balance encounters and reference party context.</p>
+            <button
+              type="button"
+              onClick={onAdd}
+              className="mt-3 rounded-md border border-copper px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-copper transition hover:bg-copper hover:text-white"
+            >
+              Add Character
+            </button>
+          </div>
+        )}
+
+        {party.map((character) => (
+          <PartyCharacterCard
+            key={character.id}
+            character={character}
+            isSaving={isSaving}
+            onEdit={onEdit}
+            onHp={onHp}
+            onHistory={onHistory}
+            onLevelChange={onLevelChange}
+          />
+        ))}
+      </div>
+
+      {status && <p className="mt-3 rounded-md bg-mist px-3 py-2 text-xs font-semibold text-moss">{status}</p>}
+
+      {activePanel && (
+        <div className="mt-4 rounded-xl border border-moss/15 bg-white p-4 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-copper">
+                {activePanel.mode === "add" ? "Add Character" : activePanel.mode === "edit" ? "Edit Character" : activePanel.mode === "hp" ? "Quick HP" : "History"}
+              </p>
+              <h3 className="mt-1 text-base font-semibold text-ink">
+                {activePanel.character?.name ?? "New player character"}
+              </h3>
+            </div>
+            <button type="button" onClick={onClose} className="rounded-md border border-moss/15 px-2.5 py-1.5 text-xs font-semibold text-moss hover:border-copper">
+              Close
+            </button>
+          </div>
+
+          {activePanel.mode === "add" && (
+            <PartyCharacterForm isSaving={isSaving} onSubmit={onSaveCharacter} submitLabel="Add Character" />
+          )}
+          {activePanel.mode === "edit" && activePanel.character && (
+            <PartyCharacterForm
+              character={activePanel.character}
+              isSaving={isSaving}
+              onSubmit={onSaveCharacter}
+              onDelete={() => onDeleteCharacter(activePanel.character!)}
+              submitLabel="Save Character"
+            />
+          )}
+          {activePanel.mode === "hp" && activePanel.character && (
+            <HpUpdateForm character={activePanel.character} isSaving={isSaving} onSubmit={onSaveHp} />
+          )}
+          {activePanel.mode === "history" && activePanel.character && (
+            <CharacterHistoryDrawer
+              events={characterEvents}
+              isLoading={isLoadingHistory}
+              isSaving={isSaving}
+              onCreateNote={onCreateNote}
+            />
+          )}
+        </div>
+      )}
+
+      {recentEvents.length > 0 && (
+        <div className="mt-4 rounded-xl border border-moss/15 bg-white p-3 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-copper">Recent Progress</p>
+            <span className="rounded-full bg-mist px-2.5 py-1 text-xs font-semibold text-moss">{recentEvents.length}</span>
+          </div>
+          <PartyEventList events={recentEvents.slice(0, 5)} compact />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PartyCharacterCard({
+  character,
+  isSaving,
+  onEdit,
+  onHp,
+  onHistory,
+  onLevelChange
+}: {
+  character: PartyCharacter;
+  isSaving: boolean;
+  onEdit: (character: PartyCharacter) => void;
+  onHp: (character: PartyCharacter) => void;
+  onHistory: (character: PartyCharacter) => void;
+  onLevelChange: (character: PartyCharacter, nextLevel: number) => void;
+}) {
+  const hpLabel = character.hpCurrent === null && character.hpMax === null
+    ? "HP not set"
+    : `HP ${character.hpCurrent ?? "-"}/${character.hpMax ?? "-"}`;
+  const tempLabel = character.tempHp ? ` +${character.tempHp} temp` : "";
+  const detail = [
+    `Level ${character.level}`,
+    character.race,
+    character.className
+  ].filter(Boolean).join(" ");
+
+  return (
+    <div className="rounded-lg border border-moss/15 bg-white p-3 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="break-words font-semibold text-ink">{character.name}</p>
+          <p className="mt-1 text-sm text-moss/75">{detail}</p>
+        </div>
+        <span className="shrink-0 rounded-full bg-mist px-2.5 py-1 text-xs font-semibold text-moss">
+          AC {character.armorClass ?? "-"}
+        </span>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+        <div className="rounded-md bg-parchment/80 px-3 py-2">
+          <p className="font-semibold text-ink">{hpLabel}{tempLabel}</p>
+        </div>
+        <div className="rounded-md bg-parchment/80 px-3 py-2">
+          <p className="font-semibold text-ink">Init {formatModifier(character.initiativeModifier ?? 0)}</p>
+        </div>
+      </div>
+
+      {character.notes && <p className="mt-3 text-xs leading-5 text-moss/70">{character.notes}</p>}
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button type="button" onClick={() => onEdit(character)} className="rounded-md border border-moss/15 px-2.5 py-1.5 text-xs font-semibold text-moss hover:border-copper">
+          Edit
+        </button>
+        <button type="button" onClick={() => onHp(character)} className="rounded-md border border-moss/15 px-2.5 py-1.5 text-xs font-semibold text-moss hover:border-copper">
+          HP
+        </button>
+        <button type="button" onClick={() => onHistory(character)} className="rounded-md border border-moss/15 px-2.5 py-1.5 text-xs font-semibold text-moss hover:border-copper">
+          History
+        </button>
+        <button
+          type="button"
+          onClick={() => onLevelChange(character, character.level + 1)}
+          disabled={isSaving}
+          className="rounded-md border border-moss/15 px-2.5 py-1.5 text-xs font-semibold text-moss hover:border-copper disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Level +1
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PartyCharacterForm({
+  character,
+  isSaving,
+  submitLabel,
+  onSubmit,
+  onDelete
+}: {
+  character?: PartyCharacter;
+  isSaving: boolean;
+  submitLabel: string;
+  onSubmit: (input: PartyCharacterInput) => void;
+  onDelete?: () => void;
+}) {
+  const [form, setForm] = useState({
+    name: character?.name ?? "",
+    className: character?.className ?? "",
+    race: character?.race ?? "",
+    level: String(character?.level ?? 1),
+    hpCurrent: character?.hpCurrent?.toString() ?? "",
+    hpMax: character?.hpMax?.toString() ?? "",
+    tempHp: character?.tempHp?.toString() ?? "",
+    armorClass: character?.armorClass?.toString() ?? "",
+    initiativeModifier: character?.initiativeModifier?.toString() ?? "",
+    passivePerception: character?.passivePerception?.toString() ?? "",
+    notes: character?.notes ?? ""
+  });
+
+  function updateField(key: keyof typeof form, value: string) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSubmit({
+      name: form.name.trim(),
+      className: form.className.trim() || null,
+      race: form.race.trim() || null,
+      level: numberOrDefault(form.level, 1),
+      hpCurrent: numberOrNull(form.hpCurrent),
+      hpMax: numberOrNull(form.hpMax),
+      tempHp: numberOrNull(form.tempHp),
+      armorClass: numberOrNull(form.armorClass),
+      initiativeModifier: numberOrNull(form.initiativeModifier),
+      passivePerception: numberOrNull(form.passivePerception),
+      conditions: character?.conditions ?? [],
+      notes: form.notes.trim() || null
+    });
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="mt-4 space-y-3">
+      <div className="grid gap-2 sm:grid-cols-2">
+        <FormField label="Name" value={form.name} onChange={(value) => updateField("name", value)} required />
+        <FormField label="Class" value={form.className} onChange={(value) => updateField("className", value)} />
+        <FormField label="Race" value={form.race} onChange={(value) => updateField("race", value)} />
+        <FormField label="Level" type="number" min={1} value={form.level} onChange={(value) => updateField("level", value)} />
+        <FormField label="Current HP" type="number" min={0} value={form.hpCurrent} onChange={(value) => updateField("hpCurrent", value)} />
+        <FormField label="Max HP" type="number" min={0} value={form.hpMax} onChange={(value) => updateField("hpMax", value)} />
+        <FormField label="Temp HP" type="number" min={0} value={form.tempHp} onChange={(value) => updateField("tempHp", value)} />
+        <FormField label="AC" type="number" min={0} value={form.armorClass} onChange={(value) => updateField("armorClass", value)} />
+        <FormField label="Initiative Modifier" type="number" value={form.initiativeModifier} onChange={(value) => updateField("initiativeModifier", value)} />
+        <FormField label="Passive Perception" type="number" min={0} value={form.passivePerception} onChange={(value) => updateField("passivePerception", value)} />
+      </div>
+      <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-copper">
+        Notes
+        <textarea
+          value={form.notes}
+          onChange={(event) => updateField("notes", event.target.value)}
+          rows={3}
+          className="mt-1 w-full resize-none rounded-md border border-moss/20 px-3 py-2 text-sm normal-case tracking-normal text-ink"
+        />
+      </label>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {onDelete && (
+          <button type="button" onClick={onDelete} disabled={isSaving} className="rounded-md border border-ember/30 px-3 py-2 text-sm font-semibold text-ember disabled:cursor-not-allowed disabled:opacity-50">
+            Archive
+          </button>
+        )}
+        <button type="submit" disabled={isSaving || !form.name.trim()} className="ml-auto rounded-md bg-copper px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+          {isSaving ? "Saving" : submitLabel}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function HpUpdateForm({
+  character,
+  isSaving,
+  onSubmit
+}: {
+  character: PartyCharacter;
+  isSaving: boolean;
+  onSubmit: (input: { hpCurrent: number | null; tempHp: number | null; note: string }) => void;
+}) {
+  const [hpCurrent, setHpCurrent] = useState(character.hpCurrent?.toString() ?? "");
+  const [tempHp, setTempHp] = useState(character.tempHp?.toString() ?? "");
+  const [note, setNote] = useState("");
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSubmit({ hpCurrent: numberOrNull(hpCurrent), tempHp: numberOrNull(tempHp), note });
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="mt-4 space-y-3">
+      <div className="rounded-md bg-parchment/80 px-3 py-2 text-sm text-moss">
+        Current maximum: {character.hpMax ?? "-"} HP. Temp HP is tracked separately for encounter context.
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <FormField label="Current HP" type="number" min={0} value={hpCurrent} onChange={setHpCurrent} />
+        <FormField label="Temp HP" type="number" min={0} value={tempHp} onChange={setTempHp} />
+      </div>
+      <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-copper">
+        Note
+        <input
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+          placeholder="Took damage from goblin ambush"
+          className="mt-1 w-full rounded-md border border-moss/20 px-3 py-2 text-sm normal-case tracking-normal text-ink"
+        />
+      </label>
+      <button type="submit" disabled={isSaving} className="w-full rounded-md bg-copper px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+        {isSaving ? "Saving" : "Save HP"}
+      </button>
+    </form>
+  );
+}
+
+function CharacterHistoryDrawer({
+  events,
+  isLoading,
+  isSaving,
+  onCreateNote
+}: {
+  events: PartyCharacterEvent[];
+  isLoading: boolean;
+  isSaving: boolean;
+  onCreateNote: (input: { title: string; description: string }) => void;
+}) {
+  return (
+    <div className="mt-4 space-y-4">
+      <ProgressNoteForm isSaving={isSaving} onSubmit={onCreateNote} />
+      {isLoading ? <p className="rounded-md bg-parchment/80 px-3 py-2 text-sm text-moss/70">Loading history...</p> : <PartyEventList events={events} />}
+    </div>
+  );
+}
+
+function ProgressNoteForm({
+  isSaving,
+  onSubmit
+}: {
+  isSaving: boolean;
+  onSubmit: (input: { title: string; description: string }) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSubmit({ title: title.trim() || "Progress note", description: description.trim() });
+    setTitle("");
+    setDescription("");
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="rounded-lg border border-moss/10 bg-parchment/70 p-3">
+      <div className="grid gap-2">
+        <FormField label="Progress Title" value={title} onChange={setTitle} />
+        <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-copper">
+          Description
+          <textarea
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            rows={2}
+            className="mt-1 w-full resize-none rounded-md border border-moss/20 px-3 py-2 text-sm normal-case tracking-normal text-ink"
+          />
+        </label>
+      </div>
+      <button type="submit" disabled={isSaving || !description.trim()} className="mt-3 rounded-md border border-copper px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-copper disabled:cursor-not-allowed disabled:opacity-50">
+        Add Note
+      </button>
+    </form>
+  );
+}
+
+function PartyEventList({ events, compact = false }: { events: PartyCharacterEvent[]; compact?: boolean }) {
+  if (events.length === 0) {
+    return <p className="mt-3 rounded-md bg-parchment/80 px-3 py-2 text-sm text-moss/70">No character progress yet.</p>;
+  }
+
+  return (
+    <div className="mt-3 space-y-2">
+      {events.map((event) => (
+        <div key={event.id} className="rounded-lg bg-parchment/80 px-3 py-2 text-sm leading-6 text-moss">
+          <div className="flex items-start justify-between gap-3">
+            <p className="font-semibold text-ink">{event.title || event.eventType.replaceAll("_", " ")}</p>
+            <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.12em] text-copper">{formatEventDate(event.createdAt)}</span>
+          </div>
+          {!compact && event.description && <p className="mt-1 text-moss/75">{event.description}</p>}
+          {!compact && <PartyEventDelta event={event} />}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PartyEventDelta({ event }: { event: PartyCharacterEvent }) {
+  const before = object(event.beforeState);
+  const after = object(event.afterState);
+  const changes = [
+    fieldChange("Level", before.level, after.level),
+    fieldChange("HP", before.hpCurrent, after.hpCurrent),
+    fieldChange("Temp HP", before.tempHp, after.tempHp),
+    fieldChange("AC", before.armorClass, after.armorClass)
+  ].filter(Boolean);
+
+  if (changes.length === 0) {
+    return null;
+  }
+
+  return <p className="mt-1 text-xs text-moss/65">{changes.join(" · ")}</p>;
+}
+
+function FormField({
+  label,
+  value,
+  onChange,
+  type = "text",
+  required = false,
+  min
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  required?: boolean;
+  min?: number;
+}) {
+  return (
+    <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-copper">
+      {label}
+      <input
+        type={type}
+        min={min}
+        required={required}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 w-full rounded-md border border-moss/20 px-3 py-2 text-sm normal-case tracking-normal text-ink"
+      />
+    </label>
+  );
+}
+
 function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
   return (
     <div className="rounded-xl border border-moss/15 bg-parchment p-4 text-sm text-moss shadow-sm">
@@ -1274,6 +1900,30 @@ function KeyValue({ value }: { value: unknown }) {
 function formatModifier(value: unknown) {
   const numeric = Number(value ?? 0);
   return `${numeric >= 0 ? "+" : ""}${numeric}`;
+}
+
+function numberOrNull(value: string): number | null {
+  if (value.trim() === "") {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function numberOrDefault(value: string, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 1 ? parsed : fallback;
+}
+
+function formatEventDate(value: string) {
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(value));
+}
+
+function fieldChange(label: string, before: unknown, after: unknown) {
+  if (before === after || after === undefined) {
+    return "";
+  }
+  return `${label}: ${before ?? "-"} -> ${after ?? "-"}`;
 }
 
 function citationLabel(citation: Citation) {

@@ -14,13 +14,46 @@ export type PartyCharacter = {
   id: string;
   campaignId: string;
   name: string;
-  className: string;
-  race: string;
+  className: string | null;
+  race: string | null;
   level: number;
-  hpCurrent: number;
-  hpMax: number;
-  armorClass: number;
+  hpCurrent: number | null;
+  hpMax: number | null;
+  tempHp: number | null;
+  armorClass: number | null;
+  initiativeModifier: number | null;
+  passivePerception: number | null;
+  conditions: string[];
   notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PartyCharacterInput = {
+  name: string;
+  className?: string | null;
+  race?: string | null;
+  level: number;
+  hpCurrent?: number | null;
+  hpMax?: number | null;
+  tempHp?: number | null;
+  armorClass?: number | null;
+  initiativeModifier?: number | null;
+  passivePerception?: number | null;
+  conditions?: string[];
+  notes?: string | null;
+};
+
+export type PartyCharacterEvent = {
+  id: string;
+  campaignId: string;
+  characterId: string;
+  eventType: string;
+  title: string | null;
+  description: string | null;
+  beforeState: Record<string, unknown> | null;
+  afterState: Record<string, unknown> | null;
+  sessionId: string | null;
   createdAt: string;
 };
 
@@ -189,6 +222,110 @@ export async function getParty(campaignId: string): Promise<PartyCharacter[]> {
   const response = await apiFetch(`/api/campaigns/${campaignId}/party`, { cache: "no-store" });
   if (!response.ok) {
     throw new Error("Failed to load party");
+  }
+  return response.json();
+}
+
+export async function createPartyCharacter(campaignId: string, input: PartyCharacterInput): Promise<PartyCharacter> {
+  const response = await apiFetch(`/api/campaigns/${campaignId}/party`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || "Character creation failed");
+  }
+  return response.json();
+}
+
+export async function updatePartyCharacter(characterId: string, input: PartyCharacterInput): Promise<PartyCharacter> {
+  const response = await apiFetch(`/api/party/${characterId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || "Character update failed");
+  }
+  return response.json();
+}
+
+export async function deletePartyCharacter(characterId: string): Promise<void> {
+  const response = await apiFetch(`/api/party/${characterId}`, { method: "DELETE" });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || "Character delete failed");
+  }
+}
+
+export async function updatePartyCharacterHp(input: {
+  characterId: string;
+  hpCurrent: number | null;
+  tempHp: number | null;
+  note?: string;
+}): Promise<PartyCharacter> {
+  const response = await apiFetch(`/api/party/${input.characterId}/hp`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ hpCurrent: input.hpCurrent, tempHp: input.tempHp, note: input.note ?? null })
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || "HP update failed");
+  }
+  return response.json();
+}
+
+export async function updatePartyCharacterLevel(input: {
+  characterId: string;
+  level: number;
+  note?: string;
+}): Promise<PartyCharacter> {
+  const response = await apiFetch(`/api/party/${input.characterId}/level`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ level: input.level, note: input.note ?? null })
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || "Level update failed");
+  }
+  return response.json();
+}
+
+export async function createPartyCharacterEvent(input: {
+  characterId: string;
+  eventType: string;
+  title?: string;
+  description?: string;
+  sessionId?: string | null;
+}): Promise<PartyCharacterEvent> {
+  const response = await apiFetch(`/api/party/${input.characterId}/events`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || "Character event creation failed");
+  }
+  return response.json();
+}
+
+export async function getPartyCharacterEvents(characterId: string): Promise<PartyCharacterEvent[]> {
+  const response = await apiFetch(`/api/party/${characterId}/events`, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error("Failed to load character history");
+  }
+  return response.json();
+}
+
+export async function getRecentPartyEvents(campaignId: string): Promise<PartyCharacterEvent[]> {
+  const response = await apiFetch(`/api/campaigns/${campaignId}/party/events`, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error("Failed to load party history");
   }
   return response.json();
 }

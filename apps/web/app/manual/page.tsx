@@ -39,7 +39,7 @@ const quickStart = [
   },
   {
     title: "Add party",
-    detail: "Review player characters with level, class, HP, AC, and notes.",
+    detail: "Add and update player characters with HP, level, AC, notes, and history.",
     result: "Encounter prompts can account for party strength.",
     area: "Right Panel"
   },
@@ -119,7 +119,10 @@ const steps: GuideStep[] = [
     where: "Right Panel -> Party",
     do: [
       "Open the party area.",
-      "Add each character's name, class, race, level, HP, AC, and notes.",
+      "Use Add Character to enter name, class, race, level, HP, AC, initiative, passive perception, and notes.",
+      "Use HP for fast damage or healing updates during play.",
+      "Use Edit for level, AC, class, race, and note changes.",
+      "Open History to review progress and add character notes.",
       "Keep the Party Info toggle on when asking for combat or challenge design."
     ],
     expected: "Party members appear in the party list and encounter answers reference party strength.",

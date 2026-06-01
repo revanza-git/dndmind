@@ -111,10 +111,17 @@ app.MapPut("/api/campaigns/{campaignId:guid}", async (Guid campaignId, UpdateCam
 
 app.MapGet("/api/campaigns/{campaignId:guid}/party", async (Guid campaignId, NpgsqlDataSource db) =>
 {
+    if (await LoadCampaign(campaignId, db) is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
+
     const string sql = """
-        SELECT id, campaign_id, name, class_name, race, level, hp_current, hp_max, armor_class, notes, created_at
+        SELECT id, campaign_id, name, class_name, race, level, hp_current, hp_max, temp_hp,
+               armor_class, initiative_modifier, passive_perception, conditions, notes, created_at, updated_at
         FROM party_characters
         WHERE campaign_id = @campaignId
+          AND archived_at IS NULL
         ORDER BY created_at ASC
         """;
 
@@ -136,29 +143,260 @@ app.MapPost("/api/campaigns/{campaignId:guid}/party", async (Guid campaignId, Cr
     {
         return Results.BadRequest(new { error = "Character name is required." });
     }
+    if (await LoadCampaign(campaignId, db) is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
+    var validationError = ValidatePartyCharacterInput(Math.Max(1, request.Level), request.HpCurrent, request.HpMax, request.TempHp);
+    if (validationError is not null)
+    {
+        return Results.BadRequest(new { error = validationError });
+    }
 
     const string sql = """
         INSERT INTO party_characters
-          (campaign_id, name, class_name, race, level, hp_current, hp_max, armor_class, notes)
+          (campaign_id, name, class_name, race, level, hp_current, hp_max, temp_hp,
+           armor_class, initiative_modifier, passive_perception, conditions, notes)
         VALUES
-          (@campaignId, @name, @className, @race, @level, @hpCurrent, @hpMax, @armorClass, @notes)
-        RETURNING id, campaign_id, name, class_name, race, level, hp_current, hp_max, armor_class, notes, created_at
+          (@campaignId, @name, @className, @race, @level, @hpCurrent, @hpMax, @tempHp,
+           @armorClass, @initiativeModifier, @passivePerception, @conditions, @notes)
+        RETURNING id, campaign_id, name, class_name, race, level, hp_current, hp_max, temp_hp,
+                  armor_class, initiative_modifier, passive_perception, conditions, notes, created_at, updated_at
         """;
 
     await using var cmd = db.CreateCommand(sql);
     cmd.Parameters.AddWithValue("campaignId", campaignId);
     cmd.Parameters.AddWithValue("name", request.Name.Trim());
-    cmd.Parameters.AddWithValue("className", request.ClassName?.Trim() ?? "Adventurer");
-    cmd.Parameters.AddWithValue("race", request.Race?.Trim() ?? "Unknown");
-    cmd.Parameters.AddWithValue("level", request.Level <= 0 ? 1 : request.Level);
-    cmd.Parameters.AddWithValue("hpCurrent", request.HpCurrent <= 0 ? 1 : request.HpCurrent);
-    cmd.Parameters.AddWithValue("hpMax", request.HpMax <= 0 ? Math.Max(1, request.HpCurrent) : request.HpMax);
-    cmd.Parameters.AddWithValue("armorClass", request.ArmorClass <= 0 ? 10 : request.ArmorClass);
-    cmd.Parameters.AddWithValue("notes", (object?)request.Notes ?? DBNull.Value);
+    AddPartyCharacterParameters(cmd, request);
 
     await using var reader = await cmd.ExecuteReaderAsync();
     await reader.ReadAsync();
-    return Results.Created($"/api/campaigns/{campaignId}/party/{reader.GetGuid(0)}", ReadPartyCharacter(reader));
+    var character = ReadPartyCharacter(reader);
+    await reader.DisposeAsync();
+    await InsertPartyEvent(db, character.CampaignId, character.Id, "created", "Character created", null, null, character, null);
+    return Results.Created($"/api/party/{character.Id}", character);
+});
+
+app.MapGet("/api/party/{characterId:guid}", async (Guid characterId, NpgsqlDataSource db) =>
+{
+    var character = await LoadPartyCharacter(characterId, db);
+    return character is null ? Results.NotFound() : Results.Ok(character);
+});
+
+app.MapPut("/api/party/{characterId:guid}", async (Guid characterId, UpdatePartyCharacterRequest request, NpgsqlDataSource db) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Name))
+    {
+        return Results.BadRequest(new { error = "Character name is required." });
+    }
+
+    var before = await LoadPartyCharacter(characterId, db);
+    if (before is null)
+    {
+        return Results.NotFound(new { error = "Character not found." });
+    }
+
+    var validationError = ValidatePartyCharacterInput(request.Level, request.HpCurrent, request.HpMax, request.TempHp);
+    if (validationError is not null)
+    {
+        return Results.BadRequest(new { error = validationError });
+    }
+
+    const string sql = """
+        UPDATE party_characters
+        SET name = @name,
+            class_name = @className,
+            race = @race,
+            level = @level,
+            hp_current = @hpCurrent,
+            hp_max = @hpMax,
+            temp_hp = @tempHp,
+            armor_class = @armorClass,
+            initiative_modifier = @initiativeModifier,
+            passive_perception = @passivePerception,
+            conditions = @conditions,
+            notes = @notes,
+            updated_at = now()
+        WHERE id = @characterId
+          AND archived_at IS NULL
+        RETURNING id, campaign_id, name, class_name, race, level, hp_current, hp_max, temp_hp,
+                  armor_class, initiative_modifier, passive_perception, conditions, notes, created_at, updated_at
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("characterId", characterId);
+    cmd.Parameters.AddWithValue("name", request.Name.Trim());
+    AddPartyCharacterParameters(cmd, request);
+
+    await using var reader = await cmd.ExecuteReaderAsync();
+    if (!await reader.ReadAsync())
+    {
+        return Results.NotFound(new { error = "Character not found." });
+    }
+
+    var after = ReadPartyCharacter(reader);
+    await reader.DisposeAsync();
+    var eventType = before.Level != after.Level ? "level_up" : "updated";
+    await InsertPartyEvent(db, after.CampaignId, after.Id, eventType, BuildPartyUpdateTitle(before, after), request.Notes, before, after, null);
+    return Results.Ok(after);
+});
+
+app.MapDelete("/api/party/{characterId:guid}", async (Guid characterId, NpgsqlDataSource db) =>
+{
+    var before = await LoadPartyCharacter(characterId, db);
+    if (before is null)
+    {
+        return Results.NotFound(new { error = "Character not found." });
+    }
+
+    const string sql = """
+        UPDATE party_characters
+        SET archived_at = now(), updated_at = now()
+        WHERE id = @characterId
+          AND archived_at IS NULL
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("characterId", characterId);
+    var updated = await cmd.ExecuteNonQueryAsync();
+    if (updated == 0)
+    {
+        return Results.NotFound(new { error = "Character not found." });
+    }
+
+    await InsertPartyEvent(db, before.CampaignId, before.Id, "deleted", "Character archived", null, before, null, null);
+    return Results.NoContent();
+});
+
+app.MapPatch("/api/party/{characterId:guid}/hp", async (Guid characterId, UpdatePartyHpRequest request, NpgsqlDataSource db) =>
+{
+    var before = await LoadPartyCharacter(characterId, db);
+    if (before is null)
+    {
+        return Results.NotFound(new { error = "Character not found." });
+    }
+
+    var hpMax = before.HpMax;
+    var validationError = ValidatePartyCharacterInput(before.Level, request.HpCurrent, hpMax, request.TempHp);
+    if (validationError is not null)
+    {
+        return Results.BadRequest(new { error = validationError });
+    }
+
+    const string sql = """
+        UPDATE party_characters
+        SET hp_current = @hpCurrent,
+            temp_hp = @tempHp,
+            updated_at = now()
+        WHERE id = @characterId
+          AND archived_at IS NULL
+        RETURNING id, campaign_id, name, class_name, race, level, hp_current, hp_max, temp_hp,
+                  armor_class, initiative_modifier, passive_perception, conditions, notes, created_at, updated_at
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("characterId", characterId);
+    cmd.Parameters.AddWithValue("hpCurrent", (object?)request.HpCurrent ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("tempHp", (object?)request.TempHp ?? DBNull.Value);
+    await using var reader = await cmd.ExecuteReaderAsync();
+    await reader.ReadAsync();
+    var after = ReadPartyCharacter(reader);
+    await reader.DisposeAsync();
+    await InsertPartyEvent(db, after.CampaignId, after.Id, "hp_changed", "HP updated", request.Note, before, after, null);
+    return Results.Ok(after);
+});
+
+app.MapPatch("/api/party/{characterId:guid}/level", async (Guid characterId, UpdatePartyLevelRequest request, NpgsqlDataSource db) =>
+{
+    var before = await LoadPartyCharacter(characterId, db);
+    if (before is null)
+    {
+        return Results.NotFound(new { error = "Character not found." });
+    }
+    if (request.Level < 1)
+    {
+        return Results.BadRequest(new { error = "Level must be at least 1." });
+    }
+
+    const string sql = """
+        UPDATE party_characters
+        SET level = @level,
+            updated_at = now()
+        WHERE id = @characterId
+          AND archived_at IS NULL
+        RETURNING id, campaign_id, name, class_name, race, level, hp_current, hp_max, temp_hp,
+                  armor_class, initiative_modifier, passive_perception, conditions, notes, created_at, updated_at
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("characterId", characterId);
+    cmd.Parameters.AddWithValue("level", request.Level);
+    await using var reader = await cmd.ExecuteReaderAsync();
+    await reader.ReadAsync();
+    var after = ReadPartyCharacter(reader);
+    await reader.DisposeAsync();
+    await InsertPartyEvent(db, after.CampaignId, after.Id, "level_up", $"Level changed to {after.Level}", request.Note, before, after, null);
+    return Results.Ok(after);
+});
+
+app.MapPost("/api/party/{characterId:guid}/events", async (Guid characterId, CreatePartyEventRequest request, NpgsqlDataSource db) =>
+{
+    var character = await LoadPartyCharacter(characterId, db);
+    if (character is null)
+    {
+        return Results.NotFound(new { error = "Character not found." });
+    }
+    if (string.IsNullOrWhiteSpace(request.EventType))
+    {
+        return Results.BadRequest(new { error = "eventType is required." });
+    }
+
+    var partyEvent = await InsertPartyEvent(
+        db,
+        character.CampaignId,
+        character.Id,
+        request.EventType.Trim(),
+        request.Title?.Trim(),
+        request.Description?.Trim(),
+        null,
+        character,
+        request.SessionId);
+    return Results.Created($"/api/party/{characterId}/events/{partyEvent.Id}", partyEvent);
+});
+
+app.MapGet("/api/party/{characterId:guid}/events", async (Guid characterId, NpgsqlDataSource db) =>
+{
+    var character = await LoadPartyCharacter(characterId, db);
+    if (character is null)
+    {
+        return Results.NotFound(new { error = "Character not found." });
+    }
+
+    var events = await LoadPartyEvents("""
+        SELECT id, campaign_id, character_id, event_type, title, description, before_state, after_state, session_id, created_at
+        FROM party_character_events
+        WHERE character_id = @characterId
+        ORDER BY created_at DESC
+        LIMIT 50
+        """, db, command => command.Parameters.AddWithValue("characterId", characterId));
+    return Results.Ok(events);
+});
+
+app.MapGet("/api/campaigns/{campaignId:guid}/party/events", async (Guid campaignId, NpgsqlDataSource db) =>
+{
+    if (await LoadCampaign(campaignId, db) is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
+
+    var events = await LoadPartyEvents("""
+        SELECT id, campaign_id, character_id, event_type, title, description, before_state, after_state, session_id, created_at
+        FROM party_character_events
+        WHERE campaign_id = @campaignId
+        ORDER BY created_at DESC
+        LIMIT 50
+        """, db, command => command.Parameters.AddWithValue("campaignId", campaignId));
+    return Results.Ok(events);
 });
 
 app.MapGet("/api/campaigns/{campaignId:guid}/sessions", async (Guid campaignId, NpgsqlDataSource db, ICurrentClientService currentClient) =>
@@ -794,6 +1032,15 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
 {
     const string sql = """
         CREATE EXTENSION IF NOT EXISTS vector;
+        CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+        CREATE OR REPLACE FUNCTION set_updated_at()
+        RETURNS trigger AS $$
+        BEGIN
+          NEW.updated_at = now();
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
 
         ALTER TABLE knowledge_documents
         ADD COLUMN IF NOT EXISTS content text NOT NULL DEFAULT '';
@@ -806,6 +1053,21 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
 
         ALTER TABLE sessions
         ADD COLUMN IF NOT EXISTS visibility text NOT NULL DEFAULT 'private';
+
+        ALTER TABLE party_characters
+        ALTER COLUMN class_name DROP NOT NULL,
+        ALTER COLUMN race DROP NOT NULL,
+        ALTER COLUMN hp_current DROP NOT NULL,
+        ALTER COLUMN hp_max DROP NOT NULL,
+        ALTER COLUMN armor_class DROP NOT NULL;
+
+        ALTER TABLE party_characters
+        ADD COLUMN IF NOT EXISTS temp_hp int NULL,
+        ADD COLUMN IF NOT EXISTS initiative_modifier int NULL,
+        ADD COLUMN IF NOT EXISTS passive_perception int NULL,
+        ADD COLUMN IF NOT EXISTS conditions text[] NULL,
+        ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now(),
+        ADD COLUMN IF NOT EXISTS archived_at timestamptz NULL;
 
         UPDATE sessions
         SET client_owner_id = 'dndmind-demo-client'
@@ -881,6 +1143,19 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
           created_at timestamptz NOT NULL DEFAULT now()
         );
 
+        CREATE TABLE IF NOT EXISTS party_character_events (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+          character_id uuid NOT NULL REFERENCES party_characters(id) ON DELETE CASCADE,
+          event_type text NOT NULL,
+          title text NULL,
+          description text NULL,
+          before_state jsonb NULL,
+          after_state jsonb NULL,
+          session_id uuid NULL REFERENCES sessions(id) ON DELETE SET NULL,
+          created_at timestamptz NOT NULL DEFAULT now()
+        );
+
         ALTER TABLE npcs ADD COLUMN IF NOT EXISTS client_owner_id text;
         ALTER TABLE quests ADD COLUMN IF NOT EXISTS client_owner_id text;
         ALTER TABLE locations ADD COLUMN IF NOT EXISTS client_owner_id text;
@@ -929,6 +1204,9 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
         CREATE INDEX IF NOT EXISTS idx_locations_campaign_id ON locations(campaign_id);
         CREATE INDEX IF NOT EXISTS idx_encounters_campaign_id ON encounters(campaign_id);
         CREATE INDEX IF NOT EXISTS idx_memory_events_campaign_id ON memory_events(campaign_id);
+        CREATE INDEX IF NOT EXISTS idx_party_characters_campaign_id ON party_characters(campaign_id);
+        CREATE INDEX IF NOT EXISTS idx_party_character_events_campaign_id ON party_character_events(campaign_id);
+        CREATE INDEX IF NOT EXISTS idx_party_character_events_character_id ON party_character_events(character_id);
         CREATE INDEX IF NOT EXISTS idx_sessions_campaign_client_owner ON sessions(campaign_id, client_owner_id);
         CREATE INDEX IF NOT EXISTS idx_npcs_campaign_client_owner ON npcs(campaign_id, client_owner_id);
         CREATE INDEX IF NOT EXISTS idx_quests_campaign_client_owner ON quests(campaign_id, client_owner_id);
@@ -940,6 +1218,9 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
         BEGIN
           IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'sessions_updated_at') THEN
             CREATE TRIGGER sessions_updated_at BEFORE UPDATE ON sessions FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'party_characters_updated_at') THEN
+            CREATE TRIGGER party_characters_updated_at BEFORE UPDATE ON party_characters FOR EACH ROW EXECUTE FUNCTION set_updated_at();
           END IF;
           IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'npcs_updated_at') THEN
             CREATE TRIGGER npcs_updated_at BEFORE UPDATE ON npcs FOR EACH ROW EXECUTE FUNCTION set_updated_at();
@@ -970,14 +1251,31 @@ static PartyCharacterDto ReadPartyCharacter(NpgsqlDataReader reader) => new(
     reader.GetGuid(0),
     reader.GetGuid(1),
     reader.GetString(2),
-    reader.GetString(3),
-    reader.GetString(4),
+    reader.IsDBNull(3) ? null : reader.GetString(3),
+    reader.IsDBNull(4) ? null : reader.GetString(4),
     reader.GetInt32(5),
-    reader.GetInt32(6),
-    reader.GetInt32(7),
-    reader.GetInt32(8),
-    reader.IsDBNull(9) ? null : reader.GetString(9),
-    reader.GetDateTime(10));
+    reader.IsDBNull(6) ? null : reader.GetInt32(6),
+    reader.IsDBNull(7) ? null : reader.GetInt32(7),
+    reader.IsDBNull(8) ? null : reader.GetInt32(8),
+    reader.IsDBNull(9) ? null : reader.GetInt32(9),
+    reader.IsDBNull(10) ? null : reader.GetInt32(10),
+    reader.IsDBNull(11) ? null : reader.GetInt32(11),
+    reader.IsDBNull(12) ? [] : reader.GetFieldValue<string[]>(12),
+    reader.IsDBNull(13) ? null : reader.GetString(13),
+    reader.GetDateTime(14),
+    reader.GetDateTime(15));
+
+static PartyCharacterEventDto ReadPartyCharacterEvent(NpgsqlDataReader reader) => new(
+    reader.GetGuid(0),
+    reader.GetGuid(1),
+    reader.GetGuid(2),
+    reader.GetString(3),
+    reader.IsDBNull(4) ? null : reader.GetString(4),
+    reader.IsDBNull(5) ? null : reader.GetString(5),
+    reader.IsDBNull(6) ? null : JsonDocument.Parse(reader.GetString(6)).RootElement.Clone(),
+    reader.IsDBNull(7) ? null : JsonDocument.Parse(reader.GetString(7)).RootElement.Clone(),
+    reader.IsDBNull(8) ? null : reader.GetGuid(8),
+    reader.GetDateTime(9));
 
 static SessionDto ReadSession(NpgsqlDataReader reader) => new(
     reader.GetGuid(0),
@@ -1017,9 +1315,11 @@ static async Task<CampaignDto?> LoadCampaign(Guid campaignId, NpgsqlDataSource d
 static async Task<List<PartyCharacterDto>> LoadParty(Guid campaignId, NpgsqlDataSource db)
 {
     const string sql = """
-        SELECT id, campaign_id, name, class_name, race, level, hp_current, hp_max, armor_class, notes, created_at
+        SELECT id, campaign_id, name, class_name, race, level, hp_current, hp_max, temp_hp,
+               armor_class, initiative_modifier, passive_perception, conditions, notes, created_at, updated_at
         FROM party_characters
         WHERE campaign_id = @campaignId
+          AND archived_at IS NULL
         ORDER BY created_at ASC
         """;
     var party = new List<PartyCharacterDto>();
@@ -1032,6 +1332,129 @@ static async Task<List<PartyCharacterDto>> LoadParty(Guid campaignId, NpgsqlData
     }
 
     return party;
+}
+
+static async Task<PartyCharacterDto?> LoadPartyCharacter(Guid characterId, NpgsqlDataSource db)
+{
+    const string sql = """
+        SELECT id, campaign_id, name, class_name, race, level, hp_current, hp_max, temp_hp,
+               armor_class, initiative_modifier, passive_perception, conditions, notes, created_at, updated_at
+        FROM party_characters
+        WHERE id = @characterId
+          AND archived_at IS NULL
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("characterId", characterId);
+    await using var reader = await cmd.ExecuteReaderAsync();
+    return await reader.ReadAsync() ? ReadPartyCharacter(reader) : null;
+}
+
+static async Task<List<PartyCharacterEventDto>> LoadPartyEvents(string sql, NpgsqlDataSource db, Action<NpgsqlCommand> bind)
+{
+    var events = new List<PartyCharacterEventDto>();
+    await using var cmd = db.CreateCommand(sql);
+    bind(cmd);
+    await using var reader = await cmd.ExecuteReaderAsync();
+    while (await reader.ReadAsync())
+    {
+        events.Add(ReadPartyCharacterEvent(reader));
+    }
+
+    return events;
+}
+
+static void AddPartyCharacterParameters(NpgsqlCommand cmd, PartyCharacterWriteRequest request)
+{
+    cmd.Parameters.AddWithValue("className", BlankToDbNull(request.ClassName));
+    cmd.Parameters.AddWithValue("race", BlankToDbNull(request.Race));
+    cmd.Parameters.AddWithValue("level", request.Level < 1 ? 1 : request.Level);
+    cmd.Parameters.AddWithValue("hpCurrent", (object?)request.HpCurrent ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("hpMax", (object?)request.HpMax ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("tempHp", (object?)request.TempHp ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("armorClass", (object?)request.ArmorClass ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("initiativeModifier", (object?)request.InitiativeModifier ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("passivePerception", (object?)request.PassivePerception ?? DBNull.Value);
+    cmd.Parameters.Add(new NpgsqlParameter("conditions", NpgsqlDbType.Array | NpgsqlDbType.Text)
+    {
+        Value = request.Conditions is { Length: > 0 }
+            ? request.Conditions.Where(condition => !string.IsNullOrWhiteSpace(condition)).Select(condition => condition.Trim()).ToArray()
+            : DBNull.Value
+    });
+    cmd.Parameters.AddWithValue("notes", BlankToDbNull(request.Notes));
+}
+
+static object BlankToDbNull(string? value) =>
+    string.IsNullOrWhiteSpace(value) ? DBNull.Value : value.Trim();
+
+static string? ValidatePartyCharacterInput(int level, int? hpCurrent, int? hpMax, int? tempHp)
+{
+    if (level < 1)
+    {
+        return "Level must be at least 1.";
+    }
+    if (hpCurrent is < 0 || hpMax is < 0 || tempHp is < 0)
+    {
+        return "HP values cannot be negative.";
+    }
+    if (hpCurrent is not null && hpMax is not null && hpCurrent > hpMax + (tempHp ?? 0))
+    {
+        return "Current HP cannot be greater than max HP unless temp HP covers the excess.";
+    }
+    return null;
+}
+
+static string BuildPartyUpdateTitle(PartyCharacterDto before, PartyCharacterDto after)
+{
+    if (before.Level != after.Level)
+    {
+        return $"Level changed to {after.Level}";
+    }
+    if (before.HpCurrent != after.HpCurrent || before.TempHp != after.TempHp)
+    {
+        return "HP updated";
+    }
+    return "Character updated";
+}
+
+static async Task<PartyCharacterEventDto> InsertPartyEvent(
+    NpgsqlDataSource db,
+    Guid campaignId,
+    Guid characterId,
+    string eventType,
+    string? title,
+    string? description,
+    PartyCharacterDto? beforeState,
+    PartyCharacterDto? afterState,
+    Guid? sessionId)
+{
+    const string sql = """
+        INSERT INTO party_character_events
+          (campaign_id, character_id, event_type, title, description, before_state, after_state, session_id)
+        VALUES
+          (@campaignId, @characterId, @eventType, @title, @description, @beforeState, @afterState, @sessionId)
+        RETURNING id, campaign_id, character_id, event_type, title, description, before_state, after_state, session_id, created_at
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("campaignId", campaignId);
+    cmd.Parameters.AddWithValue("characterId", characterId);
+    cmd.Parameters.AddWithValue("eventType", eventType);
+    cmd.Parameters.AddWithValue("title", BlankToDbNull(title));
+    cmd.Parameters.AddWithValue("description", BlankToDbNull(description));
+    cmd.Parameters.Add(new NpgsqlParameter("beforeState", NpgsqlDbType.Jsonb)
+    {
+        Value = beforeState is null ? DBNull.Value : JsonSerializer.Serialize(beforeState)
+    });
+    cmd.Parameters.Add(new NpgsqlParameter("afterState", NpgsqlDbType.Jsonb)
+    {
+        Value = afterState is null ? DBNull.Value : JsonSerializer.Serialize(afterState)
+    });
+    cmd.Parameters.AddWithValue("sessionId", (object?)sessionId ?? DBNull.Value);
+
+    await using var reader = await cmd.ExecuteReaderAsync();
+    await reader.ReadAsync();
+    return ReadPartyCharacterEvent(reader);
 }
 
 static async Task<DocumentDto?> LoadDocument(Guid documentId, NpgsqlDataSource db)
@@ -1422,13 +1845,30 @@ public record PartyCharacterDto(
     Guid Id,
     Guid CampaignId,
     string Name,
-    string ClassName,
-    string Race,
+    string? ClassName,
+    string? Race,
     int Level,
-    int HpCurrent,
-    int HpMax,
-    int ArmorClass,
+    int? HpCurrent,
+    int? HpMax,
+    int? TempHp,
+    int? ArmorClass,
+    int? InitiativeModifier,
+    int? PassivePerception,
+    string[] Conditions,
     string? Notes,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
+public record PartyCharacterEventDto(
+    Guid Id,
+    Guid CampaignId,
+    Guid CharacterId,
+    string EventType,
+    string? Title,
+    string? Description,
+    JsonElement? BeforeState,
+    JsonElement? AfterState,
+    Guid? SessionId,
     DateTime CreatedAt);
 
 public record SessionDto(
@@ -1445,15 +1885,52 @@ public record SessionDto(
 public record CreateCampaignRequest(string Name, string? Description, string? SystemTone);
 public record UpdateCampaignRequest(string? Name, string? Description, string? SystemTone);
 
+public interface PartyCharacterWriteRequest
+{
+    string? ClassName { get; }
+    string? Race { get; }
+    int Level { get; }
+    int? HpCurrent { get; }
+    int? HpMax { get; }
+    int? TempHp { get; }
+    int? ArmorClass { get; }
+    int? InitiativeModifier { get; }
+    int? PassivePerception { get; }
+    string[]? Conditions { get; }
+    string? Notes { get; }
+}
+
 public record CreatePartyCharacterRequest(
     string Name,
     string? ClassName,
     string? Race,
     int Level,
-    int HpCurrent,
-    int HpMax,
-    int ArmorClass,
-    string? Notes);
+    int? HpCurrent,
+    int? HpMax,
+    int? TempHp,
+    int? ArmorClass,
+    int? InitiativeModifier,
+    int? PassivePerception,
+    string[]? Conditions,
+    string? Notes) : PartyCharacterWriteRequest;
+
+public record UpdatePartyCharacterRequest(
+    string Name,
+    string? ClassName,
+    string? Race,
+    int Level,
+    int? HpCurrent,
+    int? HpMax,
+    int? TempHp,
+    int? ArmorClass,
+    int? InitiativeModifier,
+    int? PassivePerception,
+    string[]? Conditions,
+    string? Notes) : PartyCharacterWriteRequest;
+
+public record UpdatePartyHpRequest(int? HpCurrent, int? TempHp, string? Note);
+public record UpdatePartyLevelRequest(int Level, string? Note);
+public record CreatePartyEventRequest(string EventType, string? Title, string? Description, Guid? SessionId);
 
 public record UpsertSessionRequest(
     int SessionNumber,

@@ -89,12 +89,25 @@ Where: Right Panel -> Party
 Do:
 
 1. Open the party area.
-2. Add each character's name, class, race, level, HP, AC, and notes.
-3. Keep the Party Info toggle on when asking for combat or challenge design.
+2. Select **Add Character** and enter the character's name, class, race, level, HP, AC, initiative modifier, passive perception, and notes.
+3. Use **Edit** to update level, AC, notes, or other sheet details as the campaign changes.
+4. Use **HP** for fast damage or healing updates. Add a note such as `Took damage from goblin ambush` so the change appears in character history.
+5. Use **History** to review level ups, HP changes, and custom progress notes.
+6. Keep the Party Info toggle on when asking for combat or challenge design.
 
 Expected result: party members appear in the party list and encounter answers reference party strength.
 
 Why it matters: party context helps DNDMind tune difficulty and avoid encounters that are too weak or too punishing.
+
+### Managing the Party
+
+The Party panel is campaign-level for the MVP. Changes persist in PostgreSQL and are loaded fresh by the API when DNDMind answers chat or encounter prompts.
+
+- Add a character from the Party panel with name, class, race, level, HP, AC, initiative, passive perception, and notes.
+- Update HP from the quick HP control during play. Current HP, temp HP, and the note are saved as a progress event.
+- Edit level, AC, class, race, and notes from the Edit control. Level changes are tracked in history.
+- Open History to see recent character progress and add custom notes such as bonds, injuries, discoveries, or trust changes.
+- Encounter generation uses the latest saved party snapshot when Party Info is enabled, so updated levels, HP, AC, and notes can affect difficulty and tactics.
 
 ### Step 3 -- Ingest Rules
 

@@ -94,8 +94,10 @@ def _tool_call_response(tool_name: str, arguments: dict[str, Any], context: dict
 
 
 def _initiative_modifier(member: Any) -> int:
+    if getattr(member, "initiativeModifier", None) is not None:
+        return int(member.initiativeModifier)
     # MVP heuristic: use level as a tiny proxy when character sheets do not yet store DEX.
-    return max(0, min(5, member.level // 2))
+    return max(0, min(5, int(member.level) // 2))
 
 
 def _infer_monsters(message: str) -> list[dict[str, Any]]:

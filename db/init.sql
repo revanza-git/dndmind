@@ -33,13 +33,32 @@ CREATE TABLE party_characters (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
   name text NOT NULL,
-  class_name text NOT NULL,
-  race text NOT NULL,
+  class_name text NULL,
+  race text NULL,
   level int NOT NULL DEFAULT 1,
-  hp_current int NOT NULL DEFAULT 1,
-  hp_max int NOT NULL DEFAULT 1,
-  armor_class int NOT NULL DEFAULT 10,
+  hp_current int NULL,
+  hp_max int NULL,
+  temp_hp int NULL,
+  armor_class int NULL,
+  initiative_modifier int NULL,
+  passive_perception int NULL,
+  conditions text[] NULL,
   notes text NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  archived_at timestamptz NULL
+);
+
+CREATE TABLE party_character_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  character_id uuid NOT NULL REFERENCES party_characters(id) ON DELETE CASCADE,
+  event_type text NOT NULL,
+  title text NULL,
+  description text NULL,
+  before_state jsonb NULL,
+  after_state jsonb NULL,
+  session_id uuid NULL REFERENCES sessions(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
@@ -166,6 +185,8 @@ CREATE TABLE memory_events (
 CREATE INDEX idx_sessions_campaign_id ON sessions(campaign_id);
 CREATE INDEX idx_sessions_campaign_client_owner ON sessions(campaign_id, client_owner_id);
 CREATE INDEX idx_party_characters_campaign_id ON party_characters(campaign_id);
+CREATE INDEX idx_party_character_events_campaign_id ON party_character_events(campaign_id);
+CREATE INDEX idx_party_character_events_character_id ON party_character_events(character_id);
 CREATE INDEX idx_knowledge_documents_campaign_id ON knowledge_documents(campaign_id);
 CREATE INDEX idx_knowledge_chunks_campaign_id ON knowledge_chunks(campaign_id);
 CREATE INDEX idx_knowledge_chunks_document_id ON knowledge_chunks(document_id);
@@ -202,6 +223,11 @@ EXECUTE FUNCTION set_updated_at();
 
 CREATE TRIGGER sessions_updated_at
 BEFORE UPDATE ON sessions
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER party_characters_updated_at
+BEFORE UPDATE ON party_characters
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
