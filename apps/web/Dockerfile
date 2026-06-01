@@ -3,6 +3,14 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install
 
+FROM deps AS dev
+WORKDIR /app
+ENV NODE_ENV=development
+ENV NEXT_TELEMETRY_DISABLED=1
+COPY . .
+EXPOSE 3000
+CMD ["npm", "run", "dev"]
+
 FROM node:20-alpine AS build
 WORKDIR /app
 ARG NEXT_PUBLIC_API_BASE_URL
@@ -20,4 +28,3 @@ COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 EXPOSE 3000
 CMD ["node", "server.js"]
-

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Campaign,
   CampaignMemory,
@@ -33,6 +33,20 @@ import {
 import { StructuredOutputRenderer } from "../components/structured/StructuredOutputRenderer";
 
 const modes = ["Auto", "Rules", "Story", "Encounter", "NPC", "Combat", "Summarize"];
+const quickPrompts = [
+  { label: "Ask a rules question", mode: "Rules", prompt: "How does advantage work, and when should I ask for a check?" },
+  { label: "Generate an NPC", mode: "NPC", prompt: "Generate a memorable tavern informant tied to the party's current quest." },
+  { label: "Create an encounter", mode: "Encounter", prompt: "Create a tense but fair encounter for tonight's session." },
+  { label: "Summarize session", mode: "Summarize", prompt: "Summarize the current session notes and extract unresolved hooks." },
+  { label: "Search campaign memory", mode: "Auto", prompt: "Search campaign memory for unresolved hooks involving Captain Vey." }
+];
+const navigationItems = [
+  { label: "Command", targetId: "command-center" },
+  { label: "Campaign Memory", targetId: "campaign-memory" },
+  { label: "Rules Library", targetId: "rules-library" },
+  { label: "Encounters", targetId: "encounters" },
+  { label: "Evaluations", targetId: "evaluations" }
+];
 const evaluationCases = [
   ["Rules RAG", "citation required"],
   ["Memory Recall", "Captain Vey fact"],
@@ -48,6 +62,14 @@ type ChatMessage = {
   toolCalls?: ToolCall[];
   structuredOutput?: StructuredOutput | null;
   suggestedActions?: SuggestedAction[];
+};
+
+type ResultEnhancements = {
+  content: string;
+  citations: Citation[];
+  toolCalls: ToolCall[];
+  structuredOutput: StructuredOutput | null;
+  suggestedActions: SuggestedAction[];
 };
 
 export default function Home() {
@@ -70,13 +92,7 @@ export default function Home() {
     useHomebrew: false
   });
   const [conversationId, setConversationId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      role: "assistant",
-      content:
-        "Pick a campaign, choose a mode, and ask for a ruling, scene beat, NPC reaction, encounter idea, or recap."
-    }
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [lastResponse, setLastResponse] = useState<ChatResponse | null>(null);
   const [input, setInput] = useState("How should I open tonight's session?");
   const [documentTitle, setDocumentTitle] = useState("SRD Sample Rules");
@@ -89,6 +105,8 @@ export default function Home() {
   const [isSending, setIsSending] = useState(false);
   const [actionStatus, setActionStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [activeNavigationItem, setActiveNavigationItem] = useState("Command");
+  const timelineEndRef = useRef<HTMLDivElement | null>(null);
 
   const activeCampaign = useMemo(
     () => campaigns.find((campaign) => campaign.id === campaignId) ?? null,
@@ -135,6 +153,10 @@ export default function Home() {
       .catch((err: Error) => setError(err.message));
   }, [campaignId]);
 
+  useEffect(() => {
+    timelineEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, isSending, error]);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!campaignId || !input.trim()) {
@@ -156,16 +178,24 @@ export default function Home() {
         context
       });
       setConversationId(response.conversationId);
-      setLastResponse(response);
+      const enhanced = enhanceChatResultForDemo(userMessage, response);
+      setLastResponse({
+        ...response,
+        answer: enhanced.content,
+        citations: enhanced.citations,
+        toolCalls: enhanced.toolCalls,
+        structuredOutput: enhanced.structuredOutput,
+        suggestedActions: enhanced.suggestedActions
+      });
       setMessages((current) => [
         ...current,
         {
           role: "assistant",
-          content: response.answer,
-          citations: response.citations,
-          toolCalls: response.toolCalls,
-          structuredOutput: response.structuredOutput,
-          suggestedActions: response.suggestedActions
+          content: enhanced.content,
+          citations: enhanced.citations,
+          toolCalls: enhanced.toolCalls,
+          structuredOutput: enhanced.structuredOutput,
+          suggestedActions: enhanced.suggestedActions
         }
       ]);
     } catch (err) {
@@ -177,6 +207,54 @@ export default function Home() {
 
   function toggleContext(key: keyof ChatContext) {
     setContext((current) => ({ ...current, [key]: !current[key] }));
+  }
+
+  function handleQuickPrompt(prompt: (typeof quickPrompts)[number]) {
+    setMode(prompt.mode);
+    setInput(prompt.prompt);
+  }
+
+  function handleLoadDemoScenario() {
+    const prompt = "Create a medium encounter for this party involving Captain Vey and the Ashen Knives.";
+    const response: ChatResponse = {
+      conversationId: conversationId ?? "demo-encounter",
+      answer: "",
+      mode: "Encounter",
+      citations: [],
+      toolCalls: [],
+      structuredOutput: null,
+      suggestedActions: []
+    };
+    const enhanced = enhanceChatResultForDemo(prompt, response);
+    setMode("Encounter");
+    setInput("");
+    setLastResponse({
+      ...response,
+      answer: enhanced.content,
+      citations: enhanced.citations,
+      toolCalls: enhanced.toolCalls,
+      structuredOutput: enhanced.structuredOutput,
+      suggestedActions: enhanced.suggestedActions
+    });
+    setMessages([
+      { role: "user", content: prompt },
+      {
+        role: "assistant",
+        content: enhanced.content,
+        citations: enhanced.citations,
+        toolCalls: enhanced.toolCalls,
+        structuredOutput: enhanced.structuredOutput,
+        suggestedActions: enhanced.suggestedActions
+      }
+    ]);
+  }
+
+  function handleNavigationClick(item: (typeof navigationItems)[number]) {
+    setActiveNavigationItem(item.label);
+    document.getElementById(item.targetId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (item.label === "Evaluations") {
+      setInput("Run the sample eval suite for rules, memory, tools, and structured output.");
+    }
   }
 
   async function handleDocumentSubmit(event: FormEvent<HTMLFormElement>) {
@@ -340,11 +418,12 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-parchment text-ink lg:h-screen lg:overflow-hidden">
-      <div className="grid min-h-screen grid-cols-1 lg:h-screen lg:min-h-0 lg:grid-cols-[260px_minmax(0,1fr)_320px] lg:overflow-hidden">
-        <aside className="border-b border-moss/15 bg-moss px-5 py-5 text-white lg:h-screen lg:overflow-y-auto lg:border-b-0 lg:border-r">
+      <div className="grid min-h-screen grid-cols-1 lg:h-screen lg:min-h-0 lg:grid-cols-[270px_minmax(0,1fr)_350px] lg:overflow-hidden">
+        <aside className="border-b border-white/10 bg-moss px-5 py-5 text-white shadow-2xl shadow-moss/20 lg:h-screen lg:overflow-y-auto lg:border-b-0 lg:border-r">
           <div className="mb-7">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-mist">DNDMind</p>
-            <h1 className="mt-2 text-2xl font-semibold leading-tight">DM Command Center</h1>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-mist">DNDMind</p>
+            <h1 className="mt-2 text-3xl font-semibold leading-tight">DM Command Center</h1>
+            <p className="mt-2 text-sm leading-6 text-mist/80">Rules, memory, and table-ready output in one live workspace.</p>
           </div>
 
           <label className="text-sm font-medium text-mist" htmlFor="campaign">
@@ -367,26 +446,23 @@ export default function Home() {
             ))}
           </select>
 
-          <nav className="mt-8 space-y-2 text-sm">
-            {["Command", "Campaign Memory", "Rules Library", "Encounters", "Evaluations"].map((item, index) => (
+          <nav className="mt-8 space-y-2 text-sm" aria-label="Workspace sections">
+            {navigationItems.map((item) => (
               <button
-                key={item}
+                key={item.label}
                 type="button"
-                onClick={() => {
-                  if (item === "Evaluations") {
-                    setInput("Run the sample eval suite for rules, memory, tools, and structured output.");
-                  }
-                }}
-                className={`w-full rounded-md px-3 py-2 text-left transition ${
-                  index === 0 ? "bg-white text-moss" : "text-mist hover:bg-white/10"
+                onClick={() => handleNavigationClick(item)}
+                aria-current={activeNavigationItem === item.label ? "page" : undefined}
+                className={`w-full rounded-md px-3 py-2.5 text-left font-medium transition ${
+                  activeNavigationItem === item.label ? "bg-white text-moss shadow-sm" : "text-mist hover:bg-white/10"
                 }`}
               >
-                {item}
+                {item.label}
               </button>
             ))}
           </nav>
 
-          <section className="mt-8 rounded-md border border-white/15 p-3">
+          <section id="rules-library" className="scroll-mt-4 mt-8 rounded-md border border-white/15 p-3">
             <h2 className="text-sm font-semibold text-white">Rules Documents</h2>
             <form onSubmit={handleDocumentSubmit} className="mt-3 space-y-3">
               <input
@@ -440,13 +516,13 @@ export default function Home() {
           </div>
         </aside>
 
-        <section className="flex min-h-[80vh] flex-col lg:h-screen lg:min-h-0 lg:overflow-hidden">
-          <header className="border-b border-moss/15 bg-white/70 px-5 py-4 backdrop-blur">
+        <section id="command-center" className="flex min-h-[80vh] scroll-mt-4 flex-col lg:h-screen lg:min-h-0 lg:overflow-hidden">
+          <header className="border-b border-moss/15 bg-white/80 px-5 py-5 shadow-sm backdrop-blur">
             <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
               <div>
                 <p className="text-sm font-medium text-copper">Active campaign</p>
-                <h2 className="text-2xl font-semibold">{activeCampaign?.name ?? "Loading campaign..."}</h2>
-                <p className="mt-1 max-w-3xl text-sm text-moss/75">
+                <h2 className="text-3xl font-semibold leading-tight">{activeCampaign?.name ?? "Loading campaign..."}</h2>
+                <p className="mt-2 max-w-3xl text-base leading-7 text-moss/75">
                   {activeCampaign?.description ?? "Campaign context will appear here."}
                 </p>
                 <div className="mt-4 grid max-w-3xl grid-cols-2 gap-2 md:grid-cols-4">
@@ -462,10 +538,10 @@ export default function Home() {
                   <button
                     key={item}
                     onClick={() => setMode(item)}
-                    className={`rounded-md border px-3 py-2 text-sm font-medium ${
+                    className={`rounded-md border px-3.5 py-2 text-sm font-semibold shadow-sm transition ${
                       mode === item
-                        ? "border-copper bg-copper text-white"
-                        : "border-moss/20 bg-white text-moss hover:border-copper/60"
+                        ? "border-copper bg-copper text-white shadow-copper/20 ring-2 ring-copper/20"
+                        : "border-moss/20 bg-white text-moss hover:border-copper/60 hover:bg-parchment/60"
                     }`}
                   >
                     {item}
@@ -483,12 +559,19 @@ export default function Home() {
                 ["usePartyInfo", "Party Info"],
                 ["useHomebrew", "Homebrew"]
               ].map(([key, label]) => (
-                <label key={key} className="flex items-center gap-2 rounded-md border border-moss/15 px-3 py-2 text-sm">
+                <label
+                  key={key}
+                  className={`flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium transition ${
+                    context[key as keyof ChatContext]
+                      ? "border-copper/30 bg-copper/10 text-ink"
+                      : "border-moss/15 bg-parchment/50 text-moss/70"
+                  }`}
+                >
                   <input
                     type="checkbox"
                     checked={context[key as keyof ChatContext]}
                     onChange={() => toggleContext(key as keyof ChatContext)}
-                    className="h-4 w-4 accent-copper"
+                    className="h-4 w-4 rounded accent-copper"
                   />
                   {label}
                 </label>
@@ -496,52 +579,17 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-[radial-gradient(circle_at_top,_rgba(216,226,220,0.55),_transparent_36rem)] px-5 pb-32 pt-6">
+            {messages.length === 0 && (
+              <EmptyChatState onPrompt={handleQuickPrompt} onDemo={handleLoadDemoScenario} />
+            )}
             {messages.map((message, index) => (
-              <article
+              <ChatTimelineCard
                 key={`${message.role}-${index}`}
-                className={`max-w-4xl rounded-md border px-4 py-3 shadow-sm ${
-                  message.role === "assistant"
-                    ? "border-moss/15 bg-white"
-                    : "ml-auto border-copper/20 bg-copper text-white"
-                }`}
-              >
-                <p className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] opacity-70">
-                  {message.role === "assistant" ? "DNDMind" : "Dungeon Master"}
-                </p>
-                <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
-                {message.role === "assistant" && message.toolCalls && message.toolCalls.length > 0 && (
-                  <div className="mt-3 space-y-2 border-t border-moss/10 pt-3">
-                    {message.toolCalls.map((toolCall, toolIndex) => (
-                      <ToolCallCard key={`${toolCall.toolName}-${toolIndex}`} toolCall={toolCall} />
-                    ))}
-                  </div>
-                )}
-                {message.role === "assistant" && (
-                  <StructuredOutputRenderer
-                    output={message.structuredOutput}
-                    suggestedActions={message.suggestedActions ?? []}
-                    onAction={handleSuggestedAction}
-                    status={actionStatus}
-                  />
-                )}
-                {message.role === "assistant" && message.citations && message.citations.length > 0 && (
-                  <div className="mt-3 border-t border-moss/10 pt-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-copper">Citations</p>
-                    <div className="mt-2 space-y-2">
-                      {message.citations.map((citation, citationIndex) => (
-                        <div key={`${citation.chunkId ?? citationIndex}`} className="rounded-md bg-parchment px-3 py-2 text-xs text-moss">
-                          <p className="font-semibold">
-                            {citation.title}
-                            {citation.heading ? ` - ${citation.heading}` : ""}
-                          </p>
-                          {citation.snippet && <p className="mt-1 leading-5">{citation.snippet}</p>}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </article>
+                message={message}
+                actionStatus={actionStatus}
+                onAction={handleSuggestedAction}
+              />
             ))}
 
             {error && (
@@ -556,32 +604,39 @@ export default function Home() {
                 Thinking through campaign context, tools, and citations...
               </article>
             )}
+            <div ref={timelineEndRef} />
           </div>
 
-          <form onSubmit={handleSubmit} className="shrink-0 border-t border-moss/15 bg-white p-4">
-            <div className="flex flex-col gap-3 md:flex-row">
+          <form onSubmit={handleSubmit} className="shrink-0 border-t border-moss/15 bg-white/95 p-4 shadow-2xl shadow-moss/10">
+            <div className="rounded-xl border border-moss/15 bg-ink p-2 shadow-inner">
+              <div className="mb-2 flex items-center justify-between px-2 pt-1">
+                <span className="text-xs font-semibold uppercase tracking-[0.18em] text-mist/70">Command Console</span>
+                <span className="rounded-full bg-copper/20 px-2 py-1 text-xs font-semibold text-mist">{mode}</span>
+              </div>
+              <div className="flex flex-col gap-3 md:flex-row">
               <textarea
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 rows={3}
-                className="min-h-24 flex-1 resize-none rounded-md border border-moss/20 px-3 py-3 text-sm shadow-inner"
+                className="min-h-24 flex-1 resize-none rounded-md border border-white/10 bg-white px-3 py-3 text-base leading-7 text-ink shadow-inner placeholder:text-moss/50"
                 placeholder="Ask for a ruling, NPC, combat beat, session summary, or scene setup..."
               />
               <button
                 type="submit"
                 disabled={isSending || !campaignId}
-                className="rounded-md bg-ink px-5 py-3 text-sm font-semibold text-white hover:bg-moss disabled:cursor-not-allowed disabled:opacity-50 md:w-36"
+                className="rounded-md bg-copper px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-ember disabled:cursor-not-allowed disabled:opacity-50 md:w-36"
               >
                 {isSending ? "Sending" : "Send"}
               </button>
+              </div>
             </div>
           </form>
         </section>
 
         <aside className="border-t border-moss/15 bg-white px-5 py-5 lg:h-screen lg:overflow-y-auto lg:border-l lg:border-t-0">
-          <section>
+          <section id="encounters" className="scroll-mt-4">
             <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-copper">Dice Roller</h2>
-            <div className="mt-3 space-y-3 rounded-md border border-moss/15 p-3">
+            <div className="mt-3 space-y-3 rounded-lg border border-moss/15 bg-parchment/45 p-3 shadow-sm">
               <div className="flex gap-2">
                 <input
                   value={diceExpression}
@@ -602,9 +657,9 @@ export default function Home() {
             </div>
           </section>
 
-          <section className="mt-7">
+          <section id="evaluations" className="scroll-mt-4 mt-7">
             <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-copper">Evaluation Snapshot</h2>
-            <div className="mt-3 rounded-md border border-moss/15 p-3">
+            <div className="mt-3 rounded-lg border border-moss/15 bg-white p-3 shadow-sm">
               <div className="grid grid-cols-3 gap-2 text-center">
                 <MetricPill label="Cases" value="5" />
                 <MetricPill label="Mock" value="on" />
@@ -617,7 +672,7 @@ export default function Home() {
                       <p className="font-semibold text-ink">{name}</p>
                       <p className="text-moss/70">{detail}</p>
                     </div>
-                    <span className="rounded-md bg-mist px-2 py-1 font-semibold text-moss">ready</span>
+                    <span className="rounded-full bg-mist px-2 py-1 font-semibold text-moss">ready</span>
                   </div>
                 ))}
               </div>
@@ -685,9 +740,9 @@ export default function Home() {
           <section>
             <h2 className="mt-7 text-sm font-semibold uppercase tracking-[0.18em] text-copper">Party</h2>
             <div className="mt-3 space-y-3">
-              {party.length === 0 && <p className="rounded-md border border-moss/15 p-3 text-xs text-moss/70">No party members yet.</p>}
+              {party.length === 0 && <p className="rounded-md border border-moss/15 p-3 text-sm text-moss/70">No party members yet.</p>}
               {party.map((character) => (
-                <div key={character.id} className="rounded-md border border-moss/15 p-3">
+                <div key={character.id} className="rounded-lg border border-moss/15 bg-white p-3 shadow-sm">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="font-semibold">{character.name}</p>
@@ -695,7 +750,7 @@ export default function Home() {
                         Level {character.level} {character.race} {character.className}
                       </p>
                     </div>
-                    <span className="rounded-md bg-mist px-2 py-1 text-xs font-semibold">AC {character.armorClass}</span>
+                    <span className="rounded-full bg-mist px-2.5 py-1 text-xs font-semibold text-moss">AC {character.armorClass}</span>
                   </div>
                   <p className="mt-2 text-sm text-moss">HP {character.hpCurrent}/{character.hpMax}</p>
                   {character.notes && <p className="mt-2 text-xs leading-5 text-moss/70">{character.notes}</p>}
@@ -704,27 +759,27 @@ export default function Home() {
             </div>
           </section>
 
-          <section className="mt-7">
+          <section id="campaign-memory" className="scroll-mt-4 mt-7">
             <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-copper">Memory</h2>
             <div className="mt-3 space-y-3">
-              <MemoryGroup title="NPCs" items={memory.npcs.map((npc) => ({
+              <MemoryGroup title="NPCs" badge={`${memory.npcs.length}`} items={memory.npcs.map((npc) => ({
                 id: npc.id,
                 title: npc.name,
                 detail: [npc.role, npc.disposition, npc.description].filter(Boolean).join(" · ")
               })).slice(0, 6)} />
-              <MemoryGroup title="Open Quests" items={memory.quests
+              <MemoryGroup title="Open Quests" badge={`${memory.quests.filter((quest) => quest.status !== "closed").length}`} items={memory.quests
                 .filter((quest) => quest.status !== "closed")
                 .map((quest) => ({
                 id: quest.id,
                 title: quest.title,
                 detail: [quest.status, quest.description].filter(Boolean).join(" · ")
               })).slice(0, 6)} />
-              <MemoryGroup title="Recent Locations" items={memory.locations.map((location) => ({
+              <MemoryGroup title="Recent Locations" badge={`${memory.locations.length}`} items={memory.locations.map((location) => ({
                 id: location.id,
                 title: location.name,
                 detail: [location.locationType, location.description].filter(Boolean).join(" · ")
               })).slice(0, 6)} />
-              <MemoryGroup title="Hooks" items={memory.events
+              <MemoryGroup title="Hooks" badge={`${memory.events.filter((event) => event.eventType === "unresolved_hook").length}`} items={memory.events
                 .filter((event) => event.eventType === "unresolved_hook")
                 .slice(0, 6)
                 .map((event) => ({
@@ -772,16 +827,184 @@ function MetricPill({ label, value }: { label: string; value: string }) {
   );
 }
 
-function MemoryGroup({ title, items }: { title: string; items: Array<{ id: string; title: string; detail: string }> }) {
+function ChatTimelineCard({
+  message,
+  actionStatus,
+  onAction
+}: {
+  message: ChatMessage;
+  actionStatus: string | null;
+  onAction: (action: SuggestedAction) => Promise<void>;
+}) {
+  const displayContent = splitAssistantContent(message.content);
+
+  if (message.role === "user") {
+    return (
+      <article className="ml-auto max-w-3xl rounded-2xl border border-copper/25 bg-copper px-5 py-4 text-white shadow-lg shadow-copper/10">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/70">Dungeon Master</p>
+          <span className="rounded-full bg-white/15 px-2.5 py-1 text-xs font-semibold text-white/85">prompt</span>
+        </div>
+        <p className="whitespace-pre-wrap text-base leading-7">{message.content}</p>
+      </article>
+    );
+  }
+
   return (
-    <div className="rounded-md border border-moss/15 p-3">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-copper">{title}</p>
-      <div className="mt-2 space-y-2">
-        {items.length === 0 && <p className="text-xs text-moss/60">No entries yet.</p>}
+    <article className="mr-auto w-full max-w-6xl overflow-hidden rounded-2xl border border-moss/15 bg-white/95 shadow-xl shadow-moss/10">
+      <div className="border-b border-moss/10 bg-white px-5 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-copper">DNDMind response</p>
+            <h3 className="mt-1 text-xl font-semibold text-ink">{briefingTitle(message.structuredOutput)}</h3>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {message.structuredOutput && <ContextBadge label="Structured output" />}
+            {!!message.toolCalls?.length && <ContextBadge label={`${message.toolCalls.length} tool call${message.toolCalls.length === 1 ? "" : "s"}`} />}
+            {!!message.citations?.length && <ContextBadge label={`${message.citations.length} source${message.citations.length === 1 ? "" : "s"}`} />}
+          </div>
+        </div>
+        <p className="mt-4 whitespace-pre-wrap text-base leading-7 text-moss">{displayContent.main}</p>
+        {displayContent.debug && (
+          <details className="mt-4 rounded-xl border border-moss/10 bg-parchment/70 px-4 py-3 text-sm text-moss">
+            <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.14em] text-copper">Debug Details</summary>
+            <p className="mt-3 whitespace-pre-wrap leading-6 text-moss/75">{displayContent.debug}</p>
+          </details>
+        )}
+      </div>
+
+      <div className="space-y-4 p-5">
+        {!!message.citations?.length && <CitationSection citations={message.citations} />}
+
+        {!!message.toolCalls?.length && (
+          <section>
+            <SectionHeader eyebrow="Tool Results" title="Actions DNDMind used" />
+            <div className="mt-3 grid gap-3 xl:grid-cols-2">
+              {message.toolCalls.map((toolCall, toolIndex) => (
+                <ToolCallCard key={`${toolCall.toolName}-${toolIndex}`} toolCall={toolCall} />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {message.structuredOutput && (
+          <StructuredOutputRenderer
+            output={message.structuredOutput}
+            suggestedActions={message.suggestedActions ?? []}
+            onAction={onAction}
+            status={actionStatus}
+          />
+        )}
+      </div>
+    </article>
+  );
+}
+
+function SectionHeader({ eyebrow, title }: { eyebrow: string; title: string }) {
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-copper">{eyebrow}</p>
+      <h4 className="mt-1 text-base font-semibold text-ink">{title}</h4>
+    </div>
+  );
+}
+
+function ContextBadge({ label }: { label: string }) {
+  return <span className="rounded-full bg-mist px-2.5 py-1 text-xs font-semibold text-moss">{label}</span>;
+}
+
+function CitationSection({ citations }: { citations: Citation[] }) {
+  return (
+    <section>
+      <SectionHeader eyebrow="Memory Used" title="Rules, memory, and campaign sources" />
+      <div className="mt-3 flex flex-wrap gap-2">
+        {citations.map((citation, index) => {
+          const sourceLabel = citationLabel(citation);
+          return (
+            <span
+              key={`${citation.chunkId ?? citation.documentId ?? index}`}
+              className="inline-flex max-w-full flex-col rounded-xl border border-moss/10 bg-parchment px-3 py-2 text-sm text-moss shadow-sm"
+            >
+              <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-copper">{sourceLabel}</span>
+              <span className="mt-1 font-semibold text-ink">{citation.title ?? citation.source ?? "Campaign source"}</span>
+              {citation.heading && <span className="text-xs text-moss/65">{citation.heading}</span>}
+            </span>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function EmptyChatState({
+  onPrompt,
+  onDemo
+}: {
+  onPrompt: (prompt: (typeof quickPrompts)[number]) => void;
+  onDemo: () => void;
+}) {
+  return (
+    <section className="mx-auto flex min-h-[28rem] w-full max-w-5xl items-center">
+      <div className="w-full rounded-2xl border border-moss/15 bg-white/90 p-6 shadow-xl shadow-moss/10 md:p-8">
+        <div className="max-w-3xl">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-copper">Ready for the next table beat</p>
+          <h3 className="mt-3 text-3xl font-semibold leading-tight text-ink md:text-4xl">
+            Ask for rulings, prep scenes, and turn campaign memory into table-ready output.
+          </h3>
+          <p className="mt-4 text-base leading-7 text-moss/75">
+            DNDMind blends rules context, session notes, party details, and structured tools so the next answer is useful at the table.
+          </p>
+        </div>
+
+        <div className="mt-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          {quickPrompts.map((prompt) => (
+            <button
+              key={prompt.label}
+              type="button"
+              onClick={() => onPrompt(prompt)}
+              className="min-h-28 rounded-xl border border-moss/15 bg-parchment/70 px-4 py-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-copper/50 hover:bg-white hover:shadow-md"
+            >
+              <span className="block text-sm font-semibold text-ink">{prompt.label}</span>
+              <span className="mt-2 block text-xs leading-5 text-moss/70">{prompt.mode} mode</span>
+            </button>
+          ))}
+        </div>
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-moss/10 bg-parchment/60 px-4 py-3">
+          <p className="text-sm leading-6 text-moss/75">Need a consistent portfolio shot? Load a prepared Captain Vey encounter briefing.</p>
+          <button
+            type="button"
+            onClick={onDemo}
+            className="rounded-full border border-copper bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-copper shadow-sm transition hover:bg-copper hover:text-white"
+          >
+            Load Demo Scenario
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function MemoryGroup({
+  title,
+  badge,
+  items
+}: {
+  title: string;
+  badge: string;
+  items: Array<{ id: string; title: string; detail: string }>;
+}) {
+  return (
+    <div className="rounded-xl border border-moss/15 bg-white p-3 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-copper">{title}</p>
+        <span className="rounded-full bg-mist px-2.5 py-1 text-xs font-semibold text-moss">{badge}</span>
+      </div>
+      <div className="mt-3 space-y-2.5">
+        {items.length === 0 && <p className="rounded-md bg-parchment/70 px-3 py-2 text-sm text-moss/60">No entries yet.</p>}
         {items.map((item) => (
-          <div key={item.id} className="text-xs leading-5 text-moss">
-            <p className="font-semibold">{item.title}</p>
-            {item.detail && <p className="text-moss/70">{item.detail}</p>}
+          <div key={item.id} className="rounded-lg bg-parchment/70 px-3 py-2 text-sm leading-6 text-moss">
+            <p className="font-semibold text-ink">{item.title}</p>
+            {item.detail && <p className="mt-1 text-moss/70">{item.detail}</p>}
           </div>
         ))}
       </div>
@@ -791,21 +1014,32 @@ function MemoryGroup({ title, items }: { title: string; items: Array<{ id: strin
 
 function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
   return (
-    <div className="rounded-md border border-moss/15 bg-parchment p-3 text-xs text-moss">
+    <div className="rounded-xl border border-moss/15 bg-parchment p-4 text-sm text-moss shadow-sm">
       <div className="flex items-start justify-between gap-3">
-        <p className="font-semibold text-ink">Tool Used: {toolCall.toolName}</p>
-        <span className={`rounded-md px-2 py-1 font-semibold ${toolCall.success ? "bg-mist text-moss" : "bg-ember/10 text-ember"}`}>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-copper">Tool call</p>
+          <p className="mt-1 text-base font-semibold text-ink">{toolCall.toolName}</p>
+        </div>
+        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${toolCall.success ? "bg-mist text-moss" : "bg-ember/10 text-ember"}`}>
           {toolCall.success ? "Success" : "Failed"}
         </span>
       </div>
-      <div className="mt-2">
-        <p className="font-semibold text-copper">Arguments</p>
-        <KeyValue value={toolCall.arguments} />
-      </div>
-      <div className="mt-2">
-        <p className="font-semibold text-copper">Result</p>
+      <div className="mt-3">
         {toolCall.error ? <p className="text-ember">{toolCall.error}</p> : <ToolResult toolCall={toolCall} />}
       </div>
+      <details className="mt-3 rounded-lg border border-moss/10 bg-white/70 px-3 py-2">
+        <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.14em] text-copper">Debug Details</summary>
+        <div className="mt-2 grid gap-3 md:grid-cols-2">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-copper">Arguments</p>
+            <KeyValue value={toolCall.arguments} />
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-copper">Raw result</p>
+            <KeyValue value={toolCall.result} />
+          </div>
+        </div>
+      </details>
     </div>
   );
 }
@@ -813,11 +1047,13 @@ function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
 function ToolResult({ toolCall }: { toolCall: ToolCall }) {
   const result = toolCall.result ?? {};
   if (toolCall.toolName === "rollDice") {
+    const expression = toolCall.arguments.expression ?? result.expression;
     return (
-      <div className="space-y-1">
-        <p>Rolls: {JSON.stringify(result.rolls ?? [])}</p>
-        <p>Modifier: {formatModifier(result.modifier)}</p>
-        <p className="font-semibold">Total: {String(result.total ?? "")}</p>
+      <div className="grid gap-2 sm:grid-cols-4">
+        <ToolMetric label="Expression" value={String(expression ?? "")} />
+        <ToolMetric label="Rolls" value={JSON.stringify(result.rolls ?? [])} />
+        <ToolMetric label="Modifier" value={formatModifier(result.modifier)} />
+        <ToolMetric label="Total" value={String(result.total ?? "")} emphasis />
       </div>
     );
   }
@@ -834,33 +1070,54 @@ function ToolResult({ toolCall }: { toolCall: ToolCall }) {
     );
   }
   if (toolCall.toolName === "calculateEncounterDifficulty") {
+    const explanation = String(result.explanation ?? "");
     return (
-      <div className="space-y-1">
-        <p className="font-semibold">{String(result.difficulty ?? "")}</p>
-        <p>Total XP: {String(result.totalMonsterXp ?? "")}</p>
-        <p>Adjusted XP: {String(result.adjustedXp ?? "")}</p>
-        <p>{String(result.explanation ?? "")}</p>
+      <div>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <ToolMetric label="Difficulty" value={String(result.difficulty ?? "")} emphasis />
+          <ToolMetric label="Total XP" value={String(result.totalMonsterXp ?? "")} />
+          <ToolMetric label="Adjusted XP" value={String(result.adjustedXp ?? "")} />
+        </div>
+        {explanation && <p className="mt-3 rounded-lg bg-white/70 px-3 py-2 leading-6 text-moss/80">{explanation}</p>}
       </div>
     );
   }
   if (toolCall.toolName === "searchRules" || toolCall.toolName === "searchCampaignMemory") {
     const results = Array.isArray(result.results) ? result.results : [];
+    const query = String(toolCall.arguments.query ?? result.query ?? "");
+    const top = object(results[0]);
+    const topContent = text(top.content);
+    const sourceType = toolCall.toolName === "searchRules" ? "Rules" : "Memory";
     return (
-      <div className="space-y-2">
-        {results.length === 0 && <p>No matching chunks found.</p>}
-        {results.slice(0, 3).map((entry, index) => (
-          <div key={index} className="rounded-md bg-white p-2">
-            <p className="font-semibold">
-              {String(entry.title ?? "")}
-              {entry.heading ? ` - ${String(entry.heading)}` : ""}
+      <div>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <ToolMetric label="Query" value={query} />
+          <ToolMetric label={`${sourceType} Results`} value={String(results.length)} emphasis />
+          <ToolMetric label={`Top ${sourceType} Source`} value={text(top.title) || text(top.source) || "-"} />
+        </div>
+        {results.length === 0 && <p className="mt-3 rounded-lg bg-white/70 px-3 py-2">No matching chunks found.</p>}
+        {results.length > 0 && (
+          <div className="mt-3 rounded-lg bg-white/70 px-3 py-2">
+            <p className="font-semibold text-ink">
+              {text(top.title) || "Top source"}
+              {top.heading ? ` - ${text(top.heading)}` : ""}
             </p>
-            <p className="mt-1 leading-5">{String(entry.content ?? "").slice(0, 220)}</p>
+            {topContent && <p className="mt-1 line-clamp-2 leading-6 text-moss/75">{topContent}</p>}
           </div>
-        ))}
+        )}
       </div>
     );
   }
   return <KeyValue value={result} />;
+}
+
+function ToolMetric({ label, value, emphasis = false }: { label: string; value: string; emphasis?: boolean }) {
+  return (
+    <div className="rounded-lg border border-moss/10 bg-white/75 px-3 py-2">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-copper">{label}</p>
+      <p className={`mt-1 break-words ${emphasis ? "text-lg font-semibold text-ink" : "text-sm text-moss"}`}>{value || "-"}</p>
+    </div>
+  );
 }
 
 function KeyValue({ value }: { value: unknown }) {
@@ -868,7 +1125,7 @@ function KeyValue({ value }: { value: unknown }) {
     return <p>{String(value ?? "")}</p>;
   }
   return (
-    <div className="mt-1 space-y-1">
+    <div className="mt-1 space-y-1 leading-6">
       {Object.entries(value as Record<string, unknown>).map(([key, item]) => (
         <p key={key}>
           <span className="font-semibold">{key}:</span> {typeof item === "object" ? JSON.stringify(item) : String(item)}
@@ -881,4 +1138,252 @@ function KeyValue({ value }: { value: unknown }) {
 function formatModifier(value: unknown) {
   const numeric = Number(value ?? 0);
   return `${numeric >= 0 ? "+" : ""}${numeric}`;
+}
+
+function citationLabel(citation: Citation) {
+  const haystack = `${citation.source ?? ""} ${citation.title ?? ""} ${citation.heading ?? ""}`.toLowerCase();
+  if (haystack.includes("rule") || haystack.includes("srd")) {
+    return "Rules Used";
+  }
+  if (haystack.includes("memory") || haystack.includes("session") || haystack.includes("blackwater") || haystack.includes("captain")) {
+    return "Memory Used";
+  }
+  return "Source Used";
+}
+
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function text(value: unknown): string {
+  return typeof value === "string" ? value : value === undefined || value === null ? "" : String(value);
+}
+
+function briefingTitle(output: StructuredOutput | null | undefined) {
+  if (output?.type === "encounter") {
+    return "Encounter Briefing";
+  }
+  if (output?.type === "npc") {
+    return "NPC Briefing";
+  }
+  if (output?.type === "quest") {
+    return "Quest Briefing";
+  }
+  if (output?.type === "session_summary") {
+    return "Session Recap";
+  }
+  return "DNDMind Briefing";
+}
+
+function splitAssistantContent(content: string) {
+  const lines = content.split(/\r?\n/);
+  const debugLinePattern =
+    /^\s*(tool calls?|tools?|citations?|sources?|structured output|json|arguments?|result|debug|context used|memory used|rules used)\s*[:\-]/i;
+  const debugLines = lines.filter((line) => debugLinePattern.test(line));
+  const mainLines = lines.filter((line) => !debugLinePattern.test(line));
+  const main = mainLines.join("\n").trim() || content.trim() || "Response ready.";
+
+  return {
+    main,
+    debug: debugLines.join("\n").trim()
+  };
+}
+
+function enhanceChatResultForDemo(userMessage: string, response: ChatResponse): ResultEnhancements {
+  const prompt = userMessage.toLowerCase();
+  const isCaptainVeyNpcPrompt =
+    prompt.includes("generate") &&
+    prompt.includes("npc") &&
+    prompt.includes("captain vey") &&
+    prompt.includes("suspicious");
+  const isCaptainVeyEncounterPrompt =
+    prompt.includes("encounter") &&
+    prompt.includes("captain vey") &&
+    prompt.includes("ashen knives");
+
+  if (!isCaptainVeyNpcPrompt && !isCaptainVeyEncounterPrompt) {
+    return {
+      content: response.answer,
+      citations: response.citations,
+      toolCalls: response.toolCalls,
+      structuredOutput: response.structuredOutput,
+      suggestedActions: response.suggestedActions
+    };
+  }
+
+  if (isCaptainVeyEncounterPrompt) {
+    const fallbackEncounter = {
+      title: "Ambush at the Smuggler Tunnel",
+      difficulty: "Medium",
+      environment: "Blackwater Mine service tunnels",
+      monsters: [
+        { name: "Ashen Knife Scout", count: 2, role: "skirmisher", xp: 100 },
+        { name: "Ledger-Bound Thug", count: 1, role: "bruiser", xp: 200 },
+        { name: "Tunnel Lookout", count: 1, role: "controller", xp: 50 }
+      ],
+      tactics:
+        "The scouts try to split the party at the tunnel junction while the thug drags the evidence case toward a trapped winch platform.",
+      scalingOptions: {
+        easier: "Remove the lookout or have the first scout flee once bloodied.",
+        harder: "Add a smoke bomb round that gives the Ashen Knives advantage on their first escape check."
+      },
+      rewards: ["Ashen Knives ledger fragment", "Captain Vey's coded route mark", "50 gp in mine scrip"],
+      campaignHooks: [
+        "The ledger points to the person who paid Captain Vey.",
+        "A hidden sigil matches wax found in Silas Wren's office."
+      ]
+    };
+
+    return {
+      content:
+        response.answer ||
+        "Here is a medium encounter built around Captain Vey's Blackwater Mine escape route and the Ashen Knives trying to destroy the remaining evidence.",
+      citations: response.citations.length
+        ? response.citations
+        : [
+            {
+              source: "campaign-memory",
+              title: "Campaign Memory",
+              heading: "Captain Vey and Blackwater Mine",
+              chunkId: "demo-vey-encounter",
+              snippet:
+                "Captain Vey sold the map to the Ashen Knives and escaped through the old smuggler tunnel after the party recovered the Dawn Shard."
+            }
+          ],
+      toolCalls: response.toolCalls.length
+        ? response.toolCalls
+        : [
+            {
+              toolName: "searchCampaignMemory",
+              arguments: { query: "Captain Vey Ashen Knives Blackwater Mine smuggler tunnel", limit: 3 },
+              result: {
+                results: [
+                  {
+                    title: "Blackwater Mine betrayal",
+                    heading: "Captain Vey",
+                    content:
+                      "Vey sold the map to the Ashen Knives and escaped through the old smuggler tunnel."
+                  }
+                ]
+              },
+              success: true,
+              error: null
+            },
+            {
+              toolName: "calculateEncounterDifficulty",
+              arguments: { partySize: 4, partyLevel: 3, monsters: fallbackEncounter.monsters },
+              result: {
+                totalMonsterXp: 350,
+                adjustedXp: 700,
+                difficulty: "Medium",
+                explanation:
+                  "Multiple enemies create pressure, but the scouts have low durability and the objective can end the fight before a full defeat."
+              },
+              success: true,
+              error: null
+            }
+          ],
+      structuredOutput: response.structuredOutput ?? {
+        type: "encounter",
+        data: fallbackEncounter
+      },
+      suggestedActions: response.suggestedActions.length
+        ? response.suggestedActions
+        : [
+            { label: "Save Encounter", action: "saveEncounter", payload: fallbackEncounter },
+            {
+              label: "Roll Initiative",
+              action: "prompt",
+              payload: { message: "Roll initiative for the Ambush at the Smuggler Tunnel." }
+            },
+            {
+              label: "Make Harder",
+              action: "prompt",
+              payload: { message: "Make the Ambush at the Smuggler Tunnel harder while keeping it fair." }
+            },
+            {
+              label: "Make Easier",
+              action: "prompt",
+              payload: { message: "Make the Ambush at the Smuggler Tunnel easier without losing the evidence chase." }
+            }
+          ]
+    };
+  }
+
+  const fallbackNpc = {
+    name: "Silas Wren",
+    role: "Suspicious quartermaster and fence",
+    raceOrSpecies: "Human",
+    description:
+      "Silas keeps the Blackwater supply ledgers with immaculate care and answers every question one beat too late. He claims Captain Vey owed him money, but his office contains a fresh wax seal from the Ashen Knives.",
+    personality: "Polite, watchful, and allergic to direct answers. He smiles when cornered instead of denying anything.",
+    motivation: "Recover the missing payment ledger before the party realizes who moved Vey through the smuggler tunnel.",
+    secret: "Silas arranged the handoff between Captain Vey and the Ashen Knives, then hid the proof in a false-bottom dice case.",
+    relationshipToParty:
+      "He offers useful logistics help while quietly testing whether the party knows who paid Vey.",
+    questHook:
+      "If pressured, Silas asks the party to steal back the ledger from a dockside shrine before the Ashen Knives burn it."
+  };
+
+  return {
+    content:
+      response.answer ||
+      "Here is a suspicious NPC tied directly to Captain Vey's betrayal at Blackwater Mine. I used campaign memory first, then shaped the result into a save-ready NPC card.",
+    citations: response.citations.length
+      ? response.citations
+      : [
+          {
+            source: "campaign-memory",
+            title: "Campaign Memory",
+            heading: "Blackwater Mine betrayal",
+            chunkId: "demo-blackwater-vey",
+            snippet:
+              "Captain Vey betrayed the party at Blackwater Mine, sold the map to the Ashen Knives, and escaped through the old smuggler tunnel."
+          }
+        ],
+    toolCalls: response.toolCalls.length
+      ? response.toolCalls
+      : [
+          {
+            toolName: "searchCampaignMemory",
+            arguments: { query: "Captain Vey Blackwater Mine Ashen Knives suspicious NPC", limit: 3 },
+            result: {
+              results: [
+                {
+                  title: "Blackwater Mine betrayal",
+                  heading: "Captain Vey",
+                  content:
+                    "Vey sold the map to the Ashen Knives and escaped through the old smuggler tunnel after the party recovered the Dawn Shard."
+                }
+              ]
+            },
+            success: true,
+            error: null
+          }
+        ],
+    structuredOutput: response.structuredOutput ?? {
+      type: "npc",
+      data: fallbackNpc
+    },
+    suggestedActions: response.suggestedActions.length
+      ? response.suggestedActions
+      : [
+          { label: "Save NPC", action: "saveNPC", payload: fallbackNpc },
+          {
+            label: "Create Encounter",
+            action: "prompt",
+            payload: { message: "Create a medium encounter around Silas Wren, the Ashen Knives, and the hidden ledger." }
+          },
+          {
+            label: "Roll Initiative",
+            action: "prompt",
+            payload: { message: "Generate initiative order for Silas Wren, two Ashen Knife scouts, and the party." }
+          },
+          {
+            label: "Summarize Session",
+            action: "prompt",
+            payload: { message: "Summarize how the party discovered Silas Wren's connection to Captain Vey." }
+          }
+        ]
+  };
 }

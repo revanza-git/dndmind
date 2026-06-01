@@ -67,13 +67,23 @@ services:
   web:
     build:
       context: ./apps/web
+      target: dev
       args:
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8080}
     container_name: dndmind-web
     restart: unless-stopped
     environment:
+      NODE_ENV: development
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8080}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
+      NEXT_TELEMETRY_DISABLED: "1"
+    volumes:
+      - ./apps/web:/app
+      - web-node-modules:/app/node_modules
+      - web-next-cache:/app/.next
+    command: npm run dev
     ports:
       - "3000:3000"
     depends_on:
@@ -82,3 +92,5 @@ services:
 
 volumes:
   postgres-data:
+  web-node-modules:
+  web-next-cache:

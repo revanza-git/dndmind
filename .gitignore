@@ -3,51 +3,74 @@
 .env.*
 !.env.example
 
-# Logs and local runtime output
-*.log
-logs/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
 # Node / Next.js
 node_modules/
 .next/
 out/
 dist/
-coverage/
+build/
 .turbo/
+coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# .NET
+# ASP.NET Core / .NET
 bin/
 obj/
 TestResults/
 *.user
 *.suo
+*.rsuser
 
-# Python
+# Python / FastAPI
 __pycache__/
-*.py[cod]
+*.pyc
+*.pyo
+*.pyd
 *$py.class
+.venv/
+venv/
+env/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
 htmlcov/
-.venv/
-venv/
-env/
 
 # Docker / local data
+docker-data/
 postgres-data/
+pgdata/
+volumes/
+*.db
+*.sqlite
+*.sqlite3
 *.pid
 
-# OS and editor noise
+# Logs and cache
+logs/
+*.log
+tmp/
+temp/
+.cache/
+
+# IDE / OS
 .DS_Store
 Thumbs.db
 desktop.ini
 .idea/
 .vscode/*
 !.vscode/extensions.json
-!.vscode/settings.json
+!.vscode/settings.example.json
+
+# AI / project-specific local artifacts
+uploads/
+local-uploads/
+generated/
+exports/
+fine-tuning-exports/
+eval-outputs/
+local-models/
+ollama-data/
