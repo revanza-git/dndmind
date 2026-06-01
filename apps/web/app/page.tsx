@@ -31,6 +31,7 @@ import {
   updateSession,
   uploadDocument
 } from "../lib/api";
+import { getClientId, getClientLabel, resetClientId } from "../lib/clientIdentity";
 import { StructuredOutputRenderer } from "../components/structured/StructuredOutputRenderer";
 
 const modes = ["Auto", "Rules", "Story", "Encounter", "NPC", "Combat", "Summarize"];
@@ -55,6 +56,10 @@ const evaluationCases = [
   ["Structured Output", "NPC card"],
   ["Faithfulness", "expected facts"]
 ];
+
+function sessionDraftKey(clientId: string, campaignId: string, sessionId: string | null) {
+  return `dndmind_draft_${clientId}_${campaignId}_${sessionId ?? "new"}`;
+}
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -107,6 +112,10 @@ export default function Home() {
   const [isSending, setIsSending] = useState(false);
   const [actionStatus, setActionStatus] = useState<string | null>(null);
   const [sessionSaveStatus, setSessionSaveStatus] = useState<string | null>(null);
+  const [draftStatus, setDraftStatus] = useState<string | null>(null);
+  const [clientId, setClientId] = useState<string>("");
+  const [clientLabel, setClientLabel] = useState<string>("Local DM");
+  const [clientProfileStatus, setClientProfileStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeNavigationItem, setActiveNavigationItem] = useState("Command");
   const timelineEndRef = useRef<HTMLDivElement | null>(null);
@@ -115,6 +124,12 @@ export default function Home() {
     () => campaigns.find((campaign) => campaign.id === campaignId) ?? null,
     [campaignId, campaigns]
   );
+
+  useEffect(() => {
+    const localClientId = getClientId();
+    setClientId(localClientId);
+    setClientLabel(getClientLabel());
+  }, []);
 
   useEffect(() => {
     getCampaigns()
@@ -145,18 +160,34 @@ export default function Home() {
       .then((items) => {
         setSessions(items);
         if (items[0]) {
+          const draft = clientId ? window.localStorage.getItem(sessionDraftKey(clientId, campaignId, items[0].id)) : null;
           setActiveSessionId(items[0].id);
           setSessionTitle(items[0].title);
-          setSessionNotes(items[0].rawNotes ?? "");
+          setSessionNotes(draft ?? items[0].rawNotes ?? "");
           setSessionSaveStatus(null);
+          setDraftStatus(draft ? "Draft restored locally" : null);
         } else {
+          const draft = clientId ? window.localStorage.getItem(sessionDraftKey(clientId, campaignId, null)) : null;
           setActiveSessionId(null);
           setSessionTitle("Session Notes");
+          setSessionNotes(draft ?? "");
           setSessionSaveStatus(null);
+          setDraftStatus(draft ? "Draft restored locally" : null);
         }
       })
       .catch((err: Error) => setError(err.message));
-  }, [campaignId]);
+  }, [campaignId, clientId]);
+
+  useEffect(() => {
+    if (!clientId || !campaignId) {
+      return;
+    }
+
+    window.localStorage.setItem(sessionDraftKey(clientId, campaignId, activeSessionId), sessionNotes);
+    if (sessionNotes.trim()) {
+      setDraftStatus("Draft saved locally");
+    }
+  }, [activeSessionId, campaignId, clientId, sessionNotes]);
 
   useEffect(() => {
     timelineEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -313,9 +344,13 @@ export default function Home() {
         status: "active"
       });
       setSessions((current) => current.map((session) => (session.id === updated.id ? updated : session)));
+      if (clientId) {
+        window.localStorage.removeItem(sessionDraftKey(clientId, campaignId, updated.id));
+      }
       return updated;
     }
 
+    const newDraftKey = clientId ? sessionDraftKey(clientId, campaignId, null) : null;
     const created = await createSession({
       campaignId,
       title: sessionTitle.trim(),
@@ -323,6 +358,12 @@ export default function Home() {
     });
     setActiveSessionId(created.id);
     setSessions((current) => [created, ...current]);
+    if (clientId) {
+      if (newDraftKey) {
+        window.localStorage.removeItem(newDraftKey);
+      }
+      window.localStorage.removeItem(sessionDraftKey(clientId, campaignId, created.id));
+    }
     return created;
   }
 
@@ -334,6 +375,7 @@ export default function Home() {
       const saved = await saveSessionChanges();
       if (saved) {
         setSessionSaveStatus("Saved");
+        setDraftStatus(null);
       }
       return saved;
     } catch (err) {
@@ -443,6 +485,32 @@ export default function Home() {
     });
   }
 
+  function handleResetLocalProfile() {
+    const confirmed = window.confirm(
+      "Resetting local profile will create a new local identity and your previous browser-owned sessions may no longer appear."
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const nextClientId = resetClientId();
+    const nextClientLabel = getClientLabel(nextClientId);
+    setClientId(nextClientId);
+    setClientLabel(nextClientLabel);
+    setClientProfileStatus(`Switched to ${nextClientLabel}`);
+    setSessions([]);
+    setActiveSessionId(null);
+    setSessionTitle("Session Notes");
+    setSessionNotes("");
+    setSessionSaveStatus(null);
+    setDraftStatus(null);
+    setMemory({ npcs: [], quests: [], locations: [], events: [] });
+    setConversationId(null);
+    setMessages([]);
+    setLastResponse(null);
+    setError(null);
+  }
+
   return (
     <main className="min-h-screen bg-parchment text-ink lg:h-screen lg:overflow-hidden">
       <div className="grid min-h-screen grid-cols-1 lg:h-screen lg:min-h-0 lg:grid-cols-[270px_minmax(0,1fr)_350px] lg:overflow-hidden">
@@ -451,6 +519,21 @@ export default function Home() {
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-mist">DNDMind</p>
             <h1 className="mt-2 text-3xl font-semibold leading-tight">DM Command Center</h1>
             <p className="mt-2 text-sm leading-6 text-mist/80">Rules, memory, and table-ready output in one live workspace.</p>
+          </div>
+
+          <div className="mb-6 rounded-md border border-white/15 bg-white/10 p-3 text-sm text-mist">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-mist/70">Device Profile</p>
+            <div className="mt-2 flex items-center justify-between gap-3">
+              <span className="font-semibold text-white">{clientLabel}</span>
+              <button
+                type="button"
+                onClick={handleResetLocalProfile}
+                className="rounded-md border border-white/20 px-2.5 py-1 text-xs font-semibold text-white hover:border-copper"
+              >
+                Reset
+              </button>
+            </div>
+            {clientProfileStatus && <p className="mt-2 text-xs font-semibold text-mist">{clientProfileStatus}</p>}
           </div>
 
           <label className="text-sm font-medium text-mist" htmlFor="campaign">
@@ -713,16 +796,24 @@ export default function Home() {
           </section>
 
           <section>
-            <h2 className="mt-7 text-sm font-semibold uppercase tracking-[0.18em] text-copper">Session Notes</h2>
+            <h2 className="mt-7 text-sm font-semibold uppercase tracking-[0.18em] text-copper">My Local Sessions</h2>
             <div className="mt-3 space-y-3">
+              {sessions.length === 0 && (
+                <p className="rounded-md border border-moss/15 p-3 text-sm text-moss/70">
+                  No sessions saved for this browser profile yet.
+                </p>
+              )}
               <select
                 value={activeSessionId ?? ""}
                 onChange={(event) => {
                   const selected = sessions.find((session) => session.id === event.target.value);
+                  const selectedId = selected?.id ?? null;
+                  const draft = clientId && campaignId ? window.localStorage.getItem(sessionDraftKey(clientId, campaignId, selectedId)) : null;
                   setActiveSessionId(selected?.id ?? null);
                   setSessionTitle(selected?.title ?? "Session Notes");
-                  setSessionNotes(selected?.rawNotes ?? "");
+                  setSessionNotes(draft ?? selected?.rawNotes ?? "");
                   setSessionSaveStatus(null);
+                  setDraftStatus(draft ? "Draft restored locally" : null);
                 }}
                 className="w-full rounded-md border border-moss/20 px-3 py-2 text-sm"
               >
@@ -773,6 +864,7 @@ export default function Home() {
               {sessionSaveStatus && sessionSaveStatus !== "Saved" && (
                 <p className="text-xs font-semibold text-ember">{sessionSaveStatus}</p>
               )}
+              {draftStatus && <p className="text-xs font-semibold text-moss/70">{draftStatus}</p>}
               {sessions.find((session) => session.id === activeSessionId)?.summary && (
                 <div className="rounded-md border border-moss/15 bg-parchment p-3 text-xs leading-5 text-moss">
                   {sessions.find((session) => session.id === activeSessionId)?.summary}
@@ -1071,14 +1163,14 @@ function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
       <div className="mt-3">
         {toolCall.error ? <p className="text-ember">{toolCall.error}</p> : <ToolResult toolCall={toolCall} />}
       </div>
-      <details className="mt-3 rounded-lg border border-moss/10 bg-white/70 px-3 py-2">
+      <details className="mt-3 overflow-hidden rounded-lg border border-moss/10 bg-white/70 px-3 py-2">
         <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.14em] text-copper">Debug Details</summary>
         <div className="mt-2 grid gap-3 md:grid-cols-2">
-          <div>
+          <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-copper">Arguments</p>
             <KeyValue value={toolCall.arguments} />
           </div>
-          <div>
+          <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-copper">Raw result</p>
             <KeyValue value={toolCall.result} />
           </div>
@@ -1166,12 +1258,12 @@ function ToolMetric({ label, value, emphasis = false }: { label: string; value: 
 
 function KeyValue({ value }: { value: unknown }) {
   if (!value || typeof value !== "object") {
-    return <p>{String(value ?? "")}</p>;
+    return <p className="break-words [overflow-wrap:anywhere]">{String(value ?? "")}</p>;
   }
   return (
-    <div className="mt-1 space-y-1 leading-6">
+    <div className="mt-1 min-w-0 space-y-1 leading-6">
       {Object.entries(value as Record<string, unknown>).map(([key, item]) => (
-        <p key={key}>
+        <p key={key} className="break-words [overflow-wrap:anywhere]">
           <span className="font-semibold">{key}:</span> {typeof item === "object" ? JSON.stringify(item) : String(item)}
         </p>
       ))}

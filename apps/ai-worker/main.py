@@ -57,6 +57,7 @@ class ChatRequest(BaseModel):
     conversationId: UUID
     message: str
     mode: str = "Auto"
+    clientOwnerId: str | None = None
     context: ChatContext
     campaign: Campaign
     party: list[PartyCharacter] = Field(default_factory=list)
@@ -74,6 +75,7 @@ class ChatResponse(BaseModel):
 
 class SearchRequest(BaseModel):
     campaignId: UUID | None = None
+    clientOwnerId: str | None = None
     query: str
     limit: int = 5
 
@@ -85,6 +87,7 @@ class IngestDocumentRequest(BaseModel):
     title: str
     content: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+    clientOwnerId: str | None = None
 
 
 class IngestDocumentResponse(BaseModel):
@@ -143,6 +146,7 @@ class ToolExecuteRequest(BaseModel):
     conversationId: UUID | None = None
     toolName: str
     arguments: dict[str, Any] = Field(default_factory=dict)
+    clientOwnerId: str | None = None
 
 
 class ToolExecuteResponse(BaseModel):
@@ -193,6 +197,7 @@ def execute_tool_endpoint(request: ToolExecuteRequest) -> ToolExecuteResponse:
     context = {
         "campaignId": request.campaignId,
         "conversationId": request.conversationId,
+        "clientOwnerId": request.clientOwnerId,
     }
     response = execute_manual_tool(request.toolName, request.arguments, context)
     return ToolExecuteResponse(**response)
@@ -203,6 +208,8 @@ def ingest_document(request: IngestDocumentRequest) -> IngestDocumentResponse:
     chunks = chunk_text(request.content)
     embeddings = embed_texts([chunk.content for chunk in chunks]) if chunks else []
     embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+
+    client_owner_id = request.clientOwnerId or request.metadata.get("clientOwnerId")
 
     with psycopg.connect(database_url()) as conn:
         with conn.cursor() as cur:
@@ -224,7 +231,11 @@ def ingest_document(request: IngestDocumentRequest) -> IngestDocumentResponse:
                         chunk.content,
                         chunk.token_count,
                         vector_literal(embedding),
-                        json.dumps(chunk.metadata | {"embeddingModel": embedding_model}),
+                        json.dumps(
+                            chunk.metadata
+                            | {"embeddingModel": embedding_model}
+                            | ({"clientOwnerId": client_owner_id} if client_owner_id else {})
+                        ),
                     ),
                 )
 
@@ -241,6 +252,7 @@ def ingest_document(request: IngestDocumentRequest) -> IngestDocumentResponse:
                             "chunkCount": len(chunks),
                             "embeddingModel": embedding_model,
                             "mockEmbeddings": mock_embeddings_enabled(),
+                            **({"clientOwnerId": client_owner_id} if client_owner_id else {}),
                         }
                     ),
                     request.documentId,
@@ -296,7 +308,7 @@ def search_memory(request: SearchRequest) -> dict[str, Any]:
     if request.campaignId is None:
         return {"campaignId": None, "query": request.query, "results": []}
 
-    rows = retrieve_memory(request.campaignId, request.query, request.limit)
+    rows = retrieve_memory(request.campaignId, request.query, request.limit, request.clientOwnerId)
     return {
         "campaignId": request.campaignId,
         "query": request.query,

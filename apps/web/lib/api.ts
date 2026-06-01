@@ -1,3 +1,5 @@
+import { getClientId } from "./clientIdentity";
+
 export type Campaign = {
   id: string;
   name: string;
@@ -165,8 +167,18 @@ export type SessionSummaryResponse = {
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
+async function apiFetch(path: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers);
+  headers.set("X-Dndmind-Client-Id", getClientId());
+
+  return fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers
+  });
+}
+
 export async function getCampaigns(): Promise<Campaign[]> {
-  const response = await fetch(`${API_BASE_URL}/api/campaigns`, { cache: "no-store" });
+  const response = await apiFetch("/api/campaigns", { cache: "no-store" });
   if (!response.ok) {
     throw new Error("Failed to load campaigns");
   }
@@ -174,7 +186,7 @@ export async function getCampaigns(): Promise<Campaign[]> {
 }
 
 export async function getParty(campaignId: string): Promise<PartyCharacter[]> {
-  const response = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/party`, { cache: "no-store" });
+  const response = await apiFetch(`/api/campaigns/${campaignId}/party`, { cache: "no-store" });
   if (!response.ok) {
     throw new Error("Failed to load party");
   }
@@ -182,7 +194,7 @@ export async function getParty(campaignId: string): Promise<PartyCharacter[]> {
 }
 
 export async function getSessions(campaignId: string): Promise<Session[]> {
-  const response = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/sessions`, { cache: "no-store" });
+  const response = await apiFetch(`/api/campaigns/${campaignId}/sessions`, { cache: "no-store" });
   if (!response.ok) {
     throw new Error("Failed to load sessions");
   }
@@ -195,7 +207,7 @@ export async function createSession(input: {
   title: string;
   rawNotes: string;
 }): Promise<Session> {
-  const response = await fetch(`${API_BASE_URL}/api/campaigns/${input.campaignId}/sessions`, {
+  const response = await apiFetch(`/api/campaigns/${input.campaignId}/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -222,7 +234,7 @@ export async function updateSession(input: {
   summary?: string | null;
   status?: string;
 }): Promise<Session> {
-  const response = await fetch(`${API_BASE_URL}/api/sessions/${input.sessionId}`, {
+  const response = await apiFetch(`/api/sessions/${input.sessionId}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -243,7 +255,7 @@ export async function updateSession(input: {
 }
 
 export async function summarizeSession(sessionId: string): Promise<SessionSummaryResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/summarize`, {
+  const response = await apiFetch(`/api/sessions/${sessionId}/summarize`, {
     method: "POST"
   });
 
@@ -256,7 +268,7 @@ export async function summarizeSession(sessionId: string): Promise<SessionSummar
 }
 
 export async function getCampaignMemory(campaignId: string): Promise<CampaignMemory> {
-  const response = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/memory`, { cache: "no-store" });
+  const response = await apiFetch(`/api/campaigns/${campaignId}/memory`, { cache: "no-store" });
   if (!response.ok) {
     throw new Error("Failed to load campaign memory");
   }
@@ -264,7 +276,7 @@ export async function getCampaignMemory(campaignId: string): Promise<CampaignMem
 }
 
 export async function getDocuments(campaignId: string): Promise<KnowledgeDocument[]> {
-  const response = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/documents`, { cache: "no-store" });
+  const response = await apiFetch(`/api/campaigns/${campaignId}/documents`, { cache: "no-store" });
   if (!response.ok) {
     throw new Error("Failed to load documents");
   }
@@ -278,7 +290,7 @@ export async function uploadDocument(input: {
   sourceType?: string;
   originalFilename?: string | null;
 }): Promise<KnowledgeDocument> {
-  const response = await fetch(`${API_BASE_URL}/api/campaigns/${input.campaignId}/documents/upload`, {
+  const response = await apiFetch(`/api/campaigns/${input.campaignId}/documents/upload`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -299,7 +311,7 @@ export async function uploadDocument(input: {
 }
 
 export async function ingestDocument(documentId: string): Promise<IngestDocumentResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/documents/${documentId}/ingest`, {
+  const response = await apiFetch(`/api/documents/${documentId}/ingest`, {
     method: "POST"
   });
 
@@ -318,7 +330,7 @@ export async function sendChat(input: {
   mode: string;
   context: ChatContext;
 }): Promise<ChatResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/chat`, {
+  const response = await apiFetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input)
@@ -338,7 +350,7 @@ export async function executeTool(input: {
   toolName: string;
   arguments: Record<string, unknown>;
 }): Promise<ToolCall> {
-  const response = await fetch(`${API_BASE_URL}/api/tools/execute`, {
+  const response = await apiFetch("/api/tools/execute", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input)
@@ -353,7 +365,7 @@ export async function executeTool(input: {
 }
 
 export async function saveNpc(campaignId: string, payload: Record<string, unknown>): Promise<{ id: string; npc: MemoryNpc }> {
-  const response = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/npcs`, {
+  const response = await apiFetch(`/api/campaigns/${campaignId}/npcs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
@@ -366,7 +378,7 @@ export async function saveNpc(campaignId: string, payload: Record<string, unknow
 }
 
 export async function saveQuest(campaignId: string, payload: Record<string, unknown>): Promise<{ id: string; quest: MemoryQuest }> {
-  const response = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/quests`, {
+  const response = await apiFetch(`/api/campaigns/${campaignId}/quests`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
@@ -379,7 +391,7 @@ export async function saveQuest(campaignId: string, payload: Record<string, unkn
 }
 
 export async function saveLocation(campaignId: string, payload: Record<string, unknown>): Promise<{ id: string; location: MemoryLocation }> {
-  const response = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/locations`, {
+  const response = await apiFetch(`/api/campaigns/${campaignId}/locations`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
@@ -392,7 +404,7 @@ export async function saveLocation(campaignId: string, payload: Record<string, u
 }
 
 export async function saveEncounter(campaignId: string, payload: Record<string, unknown>): Promise<{ id: string; encounter: Record<string, unknown> }> {
-  const response = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/encounters`, {
+  const response = await apiFetch(`/api/campaigns/${campaignId}/encounters`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)

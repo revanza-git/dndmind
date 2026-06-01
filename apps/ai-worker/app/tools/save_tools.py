@@ -11,16 +11,17 @@ from rag.retriever import database_url
 
 def save_npc(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
     campaign_id = arguments.get("campaignId") or (context or {}).get("campaignId")
+    client_owner_id = arguments.get("clientOwnerId") or (context or {}).get("clientOwnerId")
     name = str(arguments.get("name") or "").strip()
-    if not campaign_id or not name:
-        raise ValueError("campaignId and name are required.")
+    if not campaign_id or not client_owner_id or not name:
+        raise ValueError("campaignId, clientOwnerId, and name are required.")
 
     with psycopg.connect(database_url(), row_factory=dict_row) as conn:
         row = conn.execute(
             """
-            INSERT INTO npcs (campaign_id, name, role, description, disposition, metadata)
-            VALUES (%s, %s, %s, %s, %s, %s::jsonb)
-            ON CONFLICT (campaign_id, name) DO UPDATE
+            INSERT INTO npcs (campaign_id, client_owner_id, name, role, description, disposition, metadata)
+            VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb)
+            ON CONFLICT (campaign_id, client_owner_id, name) DO UPDATE
             SET role = COALESCE(EXCLUDED.role, npcs.role),
                 description = COALESCE(EXCLUDED.description, npcs.description),
                 disposition = COALESCE(EXCLUDED.disposition, npcs.disposition),
@@ -29,6 +30,7 @@ def save_npc(arguments: dict[str, Any], context: dict[str, Any] | None = None) -
             """,
             (
                 campaign_id,
+                client_owner_id,
                 name,
                 arguments.get("role"),
                 arguments.get("description"),
@@ -42,16 +44,17 @@ def save_npc(arguments: dict[str, Any], context: dict[str, Any] | None = None) -
 
 def save_quest(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
     campaign_id = arguments.get("campaignId") or (context or {}).get("campaignId")
+    client_owner_id = arguments.get("clientOwnerId") or (context or {}).get("clientOwnerId")
     title = str(arguments.get("title") or "").strip()
-    if not campaign_id or not title:
-        raise ValueError("campaignId and title are required.")
+    if not campaign_id or not client_owner_id or not title:
+        raise ValueError("campaignId, clientOwnerId, and title are required.")
 
     with psycopg.connect(database_url(), row_factory=dict_row) as conn:
         row = conn.execute(
             """
-            INSERT INTO quests (campaign_id, title, status, description, metadata)
-            VALUES (%s, %s, %s, %s, %s::jsonb)
-            ON CONFLICT (campaign_id, title) DO UPDATE
+            INSERT INTO quests (campaign_id, client_owner_id, title, status, description, metadata)
+            VALUES (%s, %s, %s, %s, %s, %s::jsonb)
+            ON CONFLICT (campaign_id, client_owner_id, title) DO UPDATE
             SET status = EXCLUDED.status,
                 description = COALESCE(EXCLUDED.description, quests.description),
                 metadata = quests.metadata || EXCLUDED.metadata
@@ -59,6 +62,7 @@ def save_quest(arguments: dict[str, Any], context: dict[str, Any] | None = None)
             """,
             (
                 campaign_id,
+                client_owner_id,
                 title,
                 arguments.get("status") or "open",
                 arguments.get("description"),
@@ -71,13 +75,17 @@ def save_quest(arguments: dict[str, Any], context: dict[str, Any] | None = None)
 
 def save_session_summary(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
     campaign_id = arguments.get("campaignId") or (context or {}).get("campaignId")
+    client_owner_id = arguments.get("clientOwnerId") or (context or {}).get("clientOwnerId")
     session_id = arguments.get("sessionId")
     summary = str(arguments.get("summary") or "").strip()
-    if not campaign_id or not session_id or not summary:
-        raise ValueError("campaignId, sessionId, and summary are required.")
+    if not campaign_id or not client_owner_id or not session_id or not summary:
+        raise ValueError("campaignId, clientOwnerId, sessionId, and summary are required.")
 
     with psycopg.connect(database_url(), row_factory=dict_row) as conn:
-        conn.execute("UPDATE sessions SET summary = %s, status = 'summarized' WHERE id = %s AND campaign_id = %s", (summary, session_id, campaign_id))
+        conn.execute(
+            "UPDATE sessions SET summary = %s, status = 'summarized' WHERE id = %s AND campaign_id = %s AND client_owner_id = %s",
+            (summary, session_id, campaign_id, client_owner_id),
+        )
         document = conn.execute(
             """
             INSERT INTO knowledge_documents (campaign_id, source_type, title, content, metadata)
@@ -88,7 +96,7 @@ def save_session_summary(arguments: dict[str, Any], context: dict[str, Any] | No
                 campaign_id,
                 arguments.get("title") or "Saved Session Summary",
                 f"# Saved Session Summary\n\n{summary}",
-                json.dumps({"status": "uploaded", "sessionId": session_id, "source": "tool"}),
+                json.dumps({"status": "uploaded", "sessionId": session_id, "source": "tool", "clientOwnerId": client_owner_id}),
             ),
         ).fetchone()
         chunks = chunk_text(summary)
@@ -107,9 +115,8 @@ def save_session_summary(arguments: dict[str, Any], context: dict[str, Any] | No
                     chunk.content,
                     chunk.token_count,
                     vector_literal(embedding),
-                    json.dumps({"source": "tool"}),
+                    json.dumps({"source": "tool", "clientOwnerId": client_owner_id}),
                 ),
             )
         conn.commit()
     return {"sessionId": str(session_id), "memoryDocumentId": str(document["id"])}
-

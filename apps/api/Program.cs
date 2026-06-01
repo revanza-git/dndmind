@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Net.Http.Json;
 using Npgsql;
 using NpgsqlTypes;
@@ -11,6 +12,8 @@ var connectionString =
     ?? "Host=localhost;Port=5432;Database=dndmind;Username=dndmind;Password=dndmind";
 
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentClientService, CurrentClientService>();
 builder.Services.AddHttpClient("ai-worker", client =>
 {
     var workerUrl = builder.Configuration["AI_WORKER_URL"] ?? "http://localhost:8001";
@@ -158,18 +161,25 @@ app.MapPost("/api/campaigns/{campaignId:guid}/party", async (Guid campaignId, Cr
     return Results.Created($"/api/campaigns/{campaignId}/party/{reader.GetGuid(0)}", ReadPartyCharacter(reader));
 });
 
-app.MapGet("/api/campaigns/{campaignId:guid}/sessions", async (Guid campaignId, NpgsqlDataSource db) =>
+app.MapGet("/api/campaigns/{campaignId:guid}/sessions", async (Guid campaignId, NpgsqlDataSource db, ICurrentClientService currentClient) =>
 {
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
     const string sql = """
         SELECT id, campaign_id, session_number, title, raw_notes, summary, status, created_at, updated_at
         FROM sessions
         WHERE campaign_id = @campaignId
+          AND client_owner_id = @clientOwnerId
         ORDER BY session_number DESC, created_at DESC
         """;
 
     var sessions = new List<SessionDto>();
     await using var cmd = db.CreateCommand(sql);
     cmd.Parameters.AddWithValue("campaignId", campaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
     await using var reader = await cmd.ExecuteReaderAsync();
     while (await reader.ReadAsync())
     {
@@ -179,27 +189,39 @@ app.MapGet("/api/campaigns/{campaignId:guid}/sessions", async (Guid campaignId, 
     return Results.Ok(sessions);
 });
 
-app.MapPost("/api/campaigns/{campaignId:guid}/sessions", async (Guid campaignId, UpsertSessionRequest request, NpgsqlDataSource db) =>
+app.MapPost("/api/campaigns/{campaignId:guid}/sessions", async (Guid campaignId, UpsertSessionRequest request, NpgsqlDataSource db, ICurrentClientService currentClient) =>
 {
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
     var campaign = await LoadCampaign(campaignId, db);
     if (campaign is null)
     {
         return Results.NotFound(new { error = "Campaign not found." });
     }
 
-    const string nextSessionSql = "SELECT COALESCE(MAX(session_number), 0) + 1 FROM sessions WHERE campaign_id = @campaignId";
+    const string nextSessionSql = """
+        SELECT COALESCE(MAX(session_number), 0) + 1
+        FROM sessions
+        WHERE campaign_id = @campaignId
+          AND client_owner_id = @clientOwnerId
+        """;
     await using var nextCmd = db.CreateCommand(nextSessionSql);
     nextCmd.Parameters.AddWithValue("campaignId", campaignId);
+    nextCmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
     var nextSessionNumber = (int)(await nextCmd.ExecuteScalarAsync() ?? 1);
 
     const string sql = """
-        INSERT INTO sessions (campaign_id, session_number, title, raw_notes, summary, status)
-        VALUES (@campaignId, @sessionNumber, @title, @rawNotes, @summary, @status)
+        INSERT INTO sessions (campaign_id, client_owner_id, visibility, session_number, title, raw_notes, summary, status)
+        VALUES (@campaignId, @clientOwnerId, 'private', @sessionNumber, @title, @rawNotes, @summary, @status)
         RETURNING id, campaign_id, session_number, title, raw_notes, summary, status, created_at, updated_at
         """;
 
     await using var cmd = db.CreateCommand(sql);
     cmd.Parameters.AddWithValue("campaignId", campaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
     cmd.Parameters.AddWithValue("sessionNumber", request.SessionNumber > 0 ? request.SessionNumber : nextSessionNumber);
     cmd.Parameters.AddWithValue("title", string.IsNullOrWhiteSpace(request.Title) ? $"Session {nextSessionNumber}" : request.Title.Trim());
     cmd.Parameters.AddWithValue("rawNotes", (object?)request.RawNotes ?? DBNull.Value);
@@ -211,8 +233,24 @@ app.MapPost("/api/campaigns/{campaignId:guid}/sessions", async (Guid campaignId,
     return Results.Created($"/api/sessions/{reader.GetGuid(0)}", ReadSession(reader));
 });
 
-app.MapPut("/api/sessions/{sessionId:guid}", async (Guid sessionId, UpsertSessionRequest request, NpgsqlDataSource db) =>
+app.MapGet("/api/sessions/{sessionId:guid}", async (Guid sessionId, NpgsqlDataSource db, ICurrentClientService currentClient) =>
 {
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
+    var session = await LoadSession(sessionId, clientOwnerId, db);
+    return session is null ? Results.NotFound() : Results.Ok(session);
+});
+
+app.MapPut("/api/sessions/{sessionId:guid}", async (Guid sessionId, UpsertSessionRequest request, NpgsqlDataSource db, ICurrentClientService currentClient) =>
+{
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
     const string sql = """
         UPDATE sessions
         SET session_number = CASE WHEN @sessionNumber > 0 THEN @sessionNumber ELSE session_number END,
@@ -222,11 +260,13 @@ app.MapPut("/api/sessions/{sessionId:guid}", async (Guid sessionId, UpsertSessio
             status = COALESCE(NULLIF(@status, ''), status),
             updated_at = now()
         WHERE id = @sessionId
+          AND client_owner_id = @clientOwnerId
         RETURNING id, campaign_id, session_number, title, raw_notes, summary, status, created_at, updated_at
         """;
 
     await using var cmd = db.CreateCommand(sql);
     cmd.Parameters.AddWithValue("sessionId", sessionId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
     cmd.Parameters.AddWithValue("sessionNumber", request.SessionNumber);
     cmd.Parameters.AddWithValue("title", request.Title?.Trim() ?? string.Empty);
     cmd.Parameters.AddWithValue("rawNotes", (object?)request.RawNotes ?? DBNull.Value);
@@ -237,9 +277,29 @@ app.MapPut("/api/sessions/{sessionId:guid}", async (Guid sessionId, UpsertSessio
     return await reader.ReadAsync() ? Results.Ok(ReadSession(reader)) : Results.NotFound();
 });
 
-app.MapPost("/api/sessions/{sessionId:guid}/summarize", async (Guid sessionId, NpgsqlDataSource db, IHttpClientFactory httpClientFactory) =>
+app.MapDelete("/api/sessions/{sessionId:guid}", async (Guid sessionId, NpgsqlDataSource db, ICurrentClientService currentClient) =>
 {
-    var session = await LoadSession(sessionId, db);
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
+    const string sql = "DELETE FROM sessions WHERE id = @sessionId AND client_owner_id = @clientOwnerId";
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("sessionId", sessionId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
+    var deleted = await cmd.ExecuteNonQueryAsync();
+    return deleted > 0 ? Results.NoContent() : Results.NotFound();
+});
+
+app.MapPost("/api/sessions/{sessionId:guid}/summarize", async (Guid sessionId, NpgsqlDataSource db, IHttpClientFactory httpClientFactory, ICurrentClientService currentClient) =>
+{
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
+    var session = await LoadSession(sessionId, clientOwnerId, db);
     if (session is null)
     {
         return Results.NotFound(new { error = "Session not found." });
@@ -269,15 +329,16 @@ app.MapPost("/api/sessions/{sessionId:guid}/summarize", async (Guid sessionId, N
         return Results.Problem("AI worker returned an empty summary.", statusCode: 502);
     }
 
-    await SaveSessionMemory(session, summary, db);
-    var document = await CreateMemoryDocument(session, summary, db);
+    await SaveSessionMemory(session, summary, clientOwnerId, db);
+    var document = await CreateMemoryDocument(session, summary, clientOwnerId, db);
     var ingestResponse = await client.PostAsJsonAsync("/ai/ingest-document", new AiWorkerIngestDocumentRequest(
         document.Id,
         document.CampaignId,
         document.SourceType,
         document.Title,
         document.Content ?? string.Empty,
-        document.Metadata));
+        document.Metadata,
+        clientOwnerId));
 
     if (!ingestResponse.IsSuccessStatusCode)
     {
@@ -285,7 +346,7 @@ app.MapPost("/api/sessions/{sessionId:guid}/summarize", async (Guid sessionId, N
         return Results.Problem($"AI worker memory ingestion failed: {error}", statusCode: 502);
     }
 
-    var refreshedSession = await LoadSession(sessionId, db);
+    var refreshedSession = await LoadSession(sessionId, clientOwnerId, db);
     return Results.Ok(new
     {
         session = refreshedSession,
@@ -294,30 +355,40 @@ app.MapPost("/api/sessions/{sessionId:guid}/summarize", async (Guid sessionId, N
     });
 });
 
-app.MapGet("/api/campaigns/{campaignId:guid}/memory", async (Guid campaignId, NpgsqlDataSource db) =>
+app.MapGet("/api/campaigns/{campaignId:guid}/memory", async (Guid campaignId, NpgsqlDataSource db, ICurrentClientService currentClient) =>
 {
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
     var npcs = await LoadMemoryRows<NpcDto>(db, """
         SELECT id, campaign_id, name, role, description, disposition, last_seen_session_id, metadata, created_at, updated_at
-        FROM npcs WHERE campaign_id = @campaignId ORDER BY updated_at DESC, name
-        """, campaignId, ReadNpc);
+        FROM npcs WHERE campaign_id = @campaignId AND client_owner_id = @clientOwnerId ORDER BY updated_at DESC, name
+        """, campaignId, clientOwnerId, ReadNpc);
     var quests = await LoadMemoryRows<QuestDto>(db, """
         SELECT id, campaign_id, title, status, description, last_seen_session_id, metadata, created_at, updated_at
-        FROM quests WHERE campaign_id = @campaignId ORDER BY updated_at DESC, title
-        """, campaignId, ReadQuest);
+        FROM quests WHERE campaign_id = @campaignId AND client_owner_id = @clientOwnerId ORDER BY updated_at DESC, title
+        """, campaignId, clientOwnerId, ReadQuest);
     var locations = await LoadMemoryRows<LocationDto>(db, """
         SELECT id, campaign_id, name, description, location_type, last_seen_session_id, metadata, created_at, updated_at
-        FROM locations WHERE campaign_id = @campaignId ORDER BY updated_at DESC, name
-        """, campaignId, ReadLocation);
+        FROM locations WHERE campaign_id = @campaignId AND client_owner_id = @clientOwnerId ORDER BY updated_at DESC, name
+        """, campaignId, clientOwnerId, ReadLocation);
     var events = await LoadMemoryRows<MemoryEventDto>(db, """
         SELECT id, campaign_id, session_id, event_type, title, description, metadata, created_at
-        FROM memory_events WHERE campaign_id = @campaignId ORDER BY created_at DESC LIMIT 50
-        """, campaignId, ReadMemoryEvent);
+        FROM memory_events WHERE campaign_id = @campaignId AND client_owner_id = @clientOwnerId ORDER BY created_at DESC LIMIT 50
+        """, campaignId, clientOwnerId, ReadMemoryEvent);
 
     return Results.Ok(new CampaignMemoryDto(npcs, quests, locations, events));
 });
 
-app.MapPost("/api/campaigns/{campaignId:guid}/npcs", async (Guid campaignId, SaveNpcRequest request, NpgsqlDataSource db) =>
+app.MapPost("/api/campaigns/{campaignId:guid}/npcs", async (Guid campaignId, SaveNpcRequest request, NpgsqlDataSource db, ICurrentClientService currentClient) =>
 {
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
     if (string.IsNullOrWhiteSpace(request.Name))
     {
         return Results.BadRequest(new { error = "NPC name is required." });
@@ -328,9 +399,9 @@ app.MapPost("/api/campaigns/{campaignId:guid}/npcs", async (Guid campaignId, Sav
     }
 
     const string sql = """
-        INSERT INTO npcs (campaign_id, name, role, description, disposition, metadata)
-        VALUES (@campaignId, @name, @role, @description, @disposition, @metadata)
-        ON CONFLICT (campaign_id, name) DO UPDATE
+        INSERT INTO npcs (campaign_id, client_owner_id, name, role, description, disposition, metadata)
+        VALUES (@campaignId, @clientOwnerId, @name, @role, @description, @disposition, @metadata)
+        ON CONFLICT (campaign_id, client_owner_id, name) DO UPDATE
         SET role = COALESCE(EXCLUDED.role, npcs.role),
             description = COALESCE(EXCLUDED.description, npcs.description),
             disposition = COALESCE(EXCLUDED.disposition, npcs.disposition),
@@ -340,6 +411,7 @@ app.MapPost("/api/campaigns/{campaignId:guid}/npcs", async (Guid campaignId, Sav
 
     await using var cmd = db.CreateCommand(sql);
     cmd.Parameters.AddWithValue("campaignId", campaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
     cmd.Parameters.AddWithValue("name", request.Name.Trim());
     cmd.Parameters.AddWithValue("role", (object?)request.Role?.Trim() ?? DBNull.Value);
     cmd.Parameters.AddWithValue("description", (object?)request.Description?.Trim() ?? DBNull.Value);
@@ -349,6 +421,7 @@ app.MapPost("/api/campaigns/{campaignId:guid}/npcs", async (Guid campaignId, Sav
         Value = JsonSerializer.Serialize(new
         {
             source = "structured_output",
+            clientOwnerId,
             request.RaceOrSpecies,
             request.Personality,
             request.Motivation,
@@ -363,8 +436,13 @@ app.MapPost("/api/campaigns/{campaignId:guid}/npcs", async (Guid campaignId, Sav
     return Results.Ok(new { id = npc.Id, npc });
 });
 
-app.MapPost("/api/campaigns/{campaignId:guid}/quests", async (Guid campaignId, SaveQuestRequest request, NpgsqlDataSource db) =>
+app.MapPost("/api/campaigns/{campaignId:guid}/quests", async (Guid campaignId, SaveQuestRequest request, NpgsqlDataSource db, ICurrentClientService currentClient) =>
 {
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
     if (string.IsNullOrWhiteSpace(request.Title))
     {
         return Results.BadRequest(new { error = "Quest title is required." });
@@ -375,9 +453,9 @@ app.MapPost("/api/campaigns/{campaignId:guid}/quests", async (Guid campaignId, S
     }
 
     const string sql = """
-        INSERT INTO quests (campaign_id, title, status, description, metadata)
-        VALUES (@campaignId, @title, @status, @description, @metadata)
-        ON CONFLICT (campaign_id, title) DO UPDATE
+        INSERT INTO quests (campaign_id, client_owner_id, title, status, description, metadata)
+        VALUES (@campaignId, @clientOwnerId, @title, @status, @description, @metadata)
+        ON CONFLICT (campaign_id, client_owner_id, title) DO UPDATE
         SET status = EXCLUDED.status,
             description = COALESCE(EXCLUDED.description, quests.description),
             metadata = quests.metadata || EXCLUDED.metadata
@@ -386,6 +464,7 @@ app.MapPost("/api/campaigns/{campaignId:guid}/quests", async (Guid campaignId, S
 
     await using var cmd = db.CreateCommand(sql);
     cmd.Parameters.AddWithValue("campaignId", campaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
     cmd.Parameters.AddWithValue("title", request.Title.Trim());
     cmd.Parameters.AddWithValue("status", string.IsNullOrWhiteSpace(request.Status) ? "open" : request.Status.Trim());
     cmd.Parameters.AddWithValue("description", (object?)request.Description?.Trim() ?? DBNull.Value);
@@ -394,6 +473,7 @@ app.MapPost("/api/campaigns/{campaignId:guid}/quests", async (Guid campaignId, S
         Value = JsonSerializer.Serialize(new
         {
             source = "structured_output",
+            clientOwnerId,
             request.RelatedNpcs,
             request.Objectives,
             request.Reward,
@@ -407,8 +487,13 @@ app.MapPost("/api/campaigns/{campaignId:guid}/quests", async (Guid campaignId, S
     return Results.Ok(new { id = quest.Id, quest });
 });
 
-app.MapPost("/api/campaigns/{campaignId:guid}/locations", async (Guid campaignId, SaveLocationRequest request, NpgsqlDataSource db) =>
+app.MapPost("/api/campaigns/{campaignId:guid}/locations", async (Guid campaignId, SaveLocationRequest request, NpgsqlDataSource db, ICurrentClientService currentClient) =>
 {
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
     if (string.IsNullOrWhiteSpace(request.Name))
     {
         return Results.BadRequest(new { error = "Location name is required." });
@@ -419,9 +504,9 @@ app.MapPost("/api/campaigns/{campaignId:guid}/locations", async (Guid campaignId
     }
 
     const string sql = """
-        INSERT INTO locations (campaign_id, name, description, location_type, metadata)
-        VALUES (@campaignId, @name, @description, @locationType, @metadata)
-        ON CONFLICT (campaign_id, name) DO UPDATE
+        INSERT INTO locations (campaign_id, client_owner_id, name, description, location_type, metadata)
+        VALUES (@campaignId, @clientOwnerId, @name, @description, @locationType, @metadata)
+        ON CONFLICT (campaign_id, client_owner_id, name) DO UPDATE
         SET description = COALESCE(EXCLUDED.description, locations.description),
             location_type = COALESCE(EXCLUDED.location_type, locations.location_type),
             metadata = locations.metadata || EXCLUDED.metadata
@@ -430,6 +515,7 @@ app.MapPost("/api/campaigns/{campaignId:guid}/locations", async (Guid campaignId
 
     await using var cmd = db.CreateCommand(sql);
     cmd.Parameters.AddWithValue("campaignId", campaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
     cmd.Parameters.AddWithValue("name", request.Name.Trim());
     cmd.Parameters.AddWithValue("description", (object?)request.Description?.Trim() ?? DBNull.Value);
     cmd.Parameters.AddWithValue("locationType", (object?)request.Type?.Trim() ?? DBNull.Value);
@@ -438,6 +524,7 @@ app.MapPost("/api/campaigns/{campaignId:guid}/locations", async (Guid campaignId
         Value = JsonSerializer.Serialize(new
         {
             source = "structured_output",
+            clientOwnerId,
             request.DangerLevel,
             request.Secrets,
             request.NotableNpcs,
@@ -451,8 +538,13 @@ app.MapPost("/api/campaigns/{campaignId:guid}/locations", async (Guid campaignId
     return Results.Ok(new { id = location.Id, location });
 });
 
-app.MapPost("/api/campaigns/{campaignId:guid}/encounters", async (Guid campaignId, SaveEncounterRequest request, NpgsqlDataSource db) =>
+app.MapPost("/api/campaigns/{campaignId:guid}/encounters", async (Guid campaignId, SaveEncounterRequest request, NpgsqlDataSource db, ICurrentClientService currentClient) =>
 {
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
     if (string.IsNullOrWhiteSpace(request.Title))
     {
         return Results.BadRequest(new { error = "Encounter title is required." });
@@ -463,13 +555,14 @@ app.MapPost("/api/campaigns/{campaignId:guid}/encounters", async (Guid campaignI
     }
 
     const string sql = """
-        INSERT INTO encounters (campaign_id, title, summary, outcome, metadata)
-        VALUES (@campaignId, @title, @summary, NULL, @metadata)
+        INSERT INTO encounters (campaign_id, client_owner_id, title, summary, outcome, metadata)
+        VALUES (@campaignId, @clientOwnerId, @title, @summary, NULL, @metadata)
         RETURNING id, campaign_id, session_id, title, summary, outcome, metadata, created_at
         """;
 
     await using var cmd = db.CreateCommand(sql);
     cmd.Parameters.AddWithValue("campaignId", campaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
     cmd.Parameters.AddWithValue("title", request.Title.Trim());
     cmd.Parameters.AddWithValue("summary", (object?)request.Tactics?.Trim() ?? DBNull.Value);
     cmd.Parameters.Add(new NpgsqlParameter("metadata", NpgsqlDbType.Jsonb)
@@ -477,6 +570,7 @@ app.MapPost("/api/campaigns/{campaignId:guid}/encounters", async (Guid campaignI
         Value = JsonSerializer.Serialize(new
         {
             source = "structured_output",
+            clientOwnerId,
             request.Difficulty,
             request.Environment,
             request.Monsters,
@@ -528,14 +622,20 @@ app.MapPost("/api/campaigns/{campaignId:guid}/documents/upload", async (Guid cam
     return Results.Created($"/api/documents/{reader.GetGuid(0)}", ReadDocument(reader, includeContent: false));
 });
 
-app.MapGet("/api/campaigns/{campaignId:guid}/documents", async (Guid campaignId, NpgsqlDataSource db) =>
+app.MapGet("/api/campaigns/{campaignId:guid}/documents", async (Guid campaignId, NpgsqlDataSource db, ICurrentClientService currentClient) =>
 {
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
     const string sql = """
         SELECT kd.id, kd.campaign_id, kd.source_type, kd.title, kd.original_filename, kd.content, kd.metadata, kd.created_at,
           count(kc.id)::int AS chunk_count
         FROM knowledge_documents kd
         LEFT JOIN knowledge_chunks kc ON kc.document_id = kd.id
         WHERE kd.campaign_id = @campaignId
+          AND (kd.source_type <> 'campaign_memory' OR kd.metadata->>'clientOwnerId' = @clientOwnerId)
         GROUP BY kd.id
         ORDER BY kd.created_at DESC
         """;
@@ -543,6 +643,7 @@ app.MapGet("/api/campaigns/{campaignId:guid}/documents", async (Guid campaignId,
     var documents = new List<DocumentDto>();
     await using var cmd = db.CreateCommand(sql);
     cmd.Parameters.AddWithValue("campaignId", campaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
     await using var reader = await cmd.ExecuteReaderAsync();
     while (await reader.ReadAsync())
     {
@@ -552,10 +653,19 @@ app.MapGet("/api/campaigns/{campaignId:guid}/documents", async (Guid campaignId,
     return Results.Ok(documents);
 });
 
-app.MapPost("/api/documents/{documentId:guid}/ingest", async (Guid documentId, NpgsqlDataSource db, IHttpClientFactory httpClientFactory) =>
+app.MapPost("/api/documents/{documentId:guid}/ingest", async (Guid documentId, NpgsqlDataSource db, IHttpClientFactory httpClientFactory, ICurrentClientService currentClient) =>
 {
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
     var document = await LoadDocument(documentId, db);
     if (document is null)
+    {
+        return Results.NotFound(new { error = "Document not found." });
+    }
+    if (document.SourceType == "campaign_memory" && !MetadataClientOwnerMatches(document.Metadata, clientOwnerId))
     {
         return Results.NotFound(new { error = "Document not found." });
     }
@@ -567,7 +677,8 @@ app.MapPost("/api/documents/{documentId:guid}/ingest", async (Guid documentId, N
         document.SourceType,
         document.Title,
         document.Content ?? string.Empty,
-        document.Metadata));
+        document.Metadata,
+        document.SourceType == "campaign_memory" ? clientOwnerId : null));
 
     if (!workerResponse.IsSuccessStatusCode)
     {
@@ -579,8 +690,13 @@ app.MapPost("/api/documents/{documentId:guid}/ingest", async (Guid documentId, N
     return Results.Ok(result);
 });
 
-app.MapPost("/api/chat", async (ChatRequest request, NpgsqlDataSource db, IHttpClientFactory httpClientFactory) =>
+app.MapPost("/api/chat", async (ChatRequest request, NpgsqlDataSource db, IHttpClientFactory httpClientFactory, ICurrentClientService currentClient) =>
 {
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
     if (request.CampaignId == Guid.Empty || string.IsNullOrWhiteSpace(request.Message))
     {
         return Results.BadRequest(new { error = "campaignId and message are required." });
@@ -601,6 +717,7 @@ app.MapPost("/api/chat", async (ChatRequest request, NpgsqlDataSource db, IHttpC
         conversationId,
         request.Message,
         request.Mode,
+        clientOwnerId,
         request.Context,
         campaign,
         party);
@@ -632,15 +749,25 @@ app.MapPost("/api/chat", async (ChatRequest request, NpgsqlDataSource db, IHttpC
     return Results.Ok(response);
 });
 
-app.MapPost("/api/tools/execute", async (ToolExecuteRequest request, NpgsqlDataSource db, IHttpClientFactory httpClientFactory) =>
+app.MapPost("/api/tools/execute", async (ToolExecuteRequest request, NpgsqlDataSource db, IHttpClientFactory httpClientFactory, ICurrentClientService currentClient) =>
 {
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
     if (string.IsNullOrWhiteSpace(request.ToolName))
     {
         return Results.BadRequest(new { error = "toolName is required." });
     }
 
     var client = httpClientFactory.CreateClient("ai-worker");
-    var workerResponse = await client.PostAsJsonAsync("/ai/tools/execute", request);
+    var workerResponse = await client.PostAsJsonAsync("/ai/tools/execute", new AiWorkerToolExecuteRequest(
+        request.CampaignId,
+        request.ConversationId,
+        request.ToolName,
+        request.Arguments,
+        clientOwnerId));
     if (!workerResponse.IsSuccessStatusCode)
     {
         var error = await workerResponse.Content.ReadAsStringAsync();
@@ -674,9 +801,23 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
         ALTER TABLE sessions
         ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
 
+        ALTER TABLE sessions
+        ADD COLUMN IF NOT EXISTS client_owner_id text;
+
+        ALTER TABLE sessions
+        ADD COLUMN IF NOT EXISTS visibility text NOT NULL DEFAULT 'private';
+
+        UPDATE sessions
+        SET client_owner_id = 'dndmind-demo-client'
+        WHERE client_owner_id IS NULL;
+
+        ALTER TABLE sessions
+        ALTER COLUMN client_owner_id SET NOT NULL;
+
         CREATE TABLE IF NOT EXISTS npcs (
           id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
           campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+          client_owner_id text NOT NULL DEFAULT 'dndmind-demo-client',
           name text NOT NULL,
           role text NULL,
           description text NULL,
@@ -685,12 +826,13 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
           metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
           created_at timestamptz NOT NULL DEFAULT now(),
           updated_at timestamptz NOT NULL DEFAULT now(),
-          UNIQUE (campaign_id, name)
+          CONSTRAINT npcs_campaign_client_owner_name_key UNIQUE (campaign_id, client_owner_id, name)
         );
 
         CREATE TABLE IF NOT EXISTS quests (
           id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
           campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+          client_owner_id text NOT NULL DEFAULT 'dndmind-demo-client',
           title text NOT NULL,
           status text NOT NULL DEFAULT 'open',
           description text NULL,
@@ -698,12 +840,13 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
           metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
           created_at timestamptz NOT NULL DEFAULT now(),
           updated_at timestamptz NOT NULL DEFAULT now(),
-          UNIQUE (campaign_id, title)
+          CONSTRAINT quests_campaign_client_owner_title_key UNIQUE (campaign_id, client_owner_id, title)
         );
 
         CREATE TABLE IF NOT EXISTS locations (
           id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
           campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+          client_owner_id text NOT NULL DEFAULT 'dndmind-demo-client',
           name text NOT NULL,
           description text NULL,
           location_type text NULL,
@@ -711,12 +854,13 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
           metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
           created_at timestamptz NOT NULL DEFAULT now(),
           updated_at timestamptz NOT NULL DEFAULT now(),
-          UNIQUE (campaign_id, name)
+          CONSTRAINT locations_campaign_client_owner_name_key UNIQUE (campaign_id, client_owner_id, name)
         );
 
         CREATE TABLE IF NOT EXISTS encounters (
           id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
           campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+          client_owner_id text NOT NULL DEFAULT 'dndmind-demo-client',
           session_id uuid NULL REFERENCES sessions(id) ON DELETE SET NULL,
           title text NOT NULL,
           summary text NULL,
@@ -728,6 +872,7 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
         CREATE TABLE IF NOT EXISTS memory_events (
           id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
           campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+          client_owner_id text NOT NULL DEFAULT 'dndmind-demo-client',
           session_id uuid NULL REFERENCES sessions(id) ON DELETE SET NULL,
           event_type text NOT NULL,
           title text NOT NULL,
@@ -735,6 +880,41 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
           metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
           created_at timestamptz NOT NULL DEFAULT now()
         );
+
+        ALTER TABLE npcs ADD COLUMN IF NOT EXISTS client_owner_id text;
+        ALTER TABLE quests ADD COLUMN IF NOT EXISTS client_owner_id text;
+        ALTER TABLE locations ADD COLUMN IF NOT EXISTS client_owner_id text;
+        ALTER TABLE encounters ADD COLUMN IF NOT EXISTS client_owner_id text;
+        ALTER TABLE memory_events ADD COLUMN IF NOT EXISTS client_owner_id text;
+
+        UPDATE npcs SET client_owner_id = 'dndmind-demo-client' WHERE client_owner_id IS NULL;
+        UPDATE quests SET client_owner_id = 'dndmind-demo-client' WHERE client_owner_id IS NULL;
+        UPDATE locations SET client_owner_id = 'dndmind-demo-client' WHERE client_owner_id IS NULL;
+        UPDATE encounters SET client_owner_id = 'dndmind-demo-client' WHERE client_owner_id IS NULL;
+        UPDATE memory_events SET client_owner_id = 'dndmind-demo-client' WHERE client_owner_id IS NULL;
+
+        ALTER TABLE npcs ALTER COLUMN client_owner_id SET DEFAULT 'dndmind-demo-client', ALTER COLUMN client_owner_id SET NOT NULL;
+        ALTER TABLE quests ALTER COLUMN client_owner_id SET DEFAULT 'dndmind-demo-client', ALTER COLUMN client_owner_id SET NOT NULL;
+        ALTER TABLE locations ALTER COLUMN client_owner_id SET DEFAULT 'dndmind-demo-client', ALTER COLUMN client_owner_id SET NOT NULL;
+        ALTER TABLE encounters ALTER COLUMN client_owner_id SET DEFAULT 'dndmind-demo-client', ALTER COLUMN client_owner_id SET NOT NULL;
+        ALTER TABLE memory_events ALTER COLUMN client_owner_id SET DEFAULT 'dndmind-demo-client', ALTER COLUMN client_owner_id SET NOT NULL;
+
+        ALTER TABLE npcs DROP CONSTRAINT IF EXISTS npcs_campaign_id_name_key;
+        ALTER TABLE quests DROP CONSTRAINT IF EXISTS quests_campaign_id_title_key;
+        ALTER TABLE locations DROP CONSTRAINT IF EXISTS locations_campaign_id_name_key;
+
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'npcs_campaign_client_owner_name_key') THEN
+            ALTER TABLE npcs ADD CONSTRAINT npcs_campaign_client_owner_name_key UNIQUE (campaign_id, client_owner_id, name);
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'quests_campaign_client_owner_title_key') THEN
+            ALTER TABLE quests ADD CONSTRAINT quests_campaign_client_owner_title_key UNIQUE (campaign_id, client_owner_id, title);
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'locations_campaign_client_owner_name_key') THEN
+            ALTER TABLE locations ADD CONSTRAINT locations_campaign_client_owner_name_key UNIQUE (campaign_id, client_owner_id, name);
+          END IF;
+        END $$;
 
         CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_document_id
           ON knowledge_chunks(document_id);
@@ -749,6 +929,12 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
         CREATE INDEX IF NOT EXISTS idx_locations_campaign_id ON locations(campaign_id);
         CREATE INDEX IF NOT EXISTS idx_encounters_campaign_id ON encounters(campaign_id);
         CREATE INDEX IF NOT EXISTS idx_memory_events_campaign_id ON memory_events(campaign_id);
+        CREATE INDEX IF NOT EXISTS idx_sessions_campaign_client_owner ON sessions(campaign_id, client_owner_id);
+        CREATE INDEX IF NOT EXISTS idx_npcs_campaign_client_owner ON npcs(campaign_id, client_owner_id);
+        CREATE INDEX IF NOT EXISTS idx_quests_campaign_client_owner ON quests(campaign_id, client_owner_id);
+        CREATE INDEX IF NOT EXISTS idx_locations_campaign_client_owner ON locations(campaign_id, client_owner_id);
+        CREATE INDEX IF NOT EXISTS idx_encounters_campaign_client_owner ON encounters(campaign_id, client_owner_id);
+        CREATE INDEX IF NOT EXISTS idx_memory_events_campaign_client_owner ON memory_events(campaign_id, client_owner_id);
 
         DO $$
         BEGIN
@@ -865,29 +1051,32 @@ static async Task<DocumentDto?> LoadDocument(Guid documentId, NpgsqlDataSource d
     return await reader.ReadAsync() ? ReadDocument(reader, includeContent: true) : null;
 }
 
-static async Task<SessionDto?> LoadSession(Guid sessionId, NpgsqlDataSource db)
+static async Task<SessionDto?> LoadSession(Guid sessionId, string clientOwnerId, NpgsqlDataSource db)
 {
     const string sql = """
         SELECT id, campaign_id, session_number, title, raw_notes, summary, status, created_at, updated_at
         FROM sessions
         WHERE id = @sessionId
+          AND client_owner_id = @clientOwnerId
         """;
 
     await using var cmd = db.CreateCommand(sql);
     cmd.Parameters.AddWithValue("sessionId", sessionId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
     await using var reader = await cmd.ExecuteReaderAsync();
     return await reader.ReadAsync() ? ReadSession(reader) : null;
 }
 
-static async Task SaveSessionMemory(SessionDto session, SessionSummaryResponse summary, NpgsqlDataSource db)
+static async Task SaveSessionMemory(SessionDto session, SessionSummaryResponse summary, string clientOwnerId, NpgsqlDataSource db)
 {
     await using var connection = await db.OpenConnectionAsync();
     await using var transaction = await connection.BeginTransactionAsync();
 
-    await using (var cmd = new NpgsqlCommand("UPDATE sessions SET summary = @summary, status = 'summarized' WHERE id = @sessionId", connection, transaction))
+    await using (var cmd = new NpgsqlCommand("UPDATE sessions SET summary = @summary, status = 'summarized' WHERE id = @sessionId AND client_owner_id = @clientOwnerId", connection, transaction))
     {
         cmd.Parameters.AddWithValue("summary", summary.Summary);
         cmd.Parameters.AddWithValue("sessionId", session.Id);
+        cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
         await cmd.ExecuteNonQueryAsync();
     }
 
@@ -906,9 +1095,9 @@ static async Task SaveSessionMemory(SessionDto session, SessionSummaryResponse s
     foreach (var npc in summary.Npcs)
     {
         await using var cmd = new NpgsqlCommand("""
-            INSERT INTO npcs (campaign_id, name, role, description, disposition, last_seen_session_id, metadata)
-            VALUES (@campaignId, @name, @role, @description, @disposition, @sessionId, @metadata)
-            ON CONFLICT (campaign_id, name) DO UPDATE
+            INSERT INTO npcs (campaign_id, client_owner_id, name, role, description, disposition, last_seen_session_id, metadata)
+            VALUES (@campaignId, @clientOwnerId, @name, @role, @description, @disposition, @sessionId, @metadata)
+            ON CONFLICT (campaign_id, client_owner_id, name) DO UPDATE
             SET role = COALESCE(EXCLUDED.role, npcs.role),
                 description = COALESCE(EXCLUDED.description, npcs.description),
                 disposition = COALESCE(EXCLUDED.disposition, npcs.disposition),
@@ -916,6 +1105,7 @@ static async Task SaveSessionMemory(SessionDto session, SessionSummaryResponse s
                 metadata = npcs.metadata || EXCLUDED.metadata
             """, connection, transaction);
         cmd.Parameters.AddWithValue("campaignId", session.CampaignId);
+        cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
         cmd.Parameters.AddWithValue("name", npc.Name);
         cmd.Parameters.AddWithValue("role", (object?)npc.Role ?? DBNull.Value);
         cmd.Parameters.AddWithValue("description", (object?)npc.Description ?? DBNull.Value);
@@ -928,15 +1118,16 @@ static async Task SaveSessionMemory(SessionDto session, SessionSummaryResponse s
     foreach (var quest in summary.Quests)
     {
         await using var cmd = new NpgsqlCommand("""
-            INSERT INTO quests (campaign_id, title, status, description, last_seen_session_id, metadata)
-            VALUES (@campaignId, @title, @status, @description, @sessionId, @metadata)
-            ON CONFLICT (campaign_id, title) DO UPDATE
+            INSERT INTO quests (campaign_id, client_owner_id, title, status, description, last_seen_session_id, metadata)
+            VALUES (@campaignId, @clientOwnerId, @title, @status, @description, @sessionId, @metadata)
+            ON CONFLICT (campaign_id, client_owner_id, title) DO UPDATE
             SET status = EXCLUDED.status,
                 description = COALESCE(EXCLUDED.description, quests.description),
                 last_seen_session_id = EXCLUDED.last_seen_session_id,
                 metadata = quests.metadata || EXCLUDED.metadata
             """, connection, transaction);
         cmd.Parameters.AddWithValue("campaignId", session.CampaignId);
+        cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
         cmd.Parameters.AddWithValue("title", quest.Title);
         cmd.Parameters.AddWithValue("status", string.IsNullOrWhiteSpace(quest.Status) ? "open" : quest.Status);
         cmd.Parameters.AddWithValue("description", (object?)quest.Description ?? DBNull.Value);
@@ -948,15 +1139,16 @@ static async Task SaveSessionMemory(SessionDto session, SessionSummaryResponse s
     foreach (var location in summary.Locations)
     {
         await using var cmd = new NpgsqlCommand("""
-            INSERT INTO locations (campaign_id, name, description, location_type, last_seen_session_id, metadata)
-            VALUES (@campaignId, @name, @description, @locationType, @sessionId, @metadata)
-            ON CONFLICT (campaign_id, name) DO UPDATE
+            INSERT INTO locations (campaign_id, client_owner_id, name, description, location_type, last_seen_session_id, metadata)
+            VALUES (@campaignId, @clientOwnerId, @name, @description, @locationType, @sessionId, @metadata)
+            ON CONFLICT (campaign_id, client_owner_id, name) DO UPDATE
             SET description = COALESCE(EXCLUDED.description, locations.description),
                 location_type = COALESCE(EXCLUDED.location_type, locations.location_type),
                 last_seen_session_id = EXCLUDED.last_seen_session_id,
                 metadata = locations.metadata || EXCLUDED.metadata
             """, connection, transaction);
         cmd.Parameters.AddWithValue("campaignId", session.CampaignId);
+        cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
         cmd.Parameters.AddWithValue("name", location.Name);
         cmd.Parameters.AddWithValue("description", (object?)location.Description ?? DBNull.Value);
         cmd.Parameters.AddWithValue("locationType", (object?)location.LocationType ?? DBNull.Value);
@@ -968,10 +1160,11 @@ static async Task SaveSessionMemory(SessionDto session, SessionSummaryResponse s
     foreach (var encounter in summary.Encounters)
     {
         await using var cmd = new NpgsqlCommand("""
-            INSERT INTO encounters (campaign_id, session_id, title, summary, outcome, metadata)
-            VALUES (@campaignId, @sessionId, @title, @summary, @outcome, @metadata)
+            INSERT INTO encounters (campaign_id, client_owner_id, session_id, title, summary, outcome, metadata)
+            VALUES (@campaignId, @clientOwnerId, @sessionId, @title, @summary, @outcome, @metadata)
             """, connection, transaction);
         cmd.Parameters.AddWithValue("campaignId", session.CampaignId);
+        cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
         cmd.Parameters.AddWithValue("sessionId", session.Id);
         cmd.Parameters.AddWithValue("title", encounter.Title);
         cmd.Parameters.AddWithValue("summary", (object?)encounter.Summary ?? DBNull.Value);
@@ -982,23 +1175,24 @@ static async Task SaveSessionMemory(SessionDto session, SessionSummaryResponse s
 
     foreach (var evt in summary.ImportantEvents)
     {
-        await InsertMemoryEvent(connection, transaction, session, "important_event", evt, evt);
+        await InsertMemoryEvent(connection, transaction, session, clientOwnerId, "important_event", evt, evt);
     }
     foreach (var hook in summary.UnresolvedHooks)
     {
-        await InsertMemoryEvent(connection, transaction, session, "unresolved_hook", hook, hook);
+        await InsertMemoryEvent(connection, transaction, session, clientOwnerId, "unresolved_hook", hook, hook);
     }
 
     await transaction.CommitAsync();
 }
 
-static async Task InsertMemoryEvent(NpgsqlConnection connection, NpgsqlTransaction transaction, SessionDto session, string type, string title, string description)
+static async Task InsertMemoryEvent(NpgsqlConnection connection, NpgsqlTransaction transaction, SessionDto session, string clientOwnerId, string type, string title, string description)
 {
     await using var cmd = new NpgsqlCommand("""
-        INSERT INTO memory_events (campaign_id, session_id, event_type, title, description, metadata)
-        VALUES (@campaignId, @sessionId, @eventType, @title, @description, @metadata)
+        INSERT INTO memory_events (campaign_id, client_owner_id, session_id, event_type, title, description, metadata)
+        VALUES (@campaignId, @clientOwnerId, @sessionId, @eventType, @title, @description, @metadata)
         """, connection, transaction);
     cmd.Parameters.AddWithValue("campaignId", session.CampaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
     cmd.Parameters.AddWithValue("sessionId", session.Id);
     cmd.Parameters.AddWithValue("eventType", type);
     cmd.Parameters.AddWithValue("title", title.Length > 120 ? title[..120] : title);
@@ -1007,13 +1201,20 @@ static async Task InsertMemoryEvent(NpgsqlConnection connection, NpgsqlTransacti
     await cmd.ExecuteNonQueryAsync();
 }
 
-static async Task<DocumentDto> CreateMemoryDocument(SessionDto session, SessionSummaryResponse summary, NpgsqlDataSource db)
+static async Task<DocumentDto> CreateMemoryDocument(SessionDto session, SessionSummaryResponse summary, string clientOwnerId, NpgsqlDataSource db)
 {
-    const string deleteSql = "DELETE FROM knowledge_documents WHERE campaign_id = @campaignId AND source_type = 'campaign_memory' AND metadata->>'sessionId' = @sessionId";
+    const string deleteSql = """
+        DELETE FROM knowledge_documents
+        WHERE campaign_id = @campaignId
+          AND source_type = 'campaign_memory'
+          AND metadata->>'sessionId' = @sessionId
+          AND metadata->>'clientOwnerId' = @clientOwnerId
+        """;
     await using (var deleteCmd = db.CreateCommand(deleteSql))
     {
         deleteCmd.Parameters.AddWithValue("campaignId", session.CampaignId);
         deleteCmd.Parameters.AddWithValue("sessionId", session.Id.ToString());
+        deleteCmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
         await deleteCmd.ExecuteNonQueryAsync();
     }
 
@@ -1035,7 +1236,8 @@ static async Task<DocumentDto> CreateMemoryDocument(SessionDto session, SessionS
         {
             status = "uploaded",
             sessionId = session.Id,
-            sessionNumber = session.SessionNumber
+            sessionNumber = session.SessionNumber,
+            clientOwnerId
         })
     });
 
@@ -1069,17 +1271,26 @@ static string BuildMemoryDocumentContent(SessionDto session, SessionSummaryRespo
         """;
 }
 
-static async Task<List<T>> LoadMemoryRows<T>(NpgsqlDataSource db, string sql, Guid campaignId, Func<NpgsqlDataReader, T> read)
+static async Task<List<T>> LoadMemoryRows<T>(NpgsqlDataSource db, string sql, Guid campaignId, string clientOwnerId, Func<NpgsqlDataReader, T> read)
 {
     var rows = new List<T>();
     await using var cmd = db.CreateCommand(sql);
     cmd.Parameters.AddWithValue("campaignId", campaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
     await using var reader = await cmd.ExecuteReaderAsync();
     while (await reader.ReadAsync())
     {
         rows.Add(read(reader));
     }
     return rows;
+}
+
+static bool MetadataClientOwnerMatches(JsonElement metadata, string clientOwnerId)
+{
+    return metadata.ValueKind == JsonValueKind.Object
+        && metadata.TryGetProperty("clientOwnerId", out var owner)
+        && owner.ValueKind == JsonValueKind.String
+        && owner.GetString() == clientOwnerId;
 }
 
 static NpcDto ReadNpc(NpgsqlDataReader reader) => new(
@@ -1395,6 +1606,7 @@ public record AiWorkerChatRequest(
     Guid ConversationId,
     string Message,
     string Mode,
+    string ClientOwnerId,
     ChatContext Context,
     CampaignDto Campaign,
     IReadOnlyList<PartyCharacterDto> Party);
@@ -1405,7 +1617,15 @@ public record AiWorkerIngestDocumentRequest(
     string SourceType,
     string Title,
     string Content,
-    JsonElement Metadata);
+    JsonElement Metadata,
+    string? ClientOwnerId);
+
+public record AiWorkerToolExecuteRequest(
+    Guid? CampaignId,
+    Guid? ConversationId,
+    string ToolName,
+    JsonElement Arguments,
+    string ClientOwnerId);
 
 public record AiWorkerSummarizeSessionRequest(
     Guid CampaignId,
@@ -1443,3 +1663,43 @@ public record ChatResponse(
     JsonElement[] ToolCalls,
     JsonElement? StructuredOutput,
     JsonElement[] SuggestedActions);
+
+public interface ICurrentClientService
+{
+    bool TryGetClientId(out string clientId, out string error);
+}
+
+public sealed class CurrentClientService(IHttpContextAccessor httpContextAccessor) : ICurrentClientService
+{
+    private static readonly Regex SafeClientIdPattern = new("^[A-Za-z0-9][A-Za-z0-9_-]{7,79}$", RegexOptions.Compiled);
+    private const string HeaderName = "X-Dndmind-Client-Id";
+
+    public bool TryGetClientId(out string clientId, out string error)
+    {
+        clientId = string.Empty;
+        error = string.Empty;
+
+        var request = httpContextAccessor.HttpContext?.Request;
+        if (request is null || !request.Headers.TryGetValue(HeaderName, out var values))
+        {
+            error = $"{HeaderName} header is required.";
+            return false;
+        }
+
+        var value = values.FirstOrDefault()?.Trim();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            error = $"{HeaderName} header is required.";
+            return false;
+        }
+
+        if (!SafeClientIdPattern.IsMatch(value))
+        {
+            error = $"{HeaderName} must be a safe local profile id.";
+            return false;
+        }
+
+        clientId = value;
+        return true;
+    }
+}

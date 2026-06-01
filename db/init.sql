@@ -14,6 +14,8 @@ CREATE TABLE campaigns (
 CREATE TABLE sessions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  client_owner_id text NOT NULL DEFAULT 'dndmind-demo-client',
+  visibility text NOT NULL DEFAULT 'private',
   session_number int NOT NULL,
   title text NOT NULL,
   raw_notes text NULL,
@@ -97,6 +99,7 @@ CREATE TABLE ai_tool_calls (
 CREATE TABLE npcs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  client_owner_id text NOT NULL DEFAULT 'dndmind-demo-client',
   name text NOT NULL,
   role text NULL,
   description text NULL,
@@ -105,12 +108,13 @@ CREATE TABLE npcs (
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (campaign_id, name)
+  CONSTRAINT npcs_campaign_client_owner_name_key UNIQUE (campaign_id, client_owner_id, name)
 );
 
 CREATE TABLE quests (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  client_owner_id text NOT NULL DEFAULT 'dndmind-demo-client',
   title text NOT NULL,
   status text NOT NULL DEFAULT 'open',
   description text NULL,
@@ -118,12 +122,13 @@ CREATE TABLE quests (
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (campaign_id, title)
+  CONSTRAINT quests_campaign_client_owner_title_key UNIQUE (campaign_id, client_owner_id, title)
 );
 
 CREATE TABLE locations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  client_owner_id text NOT NULL DEFAULT 'dndmind-demo-client',
   name text NOT NULL,
   description text NULL,
   location_type text NULL,
@@ -131,12 +136,13 @@ CREATE TABLE locations (
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (campaign_id, name)
+  CONSTRAINT locations_campaign_client_owner_name_key UNIQUE (campaign_id, client_owner_id, name)
 );
 
 CREATE TABLE encounters (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  client_owner_id text NOT NULL DEFAULT 'dndmind-demo-client',
   session_id uuid NULL REFERENCES sessions(id) ON DELETE SET NULL,
   title text NOT NULL,
   summary text NULL,
@@ -148,6 +154,7 @@ CREATE TABLE encounters (
 CREATE TABLE memory_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  client_owner_id text NOT NULL DEFAULT 'dndmind-demo-client',
   session_id uuid NULL REFERENCES sessions(id) ON DELETE SET NULL,
   event_type text NOT NULL,
   title text NOT NULL,
@@ -157,6 +164,7 @@ CREATE TABLE memory_events (
 );
 
 CREATE INDEX idx_sessions_campaign_id ON sessions(campaign_id);
+CREATE INDEX idx_sessions_campaign_client_owner ON sessions(campaign_id, client_owner_id);
 CREATE INDEX idx_party_characters_campaign_id ON party_characters(campaign_id);
 CREATE INDEX idx_knowledge_documents_campaign_id ON knowledge_documents(campaign_id);
 CREATE INDEX idx_knowledge_chunks_campaign_id ON knowledge_chunks(campaign_id);
@@ -173,6 +181,11 @@ CREATE INDEX idx_quests_campaign_id ON quests(campaign_id);
 CREATE INDEX idx_locations_campaign_id ON locations(campaign_id);
 CREATE INDEX idx_encounters_campaign_id ON encounters(campaign_id);
 CREATE INDEX idx_memory_events_campaign_id ON memory_events(campaign_id);
+CREATE INDEX idx_npcs_campaign_client_owner ON npcs(campaign_id, client_owner_id);
+CREATE INDEX idx_quests_campaign_client_owner ON quests(campaign_id, client_owner_id);
+CREATE INDEX idx_locations_campaign_client_owner ON locations(campaign_id, client_owner_id);
+CREATE INDEX idx_encounters_campaign_client_owner ON encounters(campaign_id, client_owner_id);
+CREATE INDEX idx_memory_events_campaign_client_owner ON memory_events(campaign_id, client_owner_id);
 
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS trigger AS $$

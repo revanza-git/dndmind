@@ -17,8 +17,10 @@ def search_rules(campaign_id: UUID | None, query: str, limit: int = 5) -> list[d
     return _search_chunks(campaign_id, query, limit, ["rules", "srd", "homebrew"], include_global=True)
 
 
-def search_memory(campaign_id: UUID, query: str, limit: int = 5) -> list[dict[str, Any]]:
-    return _search_chunks(campaign_id, query, limit, ["campaign_memory"], include_global=False)
+def search_memory(campaign_id: UUID, query: str, limit: int = 5, client_owner_id: str | None = None) -> list[dict[str, Any]]:
+    if not client_owner_id:
+        return []
+    return _search_chunks(campaign_id, query, limit, ["campaign_memory"], include_global=False, client_owner_id=client_owner_id)
 
 
 def _search_chunks(
@@ -27,6 +29,7 @@ def _search_chunks(
     limit: int,
     source_types: list[str],
     include_global: bool,
+    client_owner_id: str | None = None,
 ) -> list[dict[str, Any]]:
     embedding = vector_literal(embed_query(query))
     sql = """
@@ -48,6 +51,10 @@ def _search_chunks(
             (%(include_global)s AND (%(campaign_id)s::uuid IS NULL OR kc.campaign_id IS NULL OR kc.campaign_id = %(campaign_id)s::uuid))
             OR (NOT %(include_global)s AND kc.campaign_id = %(campaign_id)s::uuid)
           )
+          AND (
+            kc.source_type <> 'campaign_memory'
+            OR kc.metadata->>'clientOwnerId' = %(client_owner_id)s
+          )
         ORDER BY kc.embedding <=> %(embedding)s::vector
         LIMIT %(limit)s
     """
@@ -60,6 +67,7 @@ def _search_chunks(
                 "campaign_id": campaign_id,
                 "source_types": source_types,
                 "include_global": include_global,
+                "client_owner_id": client_owner_id,
                 "limit": max(1, min(limit, 12)),
             },
         ).fetchall()

@@ -127,6 +127,12 @@ Open:
 
 For a guided walkthrough, open the in-app manual at `http://localhost:3000/manual` or read `docs/user-manual.md`.
 
+## Local Device Profiles
+
+DNDMind does not require login for the MVP. The browser creates an anonymous local profile ID in `localStorage` and sends it as `X-Dndmind-Client-Id`. Campaigns and rules documents stay shared, but sessions and session-derived campaign memory are private to the current browser profile.
+
+Clearing browser storage or resetting the local profile creates a new identity, so previous local sessions may no longer appear. This is demo ownership, not production authentication.
+
 ## Evaluation
 
 DNDMind is designed for deterministic evaluation in mock mode. The sample eval cases check:

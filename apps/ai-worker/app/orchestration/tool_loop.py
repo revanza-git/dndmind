@@ -12,6 +12,7 @@ def run_mock_tool_loop(request: Any) -> tuple[list[dict[str, Any]], list[dict[st
     context = {
         "campaignId": request.campaignId,
         "conversationId": request.conversationId,
+        "clientOwnerId": request.clientOwnerId,
         "party": [member.model_dump() for member in request.party],
     }
     planned = _plan_mock_tools(request)
