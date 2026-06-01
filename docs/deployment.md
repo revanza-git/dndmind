@@ -36,7 +36,7 @@ Mock mode variables:
 
 - `MOCK_LLM=true`
 - `MOCK_EMBEDDINGS=true`
-- `OPENAI_API_KEY=` can stay empty
+- `GEMINI_API_KEY=` and `OPENAI_API_KEY=` can stay empty
 
 Core service variables:
 
@@ -48,11 +48,21 @@ Core service variables:
 - `AI_WORKER_URL`
 - `NEXT_PUBLIC_API_BASE_URL` or `NEXT_PUBLIC_API_URL`
 
-Provider variables for future real LLM mode:
+Provider variables for Gemini AI mode:
 
-- `LLM_PROVIDER`
+- `LLM_PROVIDER=gemini`
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL` or `CHAT_MODEL`
+- `GEMINI_TEMPERATURE`
+- `GEMINI_TIMEOUT_SECONDS`
+
+Embedding provider variables if `MOCK_EMBEDDINGS=false`:
+
+- `EMBEDDING_PROVIDER=gemini` or `openai`
+- `GEMINI_EMBEDDING_MODEL`
+- `GEMINI_EMBEDDING_DIMENSIONS=1536`
+- `GEMINI_EMBEDDING_TIMEOUT_SECONDS`
 - `OPENAI_API_KEY`
-- `OPENAI_MODEL` or `CHAT_MODEL`
 - `EMBEDDING_MODEL`
 
 ## Health Checks

@@ -26,11 +26,19 @@ services:
     environment:
       MOCK_LLM: ${MOCK_LLM:-true}
       MOCK_EMBEDDINGS: ${MOCK_EMBEDDINGS:-true}
-      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_TEMPERATURE: ${GEMINI_TEMPERATURE:-0.7}
+      GEMINI_TIMEOUT_SECONDS: ${GEMINI_TIMEOUT_SECONDS:-45}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-gemini}
+      GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-gemini-embedding-001}
+      GEMINI_EMBEDDING_DIMENSIONS: ${GEMINI_EMBEDDING_DIMENSIONS:-1536}
+      GEMINI_EMBEDDING_TIMEOUT_SECONDS: ${GEMINI_EMBEDDING_TIMEOUT_SECONDS:-45}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
-      CHAT_MODEL: ${CHAT_MODEL:-gpt-4.1-mini}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      CHAT_MODEL: ${CHAT_MODEL:-gemini-2.5-flash}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-gemini-embedding-001}
       POSTGRES_DSN: ${POSTGRES_DSN:-postgresql://dndmind:dndmind@postgres:5432/dndmind}
       DATABASE_URL: ${DATABASE_URL:-postgresql://dndmind:dndmind@postgres:5432/dndmind}
     ports:

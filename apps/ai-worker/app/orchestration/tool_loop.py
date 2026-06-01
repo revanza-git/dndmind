@@ -9,6 +9,18 @@ def execute_manual_tool(tool_name: str, arguments: dict[str, Any], context: dict
 
 
 def run_mock_tool_loop(request: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any] | None]:
+    tool_calls, citations = run_provider_tool_loop(request)
+
+    structured_output = None
+    for call in tool_calls:
+        result = call.get("result") or {}
+        if isinstance(result, dict) and call["toolName"] in {"saveNPC", "saveQuest"}:
+            structured_output = result
+
+    return tool_calls, citations, structured_output
+
+
+def run_provider_tool_loop(request: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     context = {
         "campaignId": request.campaignId,
         "conversationId": request.conversationId,
@@ -19,21 +31,18 @@ def run_mock_tool_loop(request: Any) -> tuple[list[dict[str, Any]], list[dict[st
     tool_calls = [_tool_call_response(name, args, context) for name, args in planned]
 
     citations: list[dict[str, Any]] = []
-    structured_output = None
     for call in tool_calls:
         result = call.get("result") or {}
         if isinstance(result, dict):
             citations.extend(result.get("citations") or [])
-            if call["toolName"] in {"saveNPC", "saveQuest"}:
-                structured_output = result
 
-    return tool_calls, citations, structured_output
+    return tool_calls, citations
 
 
 def provider_tooling_note() -> dict[str, Any]:
     return {
         "toolSchemas": tool_schemas(),
-        "note": "OpenAI-compatible tool schemas are prepared; provider execution can call execute_tool for requested tool calls.",
+        "note": "Tool schemas are prepared; provider execution can call execute_tool for requested tool calls.",
     }
 
 

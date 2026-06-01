@@ -102,13 +102,21 @@ Open:
 | --- | --- |
 | `MOCK_LLM=true` | Enables deterministic local chat responses without paid API calls. |
 | `MOCK_EMBEDDINGS=true` | Enables deterministic local embeddings for demo RAG flows. |
-| `OPENAI_API_KEY` | Optional provider key; leave empty for mock mode. |
-| `CHAT_MODEL` | Chat model name for a real provider path. |
-| `EMBEDDING_MODEL` | Embedding model name, defaulting to `text-embedding-3-small`. |
+| `LLM_PROVIDER` | Real AI provider when `MOCK_LLM=false`; currently supports `gemini`. |
+| `GEMINI_API_KEY` | Gemini API key for real chat and session summary mode; keep empty for mock mode. |
+| `GEMINI_MODEL` | Gemini chat model, defaulting to `gemini-2.5-flash`. |
+| `CHAT_MODEL` | Backward-compatible chat model fallback when `GEMINI_MODEL` is not set. |
+| `EMBEDDING_PROVIDER` | Real embedding provider when `MOCK_EMBEDDINGS=false`; supports `gemini` or `openai`. |
+| `GEMINI_EMBEDDING_MODEL` | Gemini embedding model, defaulting to `gemini-embedding-001`. |
+| `GEMINI_EMBEDDING_DIMENSIONS` | Gemini embedding output size. Keep `1536` unless the pgvector schema changes. |
+| `OPENAI_API_KEY` | Optional OpenAI embedding key if `EMBEDDING_PROVIDER=openai`. |
+| `EMBEDDING_MODEL` | OpenAI embedding model name, or readable alias for the active embedding model. |
 | `DATABASE_URL` | Worker PostgreSQL connection string. |
 | `AI_WORKER_URL` | API-to-worker URL, defaulting to `http://ai-worker:8001`. |
 | `NEXT_PUBLIC_API_URL` | Browser-visible API URL alias. |
 | `NEXT_PUBLIC_API_BASE_URL` | Browser-visible API base URL used by the current frontend. |
+
+To use Gemini instead of mock responses, copy `.env.example` to `.env`, set `MOCK_LLM=false`, set `LLM_PROVIDER=gemini`, and put your key in `GEMINI_API_KEY`. To make RAG use Gemini embeddings too, set `MOCK_EMBEDDINGS=false` and `EMBEDDING_PROVIDER=gemini`. Gemini embeddings are requested at 1536 dimensions to match the current `knowledge_chunks.embedding vector(1536)` schema.
 
 ## Demo Flow
 

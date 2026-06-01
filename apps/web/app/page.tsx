@@ -19,6 +19,7 @@ import {
   createPartyCharacter,
   createPartyCharacterEvent,
   createSession,
+  deleteDocument,
   deletePartyCharacter,
   executeTool,
   getCampaignMemory,
@@ -129,6 +130,7 @@ export default function Home() {
   const [diceExpression, setDiceExpression] = useState("1d20+5");
   const [manualToolCall, setManualToolCall] = useState<ToolCall | null>(null);
   const [isIngesting, setIsIngesting] = useState(false);
+  const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
   const [isRolling, setIsRolling] = useState(false);
   const [isSavingSession, setIsSavingSession] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
@@ -230,6 +232,7 @@ export default function Home() {
     setInput("");
     setIsSending(true);
     setError(null);
+    setActionStatus(null);
 
     try {
       const response = await sendChat({
@@ -240,7 +243,7 @@ export default function Home() {
         context
       });
       setConversationId(response.conversationId);
-      const enhanced = enhanceChatResultForDemo(userMessage, response);
+      const enhanced = enhanceChatResultForDemo(userMessage, response, mode);
       setLastResponse({
         ...response,
         answer: enhanced.content,
@@ -287,7 +290,7 @@ export default function Home() {
       structuredOutput: null,
       suggestedActions: []
     };
-    const enhanced = enhanceChatResultForDemo(prompt, response);
+    const enhanced = enhanceChatResultForDemo(prompt, response, "Encounter");
     setMode("Encounter");
     setInput("");
     setLastResponse({
@@ -343,6 +346,28 @@ export default function Home() {
       setError(err instanceof Error ? err.message : "Document ingestion failed.");
     } finally {
       setIsIngesting(false);
+    }
+  }
+
+  async function handleDeleteDocument(document: KnowledgeDocument) {
+    if (!campaignId || document.sourceType === "campaign_memory") {
+      return;
+    }
+
+    const confirmed = window.confirm(`Delete "${document.title}" and remove its indexed chunks from rules search?`);
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingDocumentId(document.id);
+    setError(null);
+    try {
+      await deleteDocument(document.id);
+      setDocuments(await getDocuments(campaignId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Document delete failed.");
+    } finally {
+      setDeletingDocumentId(null);
     }
   }
 
@@ -784,10 +809,24 @@ export default function Home() {
               )}
               {documents.map((document) => (
                 <div key={document.id} className="rounded-md bg-white/10 px-3 py-2 text-xs text-mist">
-                  <p className="font-semibold text-white">{document.title}</p>
-                  <p>
-                    {document.metadata?.status ?? "uploaded"} · {document.chunkCount} chunks
-                  </p>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="break-words font-semibold text-white">{document.title}</p>
+                      <p>
+                        {document.metadata?.status ?? "uploaded"} · {document.chunkCount} chunks
+                      </p>
+                    </div>
+                    {document.sourceType !== "campaign_memory" && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteDocument(document)}
+                        disabled={deletingDocumentId === document.id}
+                        className="shrink-0 rounded-md border border-white/15 px-2 py-1 text-[11px] font-semibold text-mist transition hover:border-ember hover:bg-ember/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {deletingDocumentId === document.id ? "Deleting" : "Delete"}
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -1167,7 +1206,7 @@ function ChatTimelineCard({
             {!!message.citations?.length && <ContextBadge label={`${message.citations.length} source${message.citations.length === 1 ? "" : "s"}`} />}
           </div>
         </div>
-        <p className="mt-4 whitespace-pre-wrap text-base leading-7 text-moss">{displayContent.main}</p>
+        <AssistantResponseText content={displayContent.main} />
         {displayContent.debug && (
           <details className="mt-4 rounded-xl border border-moss/10 bg-parchment/70 px-4 py-3 text-sm text-moss">
             <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.14em] text-copper">Debug Details</summary>
@@ -1201,6 +1240,49 @@ function ChatTimelineCard({
       </div>
     </article>
   );
+}
+
+function AssistantResponseText({ content }: { content: string }) {
+  const lines = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (!lines.length) {
+    return <p className="mt-4 text-base leading-7 text-moss">Response ready.</p>;
+  }
+
+  return (
+    <div className="mt-4 space-y-3 text-base leading-7 text-moss">
+      {lines.map((line, index) => (
+        <AssistantResponseLine key={`${line}-${index}`} line={line} />
+      ))}
+    </div>
+  );
+}
+
+function AssistantResponseLine({ line }: { line: string }) {
+  const bulletText = line.replace(/^\s*[-*]\s+/, "").trim();
+  const heading = bulletText.match(/^\*\*([^*]+)\*\*$/);
+  if (heading) {
+    return <h4 className="text-lg font-semibold leading-tight text-ink">{heading[1]}</h4>;
+  }
+
+  const labeled = bulletText.match(/^\*?\*?([^:*]{2,36})\*?\*?\s*:\s*\*?\*?\s*(.+)$/);
+  if (labeled) {
+    return (
+      <div className="rounded-lg border border-moss/10 bg-parchment/70 px-4 py-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-copper">{stripInlineMarkdown(labeled[1])}</p>
+        <p className="mt-1 leading-7 text-moss">{renderInlineMarkdown(labeled[2])}</p>
+      </div>
+    );
+  }
+
+  if (line !== bulletText) {
+    return (
+      <p className="rounded-lg bg-parchment/60 px-4 py-2 leading-7 text-moss">
+        {renderInlineMarkdown(bulletText)}
+      </p>
+    );
+  }
+
+  return <p className="leading-7 text-moss">{renderInlineMarkdown(line)}</p>;
 }
 
 function SectionHeader({ eyebrow, title }: { eyebrow: string; title: string }) {
@@ -1945,6 +2027,21 @@ function text(value: unknown): string {
   return typeof value === "string" ? value : value === undefined || value === null ? "" : String(value);
 }
 
+function stripInlineMarkdown(value: string) {
+  return value.replace(/\*\*/g, "").replace(/^\s*[-*]\s+/, "").trim();
+}
+
+function renderInlineMarkdown(value: string) {
+  const parts = value.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, index) => {
+    const bold = part.match(/^\*\*([^*]+)\*\*$/);
+    if (bold) {
+      return <strong key={`${part}-${index}`} className="font-semibold text-ink">{bold[1]}</strong>;
+    }
+    return part;
+  });
+}
+
 function briefingTitle(output: StructuredOutput | null | undefined) {
   if (output?.type === "encounter") {
     return "Encounter Briefing";
@@ -1975,7 +2072,7 @@ function splitAssistantContent(content: string) {
   };
 }
 
-function enhanceChatResultForDemo(userMessage: string, response: ChatResponse): ResultEnhancements {
+function enhanceChatResultForDemo(userMessage: string, response: ChatResponse, selectedMode: string): ResultEnhancements {
   const prompt = userMessage.toLowerCase();
   const isCaptainVeyNpcPrompt =
     prompt.includes("generate") &&
@@ -1988,13 +2085,13 @@ function enhanceChatResultForDemo(userMessage: string, response: ChatResponse): 
     prompt.includes("ashen knives");
 
   if (!isCaptainVeyNpcPrompt && !isCaptainVeyEncounterPrompt) {
-    return {
+    return enhancePlainNpcResult(userMessage, response, selectedMode, {
       content: response.answer,
       citations: response.citations,
       toolCalls: response.toolCalls,
       structuredOutput: response.structuredOutput,
       suggestedActions: response.suggestedActions
-    };
+    });
   }
 
   if (isCaptainVeyEncounterPrompt) {
@@ -2172,4 +2269,138 @@ function enhanceChatResultForDemo(userMessage: string, response: ChatResponse): 
           }
         ]
   };
+}
+
+function enhancePlainNpcResult(
+  userMessage: string,
+  response: ChatResponse,
+  selectedMode: string,
+  base: ResultEnhancements
+): ResultEnhancements {
+  if (base.structuredOutput) {
+    return base;
+  }
+
+  const npc = inferNpcFromPlainText(userMessage, response.answer, selectedMode);
+  if (!npc) {
+    return base;
+  }
+
+  const structuredOutput: StructuredOutput = { type: "npc", data: npc };
+  return {
+    ...base,
+    structuredOutput,
+    suggestedActions: base.suggestedActions.length
+      ? base.suggestedActions
+      : [
+          { label: "Save NPC", action: "saveNPC", payload: npc },
+          {
+            label: "Generate Quest Hook",
+            action: "prompt",
+            payload: { message: `Generate a quest hook for ${npc.name} that ties back to the party's current campaign memory.` }
+          },
+          {
+            label: "Add Relationship",
+            action: "prompt",
+            payload: { message: `Add a relationship between ${npc.name} and one existing party member or campaign NPC.` }
+          }
+        ]
+  };
+}
+
+function inferNpcFromPlainText(userMessage: string, answer: string, selectedMode: string): Record<string, unknown> | null {
+  const prompt = userMessage.toLowerCase();
+  const mode = selectedMode.toLowerCase();
+  const looksLikeNpcRequest =
+    mode === "npc" ||
+    /\bnpcs?\b/.test(prompt) ||
+    /\b(character|informant|contact|ally|rival|villain|merchant|keeper|guard|knight)\b/.test(prompt);
+
+  if (!looksLikeNpcRequest || !answer.trim()) {
+    return null;
+  }
+
+  const name = extractNpcName(answer);
+  if (!name) {
+    return null;
+  }
+
+  const role = extractNpcRole(answer) || "Campaign NPC";
+  const connection = extractLabeledSection(answer, "Connection to Campaign") || extractLabeledSection(answer, "Party Link");
+  return {
+    name,
+    role,
+    raceOrSpecies: extractLabeledSection(answer, "Race") || extractLabeledSection(answer, "Ancestry") || "Humanoid",
+    description: extractLabeledSection(answer, "Appearance") || firstSentence(answer),
+    personality: extractLabeledSection(answer, "Personality") || "Practical, watchful, and useful at the table.",
+    motivation: extractLabeledSection(answer, "Motivation") || "Advance their own interests while reacting to the campaign's current pressure.",
+    secret: extractLabeledSection(answer, "Secret") || extractSecretFromAnswer(answer) || "They know more than they are ready to share.",
+    relationshipToParty: connection || "A contact the party can bargain with, pressure, or recruit.",
+    questHook:
+      extractLabeledSection(answer, "Quest Hook") ||
+      extractLeadFromAnswer(answer) ||
+      connection ||
+      "Use this NPC to point the party toward one concrete lead from the current campaign memory."
+  };
+}
+
+function extractNpcName(answer: string) {
+  const quotedFullName = answer.match(/\b(?:You encounter|Meet|Here is|Here'?s|Introducing)\s+['"]([^'"]{2,40})['"]\s+([A-Z][A-Za-z']+(?:\s+[A-Z][A-Za-z']+){0,2})/i);
+  if (quotedFullName) {
+    return `"${quotedFullName[1].trim()}" ${quotedFullName[2].trim()}`;
+  }
+
+  const quoted = answer.match(/\b(?:Meet|Here is|Here'?s|Introducing)\s+['"]([^'"]{2,80})['"]/i);
+  if (quoted) {
+    return quoted[1].trim();
+  }
+
+  const named = answer.match(
+    /\b(?:named|called|Meet|encounter)\s+((?:Sir|Lady|Lord|Captain|Mayor|Keeper|Agent|Scout|Mage|Wizard|Rogue|Guard|Innkeeper)\s+)?([A-Z][A-Za-z']+(?:\s+(?:'[^']+'|"[^"]+"|[A-Z][A-Za-z']+)){0,3})/
+  );
+  if (named) {
+    return `${named[1] ?? ""}${named[2]}`.replace(/\s+/g, " ").trim();
+  }
+
+  const bold = answer.match(/\*\*([A-Z][A-Za-z' -]{2,80})\*\*/);
+  return bold?.[1]?.trim() ?? "";
+}
+
+function extractNpcRole(answer: string) {
+  const role = answer.match(/\b(?:is|as)\s+a\s+([^.,:\n]{3,80})(?:,|\.|\n| who\b)/i);
+  return role?.[1]?.trim() ?? "";
+}
+
+function extractLabeledSection(answer: string, label: string) {
+  const expression = new RegExp(
+    `(?:^|\\n)\\s*[-*]?\\s*\\*?\\*?${escapeRegExp(label)}\\*?\\*?\\s*:\\s*(.+?)(?=\\n\\s*[-*]?\\s*\\*?\\*?[A-Z][A-Za-z ]{2,36}\\*?\\*?\\s*:|$)`,
+    "is"
+  );
+  const match = answer.match(expression);
+  return match ? cleanAssistantText(match[1]) : "";
+}
+
+function extractSecretFromAnswer(answer: string) {
+  const secret = answer.match(/\b(?:secret|knows|overheard|clue|truth)\b[^.!?]*[.!?]/i);
+  return secret ? cleanAssistantText(secret[0]) : "";
+}
+
+function extractLeadFromAnswer(answer: string) {
+  const lead = answer.match(/\b(?:next step|lead|trail|clue|investigate|find|recover|ask the party)\b[^.!?]*[.!?]/i);
+  return lead ? cleanAssistantText(lead[0]) : "";
+}
+
+function firstSentence(value: string) {
+  return cleanAssistantText(value).split(/(?<=[.!?])\s+/)[0] || "A table-ready NPC generated from the current request.";
+}
+
+function cleanAssistantText(value: string) {
+  return stripInlineMarkdown(value)
+    .replace(/^\s*[-*]\s+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

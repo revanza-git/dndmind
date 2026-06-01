@@ -355,8 +355,9 @@ Cause: the app may be configured for a real provider instead of mock mode.
 Fix:
 
 1. Use `MOCK_LLM=true` for the local demo.
-2. Use `MOCK_EMBEDDINGS=true` unless testing a real embedding provider.
-3. Restart the affected service after changing environment variables.
+2. For Gemini AI mode, set `MOCK_LLM=false`, `LLM_PROVIDER=gemini`, and `GEMINI_API_KEY`.
+3. For Gemini RAG embeddings, set `MOCK_EMBEDDINGS=false`, `EMBEDDING_PROVIDER=gemini`, and keep `GEMINI_EMBEDDING_DIMENSIONS=1536`.
+4. Restart the affected service after changing environment variables.
 
 ## Glossary
 

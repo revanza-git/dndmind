@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from app.orchestration.structured_output import build_mock_structured_output, build_suggested_actions
+from app.orchestration.gemini_provider import _fallback_structured_output
 from app.schemas.structured_outputs import EncounterOutput, NpcOutput
 
 
@@ -64,6 +65,39 @@ class StructuredOutputTests(unittest.TestCase):
         actions = build_suggested_actions(output)
         self.assertEqual(actions[0]["action"], "saveQuest")
         self.assertIn("payload", actions[0])
+
+    def test_real_provider_plain_npc_answer_becomes_save_ready(self):
+        answer = """
+Here is a knight NPC named Sir Kaelen Vance.
+
+**Sir Kaelen Vance**
+* **Appearance:** Sir Kaelen is a weathered veteran with a faded crest.
+* **Personality:** Stoic, pragmatic, and loyal to Eldermire.
+* **Motivation:** Protect Eldermire from internal and external threats.
+* **Connection to Campaign:** He can ask the party to investigate a strange disappearance near Blackwater Mine.
+"""
+        output = _fallback_structured_output(request("create some knight npc", "NPC"), answer, None)
+        self.assertIsNotNone(output)
+        self.assertEqual(output["type"], "npc")
+        npc = NpcOutput(**output["data"])
+        self.assertEqual(npc.name, "Sir Kaelen Vance")
+        self.assertIn("Blackwater Mine", npc.questHook)
+
+    def test_real_provider_quoted_nickname_npc_answer_becomes_save_ready(self):
+        answer = """
+You encounter "Whisper" Wren, a skittish halfling informant known for collecting and selling secrets at the Silver Lantern Inn.
+
+Wren knows a few crucial details related to Captain Vey and his betrayal:
+
+Vey's Escape
+Wren saw Captain Vey slip into the Serpent's Coil smuggler tunnels shortly after the betrayal.
+"""
+        output = _fallback_structured_output(request("Generate a memorable tavern informant tied to the party's current quest.", "NPC"), answer, None)
+        self.assertIsNotNone(output)
+        self.assertEqual(output["type"], "npc")
+        npc = NpcOutput(**output["data"])
+        self.assertEqual(npc.name, '"Whisper" Wren')
+        self.assertIn("Captain Vey", npc.description)
 
 
 if __name__ == "__main__":

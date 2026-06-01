@@ -326,7 +326,12 @@ const troubleshooting: TroubleshootingItem[] = [
   {
     problem: "Local demo says an API key is missing.",
     cause: "The app may be configured for a real provider instead of mock mode.",
-    fix: ["Use MOCK_LLM=true for the local demo.", "Use MOCK_EMBEDDINGS=true unless testing a real embedding provider.", "Restart the affected service after changing environment variables."]
+    fix: [
+      "Use MOCK_LLM=true for the local demo.",
+      "For Gemini AI mode, set MOCK_LLM=false, LLM_PROVIDER=gemini, and GEMINI_API_KEY.",
+      "For Gemini RAG embeddings, set MOCK_EMBEDDINGS=false, EMBEDDING_PROVIDER=gemini, and keep GEMINI_EMBEDDING_DIMENSIONS=1536.",
+      "Restart the affected service after changing environment variables."
+    ]
   }
 ];
 

@@ -20,8 +20,8 @@ ASP.NET Core API
   request assembly for the AI worker
 
 FastAPI AI Worker
-  mock-first LLM behavior
-  rules document chunking and embedding
+  mock-first LLM behavior with Gemini real-chat mode
+  rules document chunking and mock, Gemini, or OpenAI embedding
   rules and campaign memory retrieval
   session summary extraction
   deterministic tool execution
@@ -50,15 +50,15 @@ PostgreSQL + pgvector
 
 The ASP.NET Core API is the durable application backend. It owns validation, persistence, browser-facing routes, and stable product contracts.
 
-The FastAPI worker owns AI-facing behavior. Python keeps RAG, embeddings, tool orchestration, and future model-provider integrations close to the ecosystem where those tools are strongest.
+The FastAPI worker owns AI-facing behavior. Python keeps RAG, embeddings, tool orchestration, and model-provider integrations close to the ecosystem where those tools are strongest.
 
 This split is useful for a portfolio project because it demonstrates a realistic production boundary: the product API can remain stable while AI behavior evolves behind a worker contract.
 
 ## Trade-Offs
 
 - Two backend services add Docker and networking overhead, but make AI iteration cleaner.
-- Mock embeddings are not semantically equivalent to real embeddings, but they make local demos deterministic and free.
-- The current worker has a mock-first provider path, so real LLM mode is intentionally a roadmap item rather than a half-wired promise.
+- Mock embeddings are not semantically equivalent to real embeddings, but they make local demos deterministic and free. Gemini embeddings can be enabled at 1536 dimensions to match the current pgvector schema.
+- The current worker has a mock-first provider path plus Gemini chat mode; deterministic mock mode remains the safest portfolio demo path.
 - PostgreSQL + pgvector keeps the stack simple compared with a separate vector database, but large-scale retrieval would eventually need more tuning.
 - The eval dashboard is currently a demo-ready design backed by sample cases; a full automated eval runner is a clear next step.
 

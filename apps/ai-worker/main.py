@@ -4,14 +4,22 @@ import re
 from typing import Any
 from uuid import UUID
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 import psycopg
 
-from app.orchestration.tool_loop import execute_manual_tool, provider_tooling_note, run_mock_tool_loop
+from app.orchestration.gemini_provider import real_chat_response, real_session_summary
+from app.orchestration.tool_loop import execute_manual_tool, run_mock_tool_loop
 from app.orchestration.structured_output import build_mock_structured_output, build_suggested_actions
 from rag.chunker import chunk_text
-from rag.embeddings import embed_texts, mock_embeddings_enabled, mock_llm_enabled, vector_literal
+from rag.embeddings import (
+    embed_texts,
+    embedding_model_name,
+    embedding_provider,
+    mock_embeddings_enabled,
+    mock_llm_enabled,
+    vector_literal,
+)
 from rag.retriever import (
     database_url,
     format_memory_context,
@@ -168,6 +176,8 @@ def health() -> dict[str, str | bool]:
         "service": "ai-worker",
         "mockLlm": mock_llm_enabled(),
         "mockEmbeddings": mock_embeddings_enabled(),
+        "llmProvider": os.getenv("LLM_PROVIDER", "gemini"),
+        "embeddingProvider": "mock" if mock_embeddings_enabled() else embedding_provider(),
     }
 
 
@@ -176,23 +186,15 @@ def chat(request: ChatRequest) -> ChatResponse:
     if mock_llm_enabled():
         return mock_chat_response(request)
 
-    # Real provider orchestration belongs here. The API keys stay in environment
-    # variables, and this branch is intentionally disabled for the MVP demo path.
+    try:
+        provider_response = real_chat_response(request)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=friendly_provider_error(str(exc))) from exc
+
     return ChatResponse(
         conversationId=request.conversationId,
-        answer=(
-            "Real LLM mode is configured but no provider client has been wired yet. "
-            "Set MOCK_LLM=true for local demos, or implement the provider adapter next. "
-            f"Prepared tool schemas: {len(provider_tooling_note()['toolSchemas'])}."
-        ),
         mode=request.mode,
-        citations=[],
-        toolCalls=[],
-        structuredOutput=None,
-        suggestedActions=[
-            {"label": "Switch Mock Mode", "action": "operatorNote", "payload": {"env": "MOCK_LLM=true"}},
-            {"label": "Add Provider Adapter", "action": "operatorNote", "payload": {"next": "provider_adapter"}},
-        ],
+        **provider_response,
     )
 
 
@@ -210,8 +212,11 @@ def execute_tool_endpoint(request: ToolExecuteRequest) -> ToolExecuteResponse:
 @app.post("/ai/ingest-document", response_model=IngestDocumentResponse)
 def ingest_document(request: IngestDocumentRequest) -> IngestDocumentResponse:
     chunks = chunk_text(request.content)
-    embeddings = embed_texts([chunk.content for chunk in chunks]) if chunks else []
-    embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+    try:
+        embeddings = embed_texts([chunk.content for chunk in chunks]) if chunks else []
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=friendly_provider_error(str(exc))) from exc
+    embedding_model = "mock" if mock_embeddings_enabled() else embedding_model_name()
 
     client_owner_id = request.clientOwnerId or request.metadata.get("clientOwnerId")
 
@@ -277,14 +282,10 @@ def summarize_session(request: SummarizeSessionRequest) -> SummarizeSessionRespo
     if mock_llm_enabled():
         return mock_session_summary(request)
 
-    return SummarizeSessionResponse(
-        summary=(
-            "Real LLM summarization is not wired yet. Set MOCK_LLM=true for local summaries "
-            "or add a provider adapter for structured session extraction."
-        ),
-        importantEvents=[],
-        unresolvedHooks=["Implement real summarization provider adapter."],
-    )
+    try:
+        return SummarizeSessionResponse(**real_session_summary(request))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=friendly_provider_error(str(exc))) from exc
 
 
 @app.post("/ai/search-rules")
@@ -439,6 +440,25 @@ def _format_structured_section(structured_output: dict[str, Any] | None) -> str:
     data = structured_output.get("data") or {}
     title = data.get("name") or data.get("title") or data.get("expression") or "Structured result"
     return f"\n\nStructured card: {output_type.title()} - {title}."
+
+
+def friendly_provider_error(message: str) -> str:
+    lower = message.lower()
+    if "high demand" in lower or "503" in lower or "service unavailable" in lower:
+        return (
+            "Gemini is temporarily overloaded, so DNDMind could not finish this AI request. "
+            "Please try again in a moment. If it keeps happening, switch to another Gemini model in .env."
+        )
+    if "api_key" in lower or "api key" in lower:
+        return "Gemini is not available because the API key is missing or invalid. Check GEMINI_API_KEY in .env and restart the worker."
+    if "429" in lower or "quota" in lower or "rate limit" in lower:
+        return "Gemini is rate-limiting this project right now. Wait a bit, then retry the request."
+    if "embedding dimensions" in lower or "database expects" in lower or "pgvector schema" in lower:
+        return (
+            "Gemini returned embeddings in a size that does not match the database vector column. "
+            "Keep GEMINI_EMBEDDING_DIMENSIONS=1536, restart the worker, and ingest again."
+        )
+    return f"The AI provider could not complete this request. {message}"
 
 
 def mock_session_summary(request: SummarizeSessionRequest) -> SummarizeSessionResponse:

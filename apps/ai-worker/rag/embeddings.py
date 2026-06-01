@@ -9,17 +9,27 @@ import httpx
 
 EMBEDDING_DIMENSIONS = 1536
 TOKEN_RE = re.compile(r"\b[a-z0-9][a-z0-9'-]*\b", re.IGNORECASE)
+EMBEDDING_TASK_DOCUMENT = "RETRIEVAL_DOCUMENT"
+EMBEDDING_TASK_QUERY = "RETRIEVAL_QUERY"
 
 
-def embed_texts(texts: Iterable[str]) -> list[list[float]]:
+def embed_texts(texts: Iterable[str], task_type: str = EMBEDDING_TASK_DOCUMENT) -> list[list[float]]:
     text_list = list(texts)
+    if not text_list:
+        return []
     if mock_embeddings_enabled():
         return [mock_embedding(text) for text in text_list]
-    return openai_embeddings(text_list)
+
+    provider = embedding_provider()
+    if provider == "gemini":
+        return gemini_embeddings(text_list, task_type)
+    if provider == "openai":
+        return openai_embeddings(text_list)
+    raise RuntimeError(f"Unsupported EMBEDDING_PROVIDER '{provider}'. Use gemini or openai.")
 
 
 def embed_query(text: str) -> list[float]:
-    return embed_texts([text])[0]
+    return embed_texts([text], EMBEDDING_TASK_QUERY)[0]
 
 
 def mock_embedding(text: str) -> list[float]:
@@ -39,9 +49,9 @@ def mock_embedding(text: str) -> list[float]:
 def openai_embeddings(texts: list[str]) -> list[list[float]]:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required when MOCK_LLM=false.")
+        raise RuntimeError("OPENAI_API_KEY is required when MOCK_EMBEDDINGS=false.")
 
-    model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+    model = embedding_model_name()
     response = httpx.post(
         "https://api.openai.com/v1/embeddings",
         headers={"Authorization": f"Bearer {api_key}"},
@@ -51,6 +61,62 @@ def openai_embeddings(texts: list[str]) -> list[list[float]]:
     response.raise_for_status()
     payload = response.json()
     return [item["embedding"] for item in sorted(payload["data"], key=lambda item: item["index"])]
+
+
+def gemini_embeddings(texts: list[str], task_type: str) -> list[list[float]]:
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is required when MOCK_EMBEDDINGS=false and EMBEDDING_PROVIDER=gemini.")
+
+    dimensions = int(os.getenv("GEMINI_EMBEDDING_DIMENSIONS", str(EMBEDDING_DIMENSIONS)))
+    if dimensions != EMBEDDING_DIMENSIONS:
+        raise RuntimeError(
+            f"GEMINI_EMBEDDING_DIMENSIONS must be {EMBEDDING_DIMENSIONS} to match the current pgvector schema."
+        )
+
+    model = embedding_model_name()
+    model_path = model if model.startswith("models/") else f"models/{model}"
+    requests = [
+        {
+            "model": model_path,
+            "content": {"parts": [{"text": text}]},
+            "taskType": task_type,
+            "outputDimensionality": dimensions,
+            "embedContentConfig": {
+                "taskType": task_type,
+                "outputDimensionality": dimensions,
+            },
+        }
+        for text in texts
+    ]
+    response = httpx.post(
+        f"https://generativelanguage.googleapis.com/v1beta/{model_path}:batchEmbedContents",
+        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+        json={"requests": requests},
+        timeout=float(os.getenv("GEMINI_EMBEDDING_TIMEOUT_SECONDS", "45")),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    embeddings = [item.get("values") for item in payload.get("embeddings", [])]
+    if len(embeddings) != len(texts) or any(not isinstance(item, list) for item in embeddings):
+        raise RuntimeError("Gemini embeddings response did not include one embedding vector per input text.")
+    for embedding in embeddings:
+        if len(embedding) != EMBEDDING_DIMENSIONS:
+            raise RuntimeError(
+                f"Gemini returned {len(embedding)} embedding dimensions, but the database expects {EMBEDDING_DIMENSIONS}. "
+                "Keep GEMINI_EMBEDDING_DIMENSIONS=1536 or update the pgvector schema."
+            )
+    return embeddings
+
+
+def embedding_provider() -> str:
+    return (os.getenv("EMBEDDING_PROVIDER") or os.getenv("LLM_PROVIDER", "openai")).lower()
+
+
+def embedding_model_name() -> str:
+    if embedding_provider() == "gemini":
+        return os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
+    return os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 
 
 def mock_llm_enabled() -> bool:

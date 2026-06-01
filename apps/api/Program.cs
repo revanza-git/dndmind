@@ -558,7 +558,7 @@ app.MapPost("/api/sessions/{sessionId:guid}/summarize", async (Guid sessionId, N
     if (!workerResponse.IsSuccessStatusCode)
     {
         var error = await workerResponse.Content.ReadAsStringAsync();
-        return Results.Problem($"AI worker summarization failed: {error}", statusCode: 502);
+        return Results.Problem(FriendlyWorkerError("AI session summary failed", error), statusCode: 502);
     }
 
     var summary = await workerResponse.Content.ReadFromJsonAsync<SessionSummaryResponse>();
@@ -581,7 +581,7 @@ app.MapPost("/api/sessions/{sessionId:guid}/summarize", async (Guid sessionId, N
     if (!ingestResponse.IsSuccessStatusCode)
     {
         var error = await ingestResponse.Content.ReadAsStringAsync();
-        return Results.Problem($"AI worker memory ingestion failed: {error}", statusCode: 502);
+        return Results.Problem(FriendlyWorkerError("AI memory ingestion failed", error), statusCode: 502);
     }
 
     var refreshedSession = await LoadSession(sessionId, clientOwnerId, db);
@@ -921,11 +921,41 @@ app.MapPost("/api/documents/{documentId:guid}/ingest", async (Guid documentId, N
     if (!workerResponse.IsSuccessStatusCode)
     {
         var error = await workerResponse.Content.ReadAsStringAsync();
-        return Results.Problem($"AI worker ingestion failed: {error}", statusCode: 502);
+        return Results.Problem(FriendlyWorkerError("AI document ingestion failed", error), statusCode: 502);
     }
 
     var result = await workerResponse.Content.ReadFromJsonAsync<IngestDocumentResponse>();
     return Results.Ok(result);
+});
+
+app.MapDelete("/api/documents/{documentId:guid}", async (Guid documentId, NpgsqlDataSource db, ICurrentClientService currentClient) =>
+{
+    if (!currentClient.TryGetClientId(out _, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
+    var document = await LoadDocument(documentId, db);
+    if (document is null)
+    {
+        return Results.NotFound(new { error = "Document not found." });
+    }
+
+    if (document.SourceType == "campaign_memory")
+    {
+        return Results.BadRequest(new { error = "Session memory documents cannot be deleted from the rules library." });
+    }
+
+    const string sql = """
+        DELETE FROM knowledge_documents
+        WHERE id = @documentId
+          AND source_type <> 'campaign_memory'
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("documentId", documentId);
+    var deleted = await cmd.ExecuteNonQueryAsync();
+    return deleted > 0 ? Results.NoContent() : Results.NotFound(new { error = "Document not found." });
 });
 
 app.MapPost("/api/chat", async (ChatRequest request, NpgsqlDataSource db, IHttpClientFactory httpClientFactory, ICurrentClientService currentClient) =>
@@ -965,7 +995,7 @@ app.MapPost("/api/chat", async (ChatRequest request, NpgsqlDataSource db, IHttpC
     if (!workerResponse.IsSuccessStatusCode)
     {
         var error = await workerResponse.Content.ReadAsStringAsync();
-        return Results.Problem($"AI worker failed: {error}", statusCode: 502);
+        return Results.Problem(FriendlyWorkerError("AI request failed", error), statusCode: 502);
     }
 
     var chatResponse = await workerResponse.Content.ReadFromJsonAsync<ChatResponse>();
@@ -1009,7 +1039,7 @@ app.MapPost("/api/tools/execute", async (ToolExecuteRequest request, NpgsqlDataS
     if (!workerResponse.IsSuccessStatusCode)
     {
         var error = await workerResponse.Content.ReadAsStringAsync();
-        return Results.Problem($"AI worker tool execution failed: {error}", statusCode: 502);
+        return Results.Problem(FriendlyWorkerError("AI tool execution failed", error), statusCode: 502);
     }
 
     var toolResponse = await workerResponse.Content.ReadFromJsonAsync<ToolExecuteResponse>();
@@ -1829,7 +1859,66 @@ static async Task StoreToolCall(Guid conversationId, string toolName, JsonElemen
     });
     cmd.Parameters.AddWithValue("success", success);
     cmd.Parameters.AddWithValue("error", (object?)error ?? DBNull.Value);
-    await cmd.ExecuteNonQueryAsync();
+await cmd.ExecuteNonQueryAsync();
+}
+
+static string FriendlyWorkerError(string prefix, string workerError)
+{
+    var detail = ExtractWorkerErrorDetail(workerError);
+    var lower = detail.ToLowerInvariant();
+
+    if (lower.Contains("temporarily overloaded") || lower.Contains("high demand") || lower.Contains("service unavailable"))
+    {
+        return "Gemini is temporarily busy and could not finish this request. Please try again in a moment. If it keeps happening, switch to another Gemini model in .env.";
+    }
+
+    if (lower.Contains("api key") || lower.Contains("api_key"))
+    {
+        return "Gemini is not available because the API key is missing or invalid. Check GEMINI_API_KEY in .env, then restart the worker.";
+    }
+
+    if (lower.Contains("rate-limit") || lower.Contains("rate limit") || lower.Contains("quota"))
+    {
+        return "Gemini is rate-limiting this project right now. Wait a bit, then retry the request.";
+    }
+
+    if (lower.Contains("embedding dimensions") || lower.Contains("database expects") || lower.Contains("pgvector schema"))
+    {
+        return "Gemini returned embeddings in a size that does not match the database vector column. Keep GEMINI_EMBEDDING_DIMENSIONS=1536, restart the worker, and ingest again.";
+    }
+
+    return $"{prefix}: {detail}";
+}
+
+static string ExtractWorkerErrorDetail(string workerError)
+{
+    if (string.IsNullOrWhiteSpace(workerError))
+    {
+        return "The AI worker returned an empty error.";
+    }
+
+    try
+    {
+        using var document = JsonDocument.Parse(workerError);
+        var root = document.RootElement;
+        if (root.ValueKind == JsonValueKind.Object)
+        {
+            if (root.TryGetProperty("detail", out var detailElement) && detailElement.ValueKind == JsonValueKind.String)
+            {
+                return detailElement.GetString() ?? workerError;
+            }
+            if (root.TryGetProperty("error", out var errorElement) && errorElement.ValueKind == JsonValueKind.String)
+            {
+                return errorElement.GetString() ?? workerError;
+            }
+        }
+    }
+    catch (JsonException)
+    {
+        // Framework-level worker errors may arrive as plain text.
+    }
+
+    return workerError.Trim();
 }
 
 public record CampaignDto(

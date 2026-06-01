@@ -210,6 +210,48 @@ async function apiFetch(path: string, init: RequestInit = {}) {
   });
 }
 
+async function apiErrorMessage(response: Response, fallback: string) {
+  const text = await response.text();
+  if (!text) {
+    return fallback;
+  }
+
+  try {
+    const payload = JSON.parse(text) as { detail?: unknown; error?: unknown; title?: unknown; status?: unknown };
+    const detail = typeof payload.detail === "string" ? payload.detail : typeof payload.error === "string" ? payload.error : "";
+    if (detail) {
+      return friendlyError(detail, fallback);
+    }
+    if (typeof payload.title === "string" && typeof payload.status === "number") {
+      return friendlyError(`${payload.title} (${payload.status})`, fallback);
+    }
+  } catch {
+    return friendlyError(text, fallback);
+  }
+
+  return friendlyError(text, fallback);
+}
+
+function friendlyError(message: string, fallback: string) {
+  const lower = message.toLowerCase();
+  if (lower.includes("temporarily busy") || lower.includes("temporarily overloaded") || lower.includes("high demand") || lower.includes("service unavailable")) {
+    return "Gemini is temporarily busy and could not finish that request. Please try again in a moment. If it keeps happening, switch to another Gemini model in .env.";
+  }
+  if (lower.includes("api key") || lower.includes("api_key")) {
+    return "Gemini is not available because the API key is missing or invalid. Check GEMINI_API_KEY in .env, then restart the worker.";
+  }
+  if (lower.includes("rate limit") || lower.includes("rate-limit") || lower.includes("quota")) {
+    return "Gemini is rate-limiting this project right now. Wait a bit, then retry the request.";
+  }
+  if (lower.includes("embedding dimensions") || lower.includes("database expects") || lower.includes("pgvector schema")) {
+    return "Gemini returned embeddings in a size that does not match the database vector column. Keep GEMINI_EMBEDDING_DIMENSIONS=1536, restart the worker, and ingest again.";
+  }
+  if (lower.includes("bad gateway") || lower.includes("ai worker failed") || lower.includes("internal server error")) {
+    return "DNDMind reached the AI worker, but the provider request failed. Please retry in a moment; check the worker logs if it keeps happening.";
+  }
+  return message || fallback;
+}
+
 export async function getCampaigns(): Promise<Campaign[]> {
   const response = await apiFetch("/api/campaigns", { cache: "no-store" });
   if (!response.ok) {
@@ -397,8 +439,7 @@ export async function summarizeSession(sessionId: string): Promise<SessionSummar
   });
 
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || "Session summarization failed");
+    throw new Error(await apiErrorMessage(response, "Session summarization failed"));
   }
 
   return response.json();
@@ -453,11 +494,17 @@ export async function ingestDocument(documentId: string): Promise<IngestDocument
   });
 
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || "Document ingestion failed");
+    throw new Error(await apiErrorMessage(response, "Document ingestion failed"));
   }
 
   return response.json();
+}
+
+export async function deleteDocument(documentId: string): Promise<void> {
+  const response = await apiFetch(`/api/documents/${documentId}`, { method: "DELETE" });
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "Document delete failed"));
+  }
 }
 
 export async function sendChat(input: {
@@ -474,8 +521,7 @@ export async function sendChat(input: {
   });
 
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || "Chat request failed");
+    throw new Error(await apiErrorMessage(response, "Chat request failed"));
   }
 
   return response.json();
@@ -494,8 +540,7 @@ export async function executeTool(input: {
   });
 
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || "Tool execution failed");
+    throw new Error(await apiErrorMessage(response, "Tool execution failed"));
   }
 
   return response.json();
