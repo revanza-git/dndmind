@@ -1,0 +1,79 @@
+[
+  {
+    "id": "rules-advantage-citation",
+    "name": "Rules RAG cites advantage",
+    "mode": "Rules",
+    "prompt": "How does advantage work?",
+    "context": {
+      "useRules": true,
+      "useCampaignMemory": false,
+      "usePartyInfo": false,
+      "useHomebrew": false
+    },
+    "expectedFacts": ["roll two d20s", "use the higher roll"],
+    "requiredCitations": true,
+    "requiredToolCalls": ["searchRules"]
+  },
+  {
+    "id": "memory-betrayal",
+    "name": "Campaign memory recalls betrayal",
+    "mode": "Story",
+    "prompt": "Who betrayed the party last session?",
+    "context": {
+      "useRules": false,
+      "useCampaignMemory": true,
+      "usePartyInfo": true,
+      "useHomebrew": false
+    },
+    "expectedFacts": ["Captain Vey", "Ashen Knives"],
+    "requiredCitations": true,
+    "requiredToolCalls": ["searchCampaignMemory"]
+  },
+  {
+    "id": "tool-dice-roll",
+    "name": "Dice prompt calls rollDice",
+    "mode": "Combat",
+    "prompt": "Roll 1d20+5 for perception.",
+    "context": {
+      "useRules": false,
+      "useCampaignMemory": false,
+      "usePartyInfo": false,
+      "useHomebrew": false
+    },
+    "expectedFacts": ["1d20+5", "total"],
+    "requiredCitations": false,
+    "requiredToolCalls": ["rollDice"]
+  },
+  {
+    "id": "structured-npc",
+    "name": "NPC prompt returns structured card",
+    "mode": "NPC",
+    "prompt": "Generate a suspicious tavern keeper NPC.",
+    "context": {
+      "useRules": false,
+      "useCampaignMemory": true,
+      "usePartyInfo": true,
+      "useHomebrew": false
+    },
+    "expectedStructuredOutput": "npc",
+    "expectedFacts": ["motivation", "secret"],
+    "requiredCitations": false,
+    "requiredToolCalls": []
+  },
+  {
+    "id": "encounter-difficulty",
+    "name": "Encounter prompt uses difficulty tool",
+    "mode": "Encounter",
+    "prompt": "Generate a hard forest ambush encounter for my party.",
+    "context": {
+      "useRules": false,
+      "useCampaignMemory": true,
+      "usePartyInfo": true,
+      "useHomebrew": false
+    },
+    "expectedStructuredOutput": "encounter",
+    "expectedFacts": ["forest", "ambush"],
+    "requiredCitations": false,
+    "requiredToolCalls": ["calculateEncounterDifficulty"]
+  }
+]
