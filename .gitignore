@@ -2,6 +2,10 @@
 .env
 .env.*
 !.env.example
+.envrc
+*.pem
+*.key
+*.pfx
 
 # Node / Next.js
 node_modules/
@@ -15,11 +19,13 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+apps/web/.vercel/
 
 # ASP.NET Core / .NET
 bin/
 obj/
 TestResults/
+*.nupkg
 *.user
 *.suo
 *.rsuser
@@ -38,12 +44,14 @@ env/
 .ruff_cache/
 .coverage
 htmlcov/
+.python-version
 
 # Docker / local data
 docker-data/
 postgres-data/
 pgdata/
 volumes/
+docker-compose.override.yml
 *.db
 *.sqlite
 *.sqlite3

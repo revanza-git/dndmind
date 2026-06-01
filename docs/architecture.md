@@ -4,6 +4,27 @@ DNDMind is organized as a small multi-service AI product. The architecture keeps
 
 ## Components
 
+```mermaid
+flowchart LR
+  DM[Dungeon Master Browser]
+  Web[Next.js Web App<br/>Command center, manual, structured cards]
+  API[ASP.NET Core API<br/>Validation, persistence, worker proxy]
+  DB[(PostgreSQL + pgvector<br/>Campaigns, chat, memory, vectors)]
+  Worker[FastAPI AI Worker<br/>RAG, tools, structured output]
+  Provider[Gemini or Mock LLM<br/>Chat and summaries]
+
+  DM --> Web
+  Web -->|HTTP + X-Dndmind-Client-Id| API
+  API -->|SQL| DB
+  API -->|AI request context| Worker
+  Worker -->|rules and memory search| DB
+  Worker -->|mock or real provider call| Provider
+  Provider --> Worker
+  Worker -->|answer, citations, tools, cards| API
+  API -->|persist messages and traces| DB
+  API --> Web
+```
+
 ```text
 Next.js Frontend
   command center UI

@@ -14,15 +14,24 @@ DNDMind combines RAG, campaign memory, structured output, tool calling, and dete
 
 ## Architecture
 
-```text
-Next.js Frontend
-  -> ASP.NET Core Web API
-  -> FastAPI AI Worker
-  -> PostgreSQL + pgvector
-  -> LLM Provider or MOCK_LLM mode
+```mermaid
+flowchart LR
+  Web[Next.js Frontend]
+  API[ASP.NET Core API]
+  Worker[FastAPI AI Worker]
+  DB[(PostgreSQL + pgvector)]
+  Model[Gemini or Mock LLM]
+
+  Web -->|browser HTTP| API
+  API -->|campaign, chat, memory| DB
+  API -->|AI context| Worker
+  Worker -->|RAG search| DB
+  Worker -->|chat and summaries| Model
+  Worker -->|answer, citations, tools, cards| API
+  API --> Web
 ```
 
-The frontend renders the DM command center. The API owns campaign data, chat persistence, and worker proxying. The AI worker handles prompt orchestration, RAG, structured output, and tool execution. PostgreSQL stores campaign entities, messages, memory, knowledge chunks, and pgvector embeddings.
+The frontend renders the DM command center and sends a local device profile header for browser-owned sessions. The API owns campaign data, party management, chat persistence, memory writes, and worker proxying. The AI worker handles prompt orchestration, RAG, structured output, tool execution, and mock or Gemini provider calls. PostgreSQL stores campaign entities, messages, memory, knowledge chunks, party history, and pgvector embeddings.
 
 ## Key Features
 
@@ -62,7 +71,7 @@ The frontend renders the DM command center. The API owns campaign data, chat per
 | Backend API | ASP.NET Core 8 Web API, Npgsql |
 | AI Worker | Python, FastAPI, Pydantic |
 | Database | PostgreSQL 16, pgvector |
-| LLM | Mock LLM mode by default, provider-ready configuration |
+| LLM | Mock LLM mode by default, Gemini provider support |
 | Deployment | Docker Compose |
 
 ## Screenshots
