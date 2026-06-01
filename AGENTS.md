@@ -26,7 +26,49 @@ The default local path is mock-first. Keep `MOCK_LLM=true` and `MOCK_EMBEDDINGS=
 - Keep secrets out of the repo. Use `.env.example` for documented configuration only.
 - When changing data contracts, update all affected layers together: API models, worker schemas, frontend types, database schema or seeds, and README/docs if needed.
 
+## Repo-Specific Notes
+
+- `apps/api/Program.cs` is currently a single-file ASP.NET Core minimal API. Keep endpoint, DTO, persistence, and worker-proxy changes easy to trace unless a refactor is explicitly requested.
+- `apps/web/lib/api.ts` is the frontend contract hub. Update it whenever API request or response shapes change.
+- `apps/web/app/page.tsx` contains the main command center and some demo-enhancement fallback logic. Do not treat frontend demo fallback data as persisted backend behavior.
+- `apps/web/components/structured` owns structured card rendering and suggested-action controls.
+- `apps/ai-worker/main.py`, `apps/ai-worker/app/orchestration`, `apps/ai-worker/app/tools`, and `apps/ai-worker/rag` own mock AI behavior, RAG, tools, structured outputs, citations, and retrieval.
+
+## Contract Hotspots
+
+When changing chat, tools, memory, documents, or structured cards, check all relevant layers:
+
+- C# request/response records in `apps/api/Program.cs`
+- Python Pydantic models in `apps/ai-worker/main.py`
+- TypeScript types and API helpers in `apps/web/lib/api.ts`
+- Renderers in `apps/web/components/structured`
+- Database schema and seed data in `db/init.sql`
+
+Keep these fields especially aligned across services: `citations`, `toolCalls`, `structuredOutput`, `suggestedActions`, `conversationId`, `campaignId`, and `sessionId`.
+
+Suggested action names are consumed by the frontend and are case-sensitive. Current examples include `saveNPC`, `saveQuest`, `saveLocation`, `saveEncounter`, `saveSessionSummary`, and `prompt`.
+
+## Database and RAG
+
+- Main schema and seed data live in `db/init.sql`.
+- The API also calls startup RAG schema compatibility code. If changing RAG tables or document/chunk behavior, update both `db/init.sql` and the API startup compatibility path when needed.
+- Keep pgvector dimensions aligned with the embedding model. The current schema uses `vector(1536)` for `text-embedding-3-small`.
+- Preserve campaign scoping on memory, documents, chunks, conversations, messages, and tool calls.
+- Keep mock embeddings deterministic unless the user explicitly asks to wire or test a real provider.
+
 ## Useful Commands
+
+Makefile shortcuts:
+
+```bash
+make up
+make down
+make logs
+make reset-db
+make test
+make build
+make health
+```
 
 Run the full stack:
 
@@ -51,6 +93,12 @@ Frontend build:
 ```bash
 cd apps/web
 npm run build
+```
+
+Local worker tests without Docker, from `apps/ai-worker`:
+
+```bash
+python -m unittest discover -s tests
 ```
 
 Health checks after the stack is running:

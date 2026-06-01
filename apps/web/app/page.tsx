@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   Campaign,
   CampaignMemory,
@@ -460,6 +461,12 @@ export default function Home() {
                 {item.label}
               </button>
             ))}
+            <Link
+              href="/manual"
+              className="block w-full rounded-md border border-white/15 px-3 py-2.5 text-left font-medium text-mist transition hover:bg-white/10"
+            >
+              User Manual
+            </Link>
           </nav>
 
           <section id="rules-library" className="scroll-mt-4 mt-8 rounded-md border border-white/15 p-3">

@@ -125,6 +125,8 @@ Open:
 11. Roll dice from the command center.
 12. Run or review the eval suite cases in `db/seed/eval_cases.json`.
 
+For a guided walkthrough, open the in-app manual at `http://localhost:3000/manual` or read `docs/user-manual.md`.
+
 ## Evaluation
 
 DNDMind is designed for deterministic evaluation in mock mode. The sample eval cases check:
