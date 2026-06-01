@@ -218,8 +218,9 @@ app.MapPut("/api/sessions/{sessionId:guid}", async (Guid sessionId, UpsertSessio
         SET session_number = CASE WHEN @sessionNumber > 0 THEN @sessionNumber ELSE session_number END,
             title = COALESCE(NULLIF(@title, ''), title),
             raw_notes = @rawNotes,
-            summary = COALESCE(@summary, summary),
-            status = COALESCE(NULLIF(@status, ''), status)
+            summary = @summary,
+            status = COALESCE(NULLIF(@status, ''), status),
+            updated_at = now()
         WHERE id = @sessionId
         RETURNING id, campaign_id, session_number, title, raw_notes, summary, status, created_at, updated_at
         """;

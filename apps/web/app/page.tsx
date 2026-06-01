@@ -102,9 +102,11 @@ export default function Home() {
   const [manualToolCall, setManualToolCall] = useState<ToolCall | null>(null);
   const [isIngesting, setIsIngesting] = useState(false);
   const [isRolling, setIsRolling] = useState(false);
+  const [isSavingSession, setIsSavingSession] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [actionStatus, setActionStatus] = useState<string | null>(null);
+  const [sessionSaveStatus, setSessionSaveStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeNavigationItem, setActiveNavigationItem] = useState("Command");
   const timelineEndRef = useRef<HTMLDivElement | null>(null);
@@ -146,9 +148,11 @@ export default function Home() {
           setActiveSessionId(items[0].id);
           setSessionTitle(items[0].title);
           setSessionNotes(items[0].rawNotes ?? "");
+          setSessionSaveStatus(null);
         } else {
           setActiveSessionId(null);
           setSessionTitle("Session Notes");
+          setSessionSaveStatus(null);
         }
       })
       .catch((err: Error) => setError(err.message));
@@ -293,7 +297,7 @@ export default function Home() {
     setDocumentContent(await file.text());
   }
 
-  async function handleSaveSession() {
+  async function saveSessionChanges() {
     if (!campaignId || !sessionTitle.trim()) {
       return null;
     }
@@ -304,7 +308,9 @@ export default function Home() {
         sessionId: activeSessionId,
         sessionNumber: active?.sessionNumber ?? 1,
         title: sessionTitle.trim(),
-        rawNotes: sessionNotes
+        rawNotes: sessionNotes,
+        summary: null,
+        status: "active"
       });
       setSessions((current) => current.map((session) => (session.id === updated.id ? updated : session)));
       return updated;
@@ -320,11 +326,31 @@ export default function Home() {
     return created;
   }
 
-  async function handleSummarizeSession() {
-    setIsSummarizing(true);
+  async function handleSaveSession() {
+    setIsSavingSession(true);
+    setSessionSaveStatus(null);
     setError(null);
     try {
-      const saved = await handleSaveSession();
+      const saved = await saveSessionChanges();
+      if (saved) {
+        setSessionSaveStatus("Saved");
+      }
+      return saved;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Session save failed.");
+      setSessionSaveStatus("Save failed");
+      return null;
+    } finally {
+      setIsSavingSession(false);
+    }
+  }
+
+  async function handleSummarizeSession() {
+    setIsSummarizing(true);
+    setSessionSaveStatus(null);
+    setError(null);
+    try {
+      const saved = await saveSessionChanges();
       if (!saved) {
         return;
       }
@@ -696,6 +722,7 @@ export default function Home() {
                   setActiveSessionId(selected?.id ?? null);
                   setSessionTitle(selected?.title ?? "Session Notes");
                   setSessionNotes(selected?.rawNotes ?? "");
+                  setSessionSaveStatus(null);
                 }}
                 className="w-full rounded-md border border-moss/20 px-3 py-2 text-sm"
               >
@@ -708,13 +735,19 @@ export default function Home() {
               </select>
               <input
                 value={sessionTitle}
-                onChange={(event) => setSessionTitle(event.target.value)}
+                onChange={(event) => {
+                  setSessionTitle(event.target.value);
+                  setSessionSaveStatus(null);
+                }}
                 className="w-full rounded-md border border-moss/20 px-3 py-2 text-sm"
                 placeholder="Session title"
               />
               <textarea
                 value={sessionNotes}
-                onChange={(event) => setSessionNotes(event.target.value)}
+                onChange={(event) => {
+                  setSessionNotes(event.target.value);
+                  setSessionSaveStatus(null);
+                }}
                 rows={7}
                 className="min-h-44 w-full resize-none rounded-md border border-moss/20 px-3 py-2 text-sm leading-6"
                 placeholder="Paste raw session notes..."
@@ -723,19 +756,23 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={handleSaveSession}
-                  className="rounded-md border border-moss/20 px-3 py-2 text-sm font-semibold text-moss hover:border-copper"
+                  disabled={isSavingSession || isSummarizing || !campaignId || !sessionTitle.trim()}
+                  className="rounded-md border border-moss/20 px-3 py-2 text-sm font-semibold text-moss hover:border-copper disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Save
+                  {isSavingSession ? "Saving" : sessionSaveStatus === "Saved" ? "Saved" : "Save"}
                 </button>
                 <button
                   type="button"
                   onClick={handleSummarizeSession}
-                  disabled={isSummarizing || !sessionNotes.trim()}
+                  disabled={isSummarizing || isSavingSession || !sessionNotes.trim()}
                   className="rounded-md bg-copper px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isSummarizing ? "Summarizing" : "Summarize"}
                 </button>
               </div>
+              {sessionSaveStatus && sessionSaveStatus !== "Saved" && (
+                <p className="text-xs font-semibold text-ember">{sessionSaveStatus}</p>
+              )}
               {sessions.find((session) => session.id === activeSessionId)?.summary && (
                 <div className="rounded-md border border-moss/15 bg-parchment p-3 text-xs leading-5 text-moss">
                   {sessions.find((session) => session.id === activeSessionId)?.summary}

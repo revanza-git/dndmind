@@ -134,14 +134,36 @@ export default function ManualPage() {
   }
 
   return (
-    <main className="min-h-screen bg-parchment text-ink">
-      <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[270px_minmax(0,1fr)]">
-        <aside className="border-b border-white/10 bg-moss px-5 py-5 text-white shadow-2xl shadow-moss/20 lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto lg:border-b-0 lg:border-r">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-mist">DNDMind</p>
-          <h1 className="mt-2 text-3xl font-semibold leading-tight">User Manual</h1>
-          <p className="mt-2 text-sm leading-6 text-mist/80">Learn the full workflow in 5 minutes.</p>
+    <main className="min-h-screen bg-[#f7f2e9] text-ink">
+      <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[288px_minmax(0,1fr)]">
+        <aside className="border-b border-white/10 bg-moss text-white shadow-2xl shadow-moss/20 lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto lg:border-b-0 lg:border-r">
+          <div className="px-5 pb-4 pt-5 lg:px-6 lg:pb-6">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-mist">DNDMind</p>
+            <h1 className="mt-2 text-3xl font-semibold leading-tight">User Manual</h1>
+            <p className="mt-3 text-sm leading-6 text-mist/80">
+              A practical guide for setting up campaigns, asking better questions, and saving useful table material.
+            </p>
+          </div>
 
-          <div className="mt-6 space-y-2">
+          <nav
+            className="sticky top-0 z-20 border-y border-white/10 bg-moss/95 px-5 py-3 backdrop-blur lg:static lg:border-y-0 lg:px-6 lg:py-0"
+            aria-label="Manual sections"
+          >
+            <div className="flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-1 lg:overflow-visible lg:pb-0">
+              {toc.map(([label, target]) => (
+                <a
+                  key={target}
+                  href={`#${target}`}
+                  className="shrink-0 rounded-md px-3 py-2 text-sm font-medium text-mist transition hover:bg-white/10 hover:text-white lg:block"
+                >
+                  {label}
+                </a>
+              ))}
+            </div>
+          </nav>
+
+          <div className="px-5 pb-5 pt-4 lg:px-6 lg:pt-8">
+            <div className="space-y-2">
             <Link
               href="/"
               className="block rounded-md bg-white px-3 py-2.5 text-sm font-semibold text-moss shadow-sm transition hover:bg-mist"
@@ -155,40 +177,52 @@ export default function ManualPage() {
               Start with Auto Mode
             </Link>
           </div>
-
-          <nav className="mt-8 space-y-2 text-sm" aria-label="Manual sections">
-            {toc.map(([label, target]) => (
-              <a key={target} href={`#${target}`} className="block rounded-md px-3 py-2 font-medium text-mist transition hover:bg-white/10">
-                {label}
-              </a>
-            ))}
-          </nav>
+            <div className="mt-6 rounded-md border border-white/10 bg-white/5 p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-mist/70">Best first move</p>
+              <p className="mt-2 text-sm leading-6 text-mist/85">
+                Start with the checklist, then copy one prompt into the command console.
+              </p>
+            </div>
+          </div>
         </aside>
 
-        <div className="bg-[radial-gradient(circle_at_top,_rgba(216,226,220,0.65),_transparent_34rem)] px-5 py-6 md:px-8 lg:px-10">
-          <header className="mx-auto max-w-6xl rounded-lg border border-moss/15 bg-white/85 p-6 shadow-xl shadow-moss/10 md:p-8">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-copper">Quick operating guide</p>
-            <h2 className="mt-3 text-4xl font-semibold leading-tight text-ink md:text-5xl">DNDMind User Manual</h2>
-            <p className="mt-4 max-w-3xl text-base leading-7 text-moss/75">
-              Learn how to set up a campaign, use AI modes, retrieve rules, manage memory, generate content, and run evaluations.
-            </p>
+        <div className="bg-[linear-gradient(180deg,_rgba(216,226,220,0.55),_rgba(247,242,233,0)_26rem)] px-4 py-6 sm:px-6 md:px-8 lg:px-10">
+          <header className="mx-auto max-w-6xl border-b border-moss/15 pb-8 pt-2 md:pb-10">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-copper">Quick operating guide</p>
+                <h2 className="mt-3 max-w-4xl text-4xl font-semibold leading-tight text-ink md:text-5xl">
+                  Run DNDMind with confidence at the table.
+                </h2>
+                <p className="mt-4 max-w-3xl text-base leading-7 text-moss/75">
+                  Learn the core workflow: prepare campaign context, ask focused prompts, save generated cards, and keep memory useful across sessions.
+                </p>
+              </div>
+              <div className="grid grid-cols-3 gap-2 rounded-lg border border-moss/15 bg-white/80 p-3 shadow-sm lg:w-80">
+                <Metric label="Setup" value="5 min" />
+                <Metric label="Modes" value="7" />
+                <Metric label="Flow" value="3" />
+              </div>
+            </div>
           </header>
 
-          <div className="mx-auto mt-6 grid max-w-6xl gap-6 xl:grid-cols-[minmax(0,1fr)_280px]">
-            <div className="space-y-6">
+          <div className="mx-auto mt-8 grid max-w-6xl gap-8 xl:grid-cols-[minmax(0,1fr)_300px]">
+            <div className="space-y-10">
               <ManualSection id="quick-start" eyebrow="First 5 Minutes" title="Quick Start Checklist">
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-4 md:grid-cols-2">
                   {quickStart.map((item, index) => (
-                    <article key={item.title} className="rounded-lg border border-moss/15 bg-white p-4 shadow-sm">
+                    <article key={item.title} className="rounded-lg border border-moss/15 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
                       <div className="flex items-start gap-3">
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-copper text-sm font-semibold text-white">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-copper text-sm font-semibold text-white shadow-sm">
                           {index + 1}
                         </span>
-                        <div>
+                        <div className="min-w-0">
                           <h4 className="text-base font-semibold text-ink">{item.title}</h4>
                           <p className="mt-2 text-sm leading-6 text-moss/75">{item.detail}</p>
-                          <p className="mt-3 text-sm font-medium text-moss">Expected: {item.result}</p>
-                          <span className="mt-3 inline-flex rounded-full bg-mist px-2.5 py-1 text-xs font-semibold text-moss">
+                          <p className="mt-3 rounded-md bg-parchment px-3 py-2 text-sm font-medium leading-6 text-moss">
+                            {item.result}
+                          </p>
+                          <span className="mt-3 inline-flex rounded-full border border-moss/10 bg-mist px-2.5 py-1 text-xs font-semibold text-moss">
                             {item.area}
                           </span>
                         </div>
@@ -199,20 +233,22 @@ export default function ManualPage() {
               </ManualSection>
 
               <ManualSection id="layout" eyebrow="Screen Map" title="App Layout Overview">
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-4 md:grid-cols-2">
                   {layoutAreas.map(([title, detail]) => (
-                    <InfoCard key={title} title={title} detail={detail} />
+                    <InfoCard key={title} title={title} detail={detail} tone="plain" />
                   ))}
                 </div>
               </ManualSection>
 
               <ManualSection id="guide" eyebrow="Beginner Workflow" title="Step-by-Step Guide">
-                <div className="grid gap-3">
+                <div className="grid gap-4">
                   {steps.map(([title, detail], index) => (
-                    <article key={title} className="rounded-lg border border-moss/15 bg-white p-4 shadow-sm">
-                      <div className="flex flex-col gap-3 sm:flex-row">
-                        <span className="rounded-md bg-ink px-3 py-2 text-sm font-semibold text-white sm:self-start">Step {index + 1}</span>
-                        <div>
+                    <article key={title} className="overflow-hidden rounded-lg border border-moss/15 bg-white shadow-sm">
+                      <div className="grid gap-0 sm:grid-cols-[128px_minmax(0,1fr)]">
+                        <div className="flex items-center bg-ink px-4 py-3 text-white sm:items-start sm:py-5">
+                          <span className="text-sm font-semibold">Step {index + 1}</span>
+                        </div>
+                        <div className="p-4 sm:p-5">
                           <h4 className="text-lg font-semibold text-ink">{title}</h4>
                           <p className="mt-2 text-sm leading-6 text-moss/75">{detail}</p>
                         </div>
@@ -223,29 +259,32 @@ export default function ManualPage() {
               </ManualSection>
 
               <ManualSection id="modes" eyebrow="Command Modes" title="AI Modes Guide">
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-4 md:grid-cols-2">
                   {modes.map(([name, bestFor, example]) => (
                     <article key={name} className="rounded-lg border border-moss/15 bg-white p-4 shadow-sm">
                       <div className="flex items-center justify-between gap-3">
                         <h4 className="text-lg font-semibold text-ink">{name}</h4>
                         <span className="rounded-full bg-copper/10 px-2.5 py-1 text-xs font-semibold text-copper">mode</span>
                       </div>
-                      <p className="mt-3 text-sm leading-6 text-moss/75">{bestFor}</p>
-                      <p className="mt-3 rounded-md bg-parchment px-3 py-2 text-sm text-moss">{example}</p>
+                      <p className="mt-3 text-sm font-semibold text-moss">Best for</p>
+                      <p className="mt-1 text-sm leading-6 text-moss/75">{bestFor}</p>
+                      <p className="mt-4 text-sm font-semibold text-moss">Example prompt</p>
+                      <p className="mt-1 rounded-md border border-moss/10 bg-parchment px-3 py-2 text-sm leading-6 text-moss">{example}</p>
                     </article>
                   ))}
                 </div>
               </ManualSection>
 
               <ManualSection id="prompts" eyebrow="Copy And Run" title="Best Example Prompts">
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-4 md:grid-cols-2">
                   {prompts.map((prompt) => (
-                    <article key={prompt} className="rounded-lg border border-moss/15 bg-white p-4 shadow-sm">
-                      <p className="min-h-16 text-sm leading-6 text-moss">{prompt}</p>
+                    <article key={prompt} className="flex min-h-44 flex-col rounded-lg border border-moss/15 bg-white p-4 shadow-sm">
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-copper">Prompt</p>
+                      <p className="mt-3 flex-1 text-sm leading-6 text-moss">{prompt}</p>
                       <button
                         type="button"
                         onClick={() => copyPrompt(prompt)}
-                        className="mt-4 rounded-md bg-copper px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-white transition hover:bg-ember"
+                        className="mt-4 w-full rounded-md bg-copper px-3 py-2.5 text-xs font-semibold uppercase tracking-[0.12em] text-white transition hover:bg-ember sm:w-auto sm:self-start"
                       >
                         {copiedPrompt === prompt ? "Copied" : "Copy Prompt"}
                       </button>
@@ -255,13 +294,16 @@ export default function ManualPage() {
               </ManualSection>
 
               <ManualSection id="workflows" eyebrow="Table Rhythm" title="Common Workflows">
-                <div className="grid gap-3 md:grid-cols-3">
+                <div className="grid gap-4 md:grid-cols-3">
                   {workflows.map(([title, items]) => (
                     <article key={title as string} className="rounded-lg border border-moss/15 bg-white p-4 shadow-sm">
                       <h4 className="text-base font-semibold text-ink">{title as string}</h4>
-                      <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm leading-6 text-moss/75">
+                      <ol className="mt-4 space-y-3 text-sm leading-6 text-moss/75">
                         {(items as string[]).map((item) => (
-                          <li key={item}>{item}</li>
+                          <li key={item} className="flex gap-2">
+                            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-copper" />
+                            <span>{item}</span>
+                          </li>
                         ))}
                       </ol>
                     </article>
@@ -270,17 +312,17 @@ export default function ManualPage() {
               </ManualSection>
 
               <ManualSection id="troubleshooting" eyebrow="Fix Fast" title="Troubleshooting">
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-4 md:grid-cols-2">
                   {troubleshooting.map(([issue, fix]) => (
-                    <InfoCard key={issue} title={issue} detail={fix} />
+                    <InfoCard key={issue} title={issue} detail={fix} tone="warning" />
                   ))}
                 </div>
               </ManualSection>
 
               <ManualSection id="glossary" eyebrow="Terms" title="Glossary">
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-4 md:grid-cols-2">
                   {glossary.map(([term, definition]) => (
-                    <InfoCard key={term} title={term} detail={definition} />
+                    <InfoCard key={term} title={term} detail={definition} tone="definition" />
                   ))}
                 </div>
               </ManualSection>
@@ -300,6 +342,12 @@ export default function ManualPage() {
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-copper">Why this project matters</p>
                 <p className="mt-3 text-sm leading-6">
                   DNDMind demonstrates full-stack LLM architecture, RAG, pgvector, tool calling, structured output, memory, evals, and Docker deployment in one reviewer-friendly app.
+                </p>
+              </div>
+              <div className="rounded-lg border border-moss/15 bg-white p-4 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-copper">Beginner Rule</p>
+                <p className="mt-3 text-sm leading-6 text-moss/75">
+                  Save anything you want to reuse. Summaries and saved cards are what turn one-off answers into campaign memory.
                 </p>
               </div>
             </aside>
@@ -322,19 +370,35 @@ function ManualSection({
   children: ReactNode;
 }) {
   return (
-    <section id={id} className="scroll-mt-6 rounded-lg border border-moss/15 bg-parchment/70 p-4 shadow-sm md:p-5">
+    <section id={id} className="scroll-mt-24">
       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-copper">{eyebrow}</p>
-      <h3 className="mt-1 text-2xl font-semibold text-ink">{title}</h3>
-      <div className="mt-4">{children}</div>
+      <h3 className="mt-2 text-2xl font-semibold text-ink md:text-3xl">{title}</h3>
+      <div className="mt-5">{children}</div>
     </section>
   );
 }
 
-function InfoCard({ title, detail }: { title: string; detail: string }) {
+function InfoCard({ title, detail, tone = "plain" }: { title: string; detail: string; tone?: "plain" | "warning" | "definition" }) {
+  const toneClass =
+    tone === "warning"
+      ? "border-l-4 border-l-ember"
+      : tone === "definition"
+        ? "border-l-4 border-l-copper"
+        : "";
+
   return (
-    <article className="rounded-lg border border-moss/15 bg-white p-4 shadow-sm">
+    <article className={`rounded-lg border border-moss/15 bg-white p-4 shadow-sm ${toneClass}`}>
       <h4 className="text-base font-semibold text-ink">{title}</h4>
       <p className="mt-2 text-sm leading-6 text-moss/75">{detail}</p>
     </article>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md bg-parchment px-3 py-3 text-center">
+      <p className="text-lg font-semibold text-ink">{value}</p>
+      <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-moss/65">{label}</p>
+    </div>
   );
 }
