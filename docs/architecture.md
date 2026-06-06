@@ -28,6 +28,7 @@ flowchart LR
 ```text
 Next.js Frontend
   command center UI
+  campaign create, edit, archive, and restore controls
   Campaign Knowledge upload and template UI
   session notes workflow
   structured cards
@@ -37,12 +38,15 @@ Next.js Frontend
 ASP.NET Core API
   public HTTP boundary for the browser
   campaign, party, session, memory, and document endpoints
+  campaign archive filtering and restore flow
+  demo seed hydration per browser client owner
   document upload validation and filename normalization
   conversation/message/tool-call persistence
   request assembly for the AI worker
 
 FastAPI AI Worker
   mock-first LLM behavior with Gemini real-chat mode
+  guarded campaign response tone as style-only prompt context
   tabletop RPG scope guard and redirect suggestions
   upload sanitization before document chunking and embedding
   rules, homebrew, and campaign memory retrieval
@@ -66,7 +70,7 @@ PostgreSQL + pgvector
 5. The API calls the FastAPI worker with the full request context.
 6. The worker rejects clearly out-of-scope prompts before model generation, then plans tools based on the prompt intent, selected mode, and enabled context toggles.
 7. The worker returns an answer, citations, tool calls, structured output, and suggested actions.
-8. The API stores the assistant message and tool-call traces.
+8. The API stores the assistant message and tool-call traces. Saved encounters also create campaign-memory documents for later retrieval.
 9. The frontend renders normal text, citations, tool cards, and structured cards.
 
 ## Why ASP.NET Core + FastAPI
@@ -83,6 +87,9 @@ This split is useful for a portfolio project because it demonstrates a realistic
 - Mock embeddings are not semantically equivalent to real embeddings, but they make local demos deterministic and free. Gemini embeddings can be enabled at 1536 dimensions to match the current pgvector schema.
 - The current worker has a mock-first provider path plus Gemini chat mode; deterministic mock mode remains the safest portfolio demo path.
 - The scope guard is intentionally lightweight and deterministic. It keeps obvious unrelated prompts out of the product path, but it is not a full safety classifier.
+- Campaign response tone is a style hint only; the worker prompt explicitly keeps scope, grounding, citations, tool results, and structured-output requirements higher priority.
+- Campaign archive is soft state (`archived_at`), so normal campaign lists stay tidy without deleting data.
+- Demo memory is copied per browser client owner on first access to preserve local profile isolation while keeping the seeded walkthrough useful.
 - Uploaded Campaign Knowledge is capped and sanitized as plain text before chunking so indexing remains bounded and safe for local demos.
 - Rules and Homebrew retrieval are intentionally separate, so custom table mechanics only affect answers when Homebrew context is enabled.
 - PostgreSQL + pgvector keeps the stack simple compared with a separate vector database, but large-scale retrieval would eventually need more tuning.
@@ -90,7 +97,7 @@ This split is useful for a portfolio project because it demonstrates a realistic
 
 ## Data Model Highlights
 
-- `campaigns`, `sessions`, and `party_characters` hold campaign setup.
+- `campaigns`, `sessions`, and `party_characters` hold campaign setup, archive state, and party context.
 - `knowledge_documents` and `knowledge_chunks` store rules, homebrew, and memory RAG content.
 - `ai_conversations`, `ai_messages`, and `ai_tool_calls` preserve AI interactions.
 - `npcs`, `quests`, `locations`, `encounters`, and `memory_events` turn session notes and structured outputs into reusable campaign memory.

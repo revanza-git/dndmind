@@ -45,9 +45,11 @@ def real_chat_response(request: Any) -> dict[str, Any]:
     answer = str(model_payload.get("answer") or "").strip()
     if not answer:
         answer = "Gemini returned an empty answer. Try rephrasing the request or checking the model configuration."
+    used_structured_fallback = False
     if structured_output is None:
         structured_output = _fallback_structured_output(request, answer, model_payload.get("structuredOutput"))
-    if structured_output and not suggested_actions:
+        used_structured_fallback = structured_output is not None
+    if structured_output and (used_structured_fallback or not suggested_actions):
         suggested_actions = build_suggested_actions(structured_output)
 
     return {
@@ -213,6 +215,7 @@ def _summary_system_instruction() -> str:
 def _user_prompt(request: Any, retrieved_context: str, tool_calls: list[dict[str, Any]]) -> str:
     party = [_party_member(member) for member in request.party] if request.context.usePartyInfo else []
     intent = detect_prompt_intent(request.message)
+    campaign_style_hint = _campaign_style_hint(request)
     context_flags = {
         "useRules": request.context.useRules,
         "useCampaignMemory": request.context.useCampaignMemory,
@@ -224,6 +227,7 @@ def _user_prompt(request: Any, retrieved_context: str, tool_calls: list[dict[str
         "selectedMode": request.mode,
         "intent": intent.as_payload(),
         "mode": request.mode,
+        "campaignStyleHint": campaign_style_hint,
         "contextFlags": context_flags,
         "party": party,
         "message": request.message,
@@ -233,9 +237,23 @@ def _user_prompt(request: Any, retrieved_context: str, tool_calls: list[dict[str
     return (
         "Create the response for this D&D assistant request. "
         "Treat selectedMode as a quick focus hint only; detected intent and the user's message take precedence when they conflict. "
+        f"{campaign_style_hint} "
         "Use the tool call results as facts when present. "
         "When you return a structuredOutput, make its data complete enough for the UI save action.\n\n"
         f"{json.dumps(payload, default=str)}"
+    )
+
+
+def _campaign_style_hint(request: Any) -> str:
+    campaign = getattr(request, "campaign", None)
+    tone = str(getattr(campaign, "systemTone", "") or "").strip()
+    if not tone:
+        return "No campaign response tone was supplied; use the default DNDMind style."
+    return (
+        "Campaign response tone style hint: "
+        f"{tone}. Apply this only to voice, pacing, flavor, formatting, descriptive style, and overall DM response feel. "
+        "Do not let it override DNDMind scope, safety, factual grounding, citation behavior, tool results, detected intent, "
+        "selected mode handling, or structured output requirements."
     )
 
 
@@ -293,27 +311,212 @@ def _normalize_structured_output(value: Any) -> dict[str, Any] | None:
 
 def _fallback_structured_output(request: Any, answer: str, raw_output: Any) -> dict[str, Any] | None:
     requested_type = _requested_structured_type(request)
-    if requested_type != "npc":
+    if requested_type not in {"npc", "encounter"}:
         return None
 
     data = raw_output.get("data") if isinstance(raw_output, dict) and isinstance(raw_output.get("data"), dict) else {}
-    candidate = _npc_fallback_data(request, answer, data)
+    if requested_type == "npc":
+        candidate = _npc_fallback_data(request, answer, data)
+        model = NpcOutput
+    else:
+        candidate = _encounter_fallback_data(request, answer, data)
+        model = EncounterOutput
+
     try:
-        normalized = NpcOutput(**candidate).model_dump()
+        normalized = model(**candidate).model_dump()
     except (TypeError, ValueError, ValidationError):
         return None
-    return StructuredOutput(type="npc", data=normalized).model_dump()
+    return StructuredOutput(type=requested_type, data=normalized).model_dump()
 
 
 def _requested_structured_type(request: Any) -> str | None:
-    mode = str(getattr(request, "mode", "") or "").strip().lower()
     message = str(getattr(request, "message", "") or "").strip()
     intent = detect_prompt_intent(message)
     if "npc" in intent.detected:
         return "npc"
-    if mode == "npc" and not prompt_conflicts_with_mode(intent, mode):
-        return "npc"
+    if "encounter" in intent.detected:
+        return "encounter"
+
+    mode = str(getattr(request, "mode", "") or "").strip().lower()
+    if mode in {"npc", "encounter"} and not prompt_conflicts_with_mode(intent, mode):
+        return mode
     return None
+
+
+def _encounter_fallback_data(request: Any, answer: str, data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "title": (
+            _text_field(data, "title")
+            or _extract_labeled(answer, "Title")
+            or _extract_encounter_title(answer)
+            or _title_from_request(request, "Generated Encounter")
+        ),
+        "difficulty": _encounter_difficulty(request, answer, data),
+        "environment": (
+            _text_field(data, "environment")
+            or _extract_labeled(answer, "Environment")
+            or _extract_labeled(answer, "Terrain")
+            or _extract_environment_sentence(answer)
+            or "A flexible battlefield with useful cover, a clear objective, and one terrain complication the DM can emphasize."
+        ),
+        "monsters": _encounter_monsters(data, answer),
+        "tactics": (
+            _text_field(data, "tactics")
+            or _extract_labeled(answer, "Tactics")
+            or _extract_labeled(answer, "Enemy Tactics")
+            or _extract_tactics_sentence(answer)
+            or "The enemies pressure exposed characters, use terrain intelligently, and shift focus when the party changes plans."
+        ),
+        "scalingOptions": _encounter_scaling_options(data, answer),
+        "rewards": (
+            _text_list(data.get("rewards"))
+            or _extract_labeled_list(answer, "Rewards")
+            or ["A useful clue, modest treasure, or leverage tied to the next scene."]
+        ),
+        "campaignHooks": (
+            _text_list(data.get("campaignHooks"))
+            or _text_list(data.get("campaign_hooks"))
+            or _extract_labeled_list(answer, "Campaign Hooks")
+            or _extract_labeled_list(answer, "Hooks")
+            or ["Tie one enemy, clue, or battlefield detail to an unresolved campaign question."]
+        ),
+    }
+
+
+def _normalize_difficulty(value: str) -> str:
+    match = re.search(r"\b(easy|medium|hard|deadly|unknown)\b", str(value or ""), flags=re.IGNORECASE)
+    return match.group(1).capitalize() if match else "Unknown"
+
+
+def _encounter_difficulty(request: Any, answer: str, data: dict[str, Any]) -> str:
+    for value in (
+        _text_field(data, "difficulty"),
+        _extract_difficulty(answer),
+        _extract_difficulty(str(getattr(request, "message", "") or "")),
+    ):
+        if not value:
+            continue
+        normalized = _normalize_difficulty(value)
+        if normalized != "Unknown" or re.search(r"\bunknown\b", value, flags=re.IGNORECASE):
+            return normalized
+    return "Unknown"
+
+
+def _extract_difficulty(text: str) -> str:
+    match = re.search(r"\b(easy|medium|hard|deadly|unknown)\b", str(text or ""), flags=re.IGNORECASE)
+    return match.group(1) if match else ""
+
+
+def _extract_encounter_title(answer: str) -> str:
+    bold = re.search(r"\*\*([^*\n]{3,60}?)\*\*", answer)
+    if bold:
+        title = bold.group(1).strip(" :-")
+        if not re.search(r"\b(?:environment|terrain|tactics|rewards?|hooks?|scaling)\b", title, flags=re.IGNORECASE):
+            return title
+
+    heading = re.search(r"(?:^|\n)\s*#{1,3}\s*([^#\n]{3,60})", answer)
+    if heading:
+        return heading.group(1).strip(" :-")
+
+    named = re.search(
+        r"\b(?:encounter|ambush|fight|battle)\s+(?:called|named|titled)\s+['\"]?([^'\".\n]{3,60})",
+        answer,
+        flags=re.IGNORECASE,
+    )
+    return named.group(1).strip(" :-") if named else ""
+
+
+def _title_from_request(request: Any, default: str) -> str:
+    message = str(getattr(request, "message", "") or "")
+    if re.search(r"\bambush\b", message, flags=re.IGNORECASE):
+        return "Ambush Encounter"
+    if re.search(r"\bboss\b", message, flags=re.IGNORECASE):
+        return "Boss Encounter"
+    if re.search(r"\bcombat\b", message, flags=re.IGNORECASE):
+        return "Combat Encounter"
+    return default
+
+
+def _encounter_monsters(data: dict[str, Any], answer: str) -> list[dict[str, Any]]:
+    monsters = _normalize_monster_list(data.get("monsters"))
+    if monsters:
+        return monsters
+
+    labeled = (
+        _extract_labeled(answer, "Monsters")
+        or _extract_labeled(answer, "Enemies")
+        or _extract_labeled(answer, "Creatures")
+    )
+    monsters = _normalize_monster_list(_split_text_items(labeled))
+    if monsters:
+        return monsters
+
+    return [_monster_from_answer(answer) or {"name": "Encounter Foe", "count": 1, "role": "primary threat", "xp": 0}]
+
+
+def _normalize_monster_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+
+    monsters: list[dict[str, Any]] = []
+    for item in value:
+        if isinstance(item, dict):
+            name = _text_field(item, "name") or _text_field(item, "type")
+            if not name:
+                continue
+            monsters.append(
+                {
+                    "name": name,
+                    "count": _positive_int(item.get("count"), 1),
+                    "role": _text_field(item, "role") or "combatant",
+                    "xp": _nonnegative_int(item.get("xp"), 0),
+                }
+            )
+        elif str(item).strip():
+            monsters.append(_monster_from_text(str(item)))
+    return monsters
+
+
+def _monster_from_answer(answer: str) -> dict[str, Any] | None:
+    lower = str(answer or "").lower()
+    for name, role in (
+        ("Cultist", "fanatic striker"),
+        ("Bandit", "mobile skirmisher"),
+        ("Orc", "bruiser"),
+        ("Skeleton", "front-line minion"),
+        ("Goblin", "mobile skirmisher"),
+        ("Dragon", "solo boss"),
+    ):
+        if name.lower() in lower:
+            return {"name": name, "count": 1, "role": role, "xp": 0}
+    return None
+
+
+def _monster_from_text(text: str) -> dict[str, Any]:
+    count_match = re.search(r"\b(\d+)\b", text)
+    count = _positive_int(count_match.group(1) if count_match else None, 1)
+    cleaned = re.sub(r"\b\d+\b", "", text)
+    cleaned = re.sub(r"\([^)]*\)", "", cleaned)
+    name = _clean_markdown_text(cleaned).strip(" ,:-") or "Encounter Foe"
+    return {"name": name, "count": count, "role": "combatant", "xp": 0}
+
+
+def _encounter_scaling_options(data: dict[str, Any], answer: str) -> dict[str, str]:
+    value = data.get("scalingOptions") or data.get("scaling_options")
+    scaling = value if isinstance(value, dict) else {}
+    easier = (
+        _text_field(scaling, "easier")
+        or _text_field(data, "easier")
+        or _extract_labeled(answer, "Easier")
+        or "Reduce the number of enemies, lower enemy damage, or reveal the hazard before initiative."
+    )
+    harder = (
+        _text_field(scaling, "harder")
+        or _text_field(data, "harder")
+        or _extract_labeled(answer, "Harder")
+        or "Add a reinforcement, tighten the objective timer, or make the terrain hazard active each round."
+    )
+    return {"easier": easier, "harder": harder}
 
 
 def _npc_fallback_data(request: Any, answer: str, data: dict[str, Any]) -> dict[str, str]:
@@ -351,6 +554,38 @@ def _npc_fallback_data(request: Any, answer: str, data: dict[str, Any]) -> dict[
 def _text_field(data: dict[str, Any], key: str) -> str:
     value = data.get(key)
     return str(value).strip() if value is not None and str(value).strip() else ""
+
+
+def _text_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return _split_text_items(value)
+    return []
+
+
+def _split_text_items(value: str) -> list[str]:
+    cleaned = _clean_markdown_text(value)
+    if not cleaned:
+        return []
+    parts = re.split(r"\s*(?:,|;|\n|\s+-\s+)\s*", cleaned)
+    return [part.strip(" .:-") for part in parts if part.strip(" .:-")]
+
+
+def _positive_int(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _nonnegative_int(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= 0 else default
 
 
 def _extract_npc_name(answer: str) -> str:
@@ -395,6 +630,30 @@ def _extract_labeled(answer: str, label: str) -> str:
     if not match:
         return ""
     return _clean_markdown_text(match.group(1))
+
+
+def _extract_labeled_list(answer: str, label: str) -> list[str]:
+    return _split_text_items(_extract_labeled(answer, label))
+
+
+def _extract_environment_sentence(answer: str) -> str:
+    return _matching_sentence(
+        answer,
+        r"\b(?:environment|terrain|battlefield|road|forest|ruins?|cavern|street|temple|swamp|cover|hazard)\b",
+    )
+
+
+def _extract_tactics_sentence(answer: str) -> str:
+    return _matching_sentence(answer, r"\b(?:tactic|ambush|flank|focus|retreat|target|harry|pressure|control|reinforcement)\b")
+
+
+def _matching_sentence(answer: str, pattern: str) -> str:
+    sentences = re.split(r"(?<=[.!?])\s+", _clean_markdown_text(answer))
+    for sentence in sentences:
+        cleaned = sentence.strip()
+        if cleaned and re.search(pattern, cleaned, flags=re.IGNORECASE):
+            return cleaned
+    return ""
 
 
 def _first_sentence(answer: str) -> str:

@@ -21,6 +21,7 @@ Use mock mode. No API key is required.
 Point out:
 
 - campaign selector
+- create/edit/archive/restore controls
 - mode buttons
 - context toggles
 - party and memory panels
@@ -28,6 +29,8 @@ Point out:
 - tabletop-focused assistant behavior
 
 ## 0:30 - 1:20 Campaign Knowledge RAG
+
+First, confirm an active campaign is selected. If the selector says `No active campaigns`, click `New`, enter a campaign name, and save it. Mention that archived campaigns can be restored without deleting their data.
 
 In Campaign Knowledge:
 
@@ -110,10 +113,11 @@ Generate a hard forest ambush encounter for my party.
 Expected result:
 
 - encounter card appears with monsters, tactics, scaling, hooks, and rewards
+- saving the encounter adds it to Campaign Memory and indexes it for later retrieval
 
 Narration:
 
-"The worker returns AI-shaped JSON, and the frontend renders it as reusable campaign cards. Save actions turn generated ideas into persistent campaign state."
+"The worker returns AI-shaped JSON, and the frontend renders it as reusable campaign cards. Save actions turn generated ideas into persistent campaign state. Encounters are also indexed as memory so future prompts can find them."
 
 ## 3:00 - 3:40 Tool Calling
 
@@ -145,7 +149,17 @@ Point to the Session Prep section in the UI.
 
 Narration:
 
-"Session Prep turns saved state into a fast DM dashboard: open hooks, active quests, ready knowledge, and current session notes. The deterministic eval cases still live in `db/seed/eval_cases.json` and are covered by worker tests."
+"Session Prep turns saved state into a fast DM dashboard: open hooks, active quests, saved encounters, ready knowledge, and current session notes. The deterministic eval cases still live in `db/seed/eval_cases.json` and are covered by worker tests."
+
+Optional tone check:
+
+1. Edit the campaign response tone to `Wry gothic suspense`.
+2. Ask for an opening scene.
+
+Expected result:
+
+- the response reflects the tone as style
+- scope, citations, tools, and structured cards still behave normally
 
 ## 4:20 - 5:00 Close
 

@@ -16,6 +16,8 @@ import {
   StructuredOutput,
   SuggestedAction,
   ToolCall,
+  archiveCampaign,
+  createCampaign,
   createPartyCharacter,
   createPartyCharacterEvent,
   createSession,
@@ -23,6 +25,7 @@ import {
   deletePartyCharacter,
   executeTool,
   getCampaignMemory,
+  getArchivedCampaigns,
   getCampaigns,
   getDocuments,
   getParty,
@@ -35,10 +38,12 @@ import {
   saveNpc,
   saveQuest,
   sendChat,
+  restoreCampaign,
   summarizeSession,
   updatePartyCharacter,
   updatePartyCharacterHp,
   updatePartyCharacterLevel,
+  updateCampaign,
   updateSession,
   uploadDocument
 } from "../lib/api";
@@ -74,6 +79,47 @@ const documentTemplates = [
 ];
 const acceptedDocumentExtensions = [".txt", ".md"];
 const maxDocumentUploadBytes = 2 * 1024 * 1024;
+const diceExpressionPattern = /^\s*(\d{1,2})d(\d{1,4})([+-]\d{1,4})?\s*$/i;
+const diceExamples = ["1d20", "2d6+3", "4d8-1"];
+const emptyCampaignMemory: CampaignMemory = { npcs: [], quests: [], locations: [], encounters: [], events: [] };
+
+function D20MindSparkLogo() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-14 w-14 shrink-0"
+      viewBox="0 0 48 48"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M24 3.5 42.5 14v20L24 44.5 5.5 34V14L24 3.5Z"
+        className="fill-parchment/10 stroke-mist"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M24 3.5 32 24 24 44.5 16 24 24 3.5Z"
+        className="stroke-mist/75"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M5.5 14 16 24 5.5 34M42.5 14 32 24l10.5 10M16 24h16M5.5 14h37"
+        className="stroke-mist/45"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      <circle cx="24" cy="24" r="3.25" className="fill-copper" />
+      <path
+        d="M24 13.5v5M24 29.5v5M13.5 24h5M29.5 24h5M16.5 16.5l3.5 3.5M28 28l3.5 3.5M31.5 16.5 28 20M20 28l-3.5 3.5"
+        className="stroke-copper"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
 
 function sessionDraftKey(clientId: string, campaignId: string, sessionId: string | null) {
   return `dndmind_draft_${clientId}_${campaignId}_${sessionId ?? "new"}`;
@@ -96,6 +142,18 @@ type ResultEnhancements = {
   suggestedActions: SuggestedAction[];
 };
 
+type ChatRequest = {
+  campaignId: string;
+  conversationId: string | null;
+  message: string;
+  mode: string;
+  context: ChatContext;
+};
+
+type FailedChatRequest = ChatRequest & {
+  errorMessage: string;
+};
+
 type PartyPanelMode = "add" | "edit" | "hp" | "history";
 
 type ActivePartyPanel = {
@@ -103,9 +161,30 @@ type ActivePartyPanel = {
   character: PartyCharacter | null;
 };
 
+type CampaignFormMode = "new" | "edit";
+
+type CampaignFormState = {
+  name: string;
+  description: string;
+  systemTone: string;
+};
+
+const emptyCampaignForm: CampaignFormState = {
+  name: "",
+  description: "",
+  systemTone: ""
+};
+
 export default function Home() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [archivedCampaigns, setArchivedCampaigns] = useState<Campaign[]>([]);
   const [campaignId, setCampaignId] = useState<string>("");
+  const [hasLoadedCampaigns, setHasLoadedCampaigns] = useState(false);
+  const [campaignFormMode, setCampaignFormMode] = useState<CampaignFormMode | null>(null);
+  const [campaignForm, setCampaignForm] = useState<CampaignFormState>(emptyCampaignForm);
+  const [isSavingCampaign, setIsSavingCampaign] = useState(false);
+  const [isArchivingCampaign, setIsArchivingCampaign] = useState(false);
+  const [restoringCampaignId, setRestoringCampaignId] = useState<string | null>(null);
   const [party, setParty] = useState<PartyCharacter[]>([]);
   const [partyEvents, setPartyEvents] = useState<PartyCharacterEvent[]>([]);
   const [activePartyPanel, setActivePartyPanel] = useState<ActivePartyPanel | null>(null);
@@ -120,7 +199,9 @@ export default function Home() {
   const [sessionNotes, setSessionNotes] = useState(
     "Captain Vey betrayed the party last session at Blackwater Mine. He sold the map to the Ashen Knives and escaped through the old smuggler tunnel. Mira swore to track him down. The party recovered the Dawn Shard but still does not know who paid Vey."
   );
-  const [memory, setMemory] = useState<CampaignMemory>({ npcs: [], quests: [], locations: [], events: [] });
+  const [memory, setMemory] = useState<CampaignMemory>(emptyCampaignMemory);
+  const [isLoadingMemory, setIsLoadingMemory] = useState(false);
+  const [memoryError, setMemoryError] = useState<string | null>(null);
   const [mode, setMode] = useState("Auto");
   const [context, setContext] = useState<ChatContext>({
     useRules: true,
@@ -151,6 +232,7 @@ export default function Home() {
   const [clientLabel, setClientLabel] = useState<string>("Local DM");
   const [clientProfileStatus, setClientProfileStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lastFailedChatRequest, setLastFailedChatRequest] = useState<FailedChatRequest | null>(null);
   const [activeNavigationItem, setActiveNavigationItem] = useState("Command");
   const timelineEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -158,6 +240,7 @@ export default function Home() {
     () => campaigns.find((campaign) => campaign.id === campaignId) ?? null,
     [campaignId, campaigns]
   );
+  const diceExpressionError = validateDiceExpression(diceExpression);
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? null,
     [activeSessionId, sessions]
@@ -187,21 +270,42 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    getCampaigns()
-      .then((items) => {
+    Promise.all([getCampaigns(), getArchivedCampaigns()])
+      .then(([items, archivedItems]) => {
         setCampaigns(items);
+        setArchivedCampaigns(archivedItems);
         if (items[0]) {
           setCampaignId(items[0].id);
         }
+        setHasLoadedCampaigns(true);
       })
-      .catch((err: Error) => setError(err.message));
+      .catch((err: Error) => {
+        setHasLoadedCampaigns(true);
+        setError(err.message);
+      });
   }, []);
 
   useEffect(() => {
     if (!campaignId) {
+      if (hasLoadedCampaigns) {
+        setParty([]);
+        setPartyEvents([]);
+        setDocuments([]);
+        setSessions([]);
+        setActiveSessionId(null);
+        setSessionTitle("Session Notes");
+        setSessionNotes("");
+        setSessionSaveStatus(null);
+        setDraftStatus(null);
+        setMemory(emptyCampaignMemory);
+        setIsLoadingMemory(false);
+        setMemoryError(null);
+      }
       return;
     }
 
+    setIsLoadingMemory(true);
+    setMemoryError(null);
     getParty(campaignId)
       .then(setParty)
       .catch((err: Error) => setError(err.message));
@@ -212,8 +316,15 @@ export default function Home() {
       .then(setDocuments)
       .catch((err: Error) => setError(err.message));
     getCampaignMemory(campaignId)
-      .then(setMemory)
-      .catch((err: Error) => setError(err.message));
+      .then((updatedMemory) => {
+        setMemory(updatedMemory);
+        setMemoryError(null);
+      })
+      .catch((err: Error) => {
+        setMemoryError(err.message);
+        setError(err.message);
+      })
+      .finally(() => setIsLoadingMemory(false));
     getSessions(campaignId)
       .then((items) => {
         setSessions(items);
@@ -234,7 +345,7 @@ export default function Home() {
         }
       })
       .catch((err: Error) => setError(err.message));
-  }, [campaignId, clientId]);
+  }, [campaignId, clientId, hasLoadedCampaigns]);
 
   useEffect(() => {
     if (!clientId || !campaignId) {
@@ -251,29 +362,172 @@ export default function Home() {
     timelineEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, isSending, error]);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!campaignId || !input.trim()) {
+  function campaignFormFrom(campaign: Campaign | null): CampaignFormState {
+    return {
+      name: campaign?.name ?? "",
+      description: campaign?.description ?? "",
+      systemTone: campaign?.systemTone ?? ""
+    };
+  }
+
+  function handleCampaignSelect(nextCampaignId: string) {
+    setCampaignId(nextCampaignId);
+    setCampaignFormMode(null);
+    setCampaignForm(campaignFormFrom(campaigns.find((campaign) => campaign.id === nextCampaignId) ?? null));
+    setConversationId(null);
+    setLastResponse(null);
+  }
+
+  function handleNewCampaign() {
+    setCampaignFormMode("new");
+    setCampaignForm(emptyCampaignForm);
+    setError(null);
+  }
+
+  function handleEditCampaign() {
+    if (!activeCampaign) {
       return;
     }
 
-    const userMessage = input.trim();
-    setMessages((current) => [...current, { role: "user", content: userMessage }]);
-    setInput("");
+    setCampaignFormMode("edit");
+    setCampaignForm(campaignFormFrom(activeCampaign));
+    setError(null);
+  }
+
+  function handleCancelCampaignForm() {
+    setCampaignFormMode(null);
+    setCampaignForm(campaignFormFrom(activeCampaign));
+    setError(null);
+  }
+
+  async function refreshCampaignLists() {
+    const [activeItems, archivedItems] = await Promise.all([getCampaigns(), getArchivedCampaigns()]);
+    setCampaigns(activeItems);
+    setArchivedCampaigns(archivedItems);
+    return { activeItems, archivedItems };
+  }
+
+  function nextCampaignAfterArchive(archivedCampaignId: string, activeItems: Campaign[]) {
+    const archivedIndex = campaigns.findIndex((campaign) => campaign.id === archivedCampaignId);
+    if (archivedIndex < 0) {
+      return activeItems[0] ?? null;
+    }
+
+    return activeItems[archivedIndex] ?? activeItems[archivedIndex - 1] ?? activeItems[0] ?? null;
+  }
+
+  async function handleCampaignFormSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!campaignFormMode || !campaignForm.name.trim()) {
+      return;
+    }
+
+    setIsSavingCampaign(true);
+    setError(null);
+
+    try {
+      const input = {
+        name: campaignForm.name.trim(),
+        description: campaignForm.description.trim() || null,
+        systemTone: campaignForm.systemTone.trim() || null
+      };
+      const saved =
+        campaignFormMode === "new"
+          ? await createCampaign(input)
+          : activeCampaign
+            ? await updateCampaign(activeCampaign.id, input)
+            : null;
+
+      if (!saved) {
+        return;
+      }
+
+      const { activeItems } = await refreshCampaignLists();
+      const refreshedCampaigns = activeItems.some((campaign) => campaign.id === saved.id) ? activeItems : [saved, ...activeItems];
+      setCampaigns(refreshedCampaigns);
+      setCampaignId(saved.id);
+      setCampaignFormMode(null);
+      setCampaignForm(campaignFormFrom(saved));
+      if (campaignFormMode === "new") {
+        setConversationId(null);
+        setLastResponse(null);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "DNDMind could not save that campaign. Please try again.");
+    } finally {
+      setIsSavingCampaign(false);
+    }
+  }
+
+  async function handleArchiveCampaign() {
+    if (!activeCampaign) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Archive "${activeCampaign.name}"? It will leave the active campaign list, and you can restore it later.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const archivedCampaignId = activeCampaign.id;
+    setIsArchivingCampaign(true);
+    setError(null);
+    try {
+      await archiveCampaign(archivedCampaignId);
+      const { activeItems } = await refreshCampaignLists();
+      const nextCampaign = campaignId === archivedCampaignId ? nextCampaignAfterArchive(archivedCampaignId, activeItems) : activeCampaign;
+      setCampaignId(nextCampaign?.id ?? "");
+      setCampaignFormMode(null);
+      setCampaignForm(campaignFormFrom(nextCampaign));
+      setConversationId(null);
+      setLastResponse(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "DNDMind could not archive that campaign. Please try again.");
+    } finally {
+      setIsArchivingCampaign(false);
+    }
+  }
+
+  async function handleRestoreCampaign(archivedCampaign: Campaign) {
+    setRestoringCampaignId(archivedCampaign.id);
+    setError(null);
+    try {
+      const restored = await restoreCampaign(archivedCampaign.id);
+      const { activeItems } = await refreshCampaignLists();
+      const restoredCampaign = activeItems.find((campaign) => campaign.id === restored.id) ?? restored;
+      setCampaignId(restoredCampaign.id);
+      setCampaignFormMode(null);
+      setCampaignForm(campaignFormFrom(restoredCampaign));
+      setConversationId(null);
+      setLastResponse(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "DNDMind could not restore that campaign. Please try again.");
+    } finally {
+      setRestoringCampaignId(null);
+    }
+  }
+
+  async function sendChatRequest(request: ChatRequest, options: { appendUserMessage: boolean }) {
+    if (options.appendUserMessage) {
+      setMessages((current) => [...current, { role: "user", content: request.message }]);
+    }
     setIsSending(true);
     setError(null);
     setActionStatus(null);
+    setLastFailedChatRequest(null);
 
     try {
       const response = await sendChat({
-        campaignId,
-        conversationId,
-        message: userMessage,
-        mode,
-        context
+        campaignId: request.campaignId,
+        conversationId: request.conversationId,
+        message: request.message,
+        mode: request.mode,
+        context: request.context
       });
       setConversationId(response.conversationId);
-      const enhanced = enhanceChatResultForPreparedContent(userMessage, response, mode);
+      const enhanced = enhanceChatResultForPreparedContent(request.message, response, request.mode);
       setLastResponse({
         ...response,
         answer: enhanced.content,
@@ -294,10 +548,47 @@ export default function Home() {
         }
       ]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      const message = err instanceof Error ? err.message : "DNDMind could not send that message. Please try again.";
+      setError(message);
+      setLastFailedChatRequest({ ...request, errorMessage: message });
     } finally {
       setIsSending(false);
     }
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!campaignId || !input.trim()) {
+      return;
+    }
+
+    const request: ChatRequest = {
+      campaignId,
+      conversationId,
+      message: input.trim(),
+      mode,
+      context: { ...context }
+    };
+    setInput("");
+    await sendChatRequest(request, { appendUserMessage: true });
+  }
+
+  async function handleRetryFailedChat() {
+    if (!lastFailedChatRequest || isSending) {
+      return;
+    }
+    await sendChatRequest(lastFailedChatRequest, { appendUserMessage: false });
+  }
+
+  function handleEditFailedChat() {
+    if (!lastFailedChatRequest) {
+      return;
+    }
+    setMode(lastFailedChatRequest.mode);
+    setContext({ ...lastFailedChatRequest.context });
+    setInput(lastFailedChatRequest.message);
+    setError(null);
+    setLastFailedChatRequest(null);
   }
 
   function toggleContext(key: keyof ChatContext) {
@@ -402,7 +693,7 @@ export default function Home() {
       await deleteDocument(document.id);
       setDocuments(await getDocuments(campaignId));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Document delete failed.");
+      setError(err instanceof Error ? err.message : "DNDMind could not remove that campaign knowledge. Please try again.");
     } finally {
       setDeletingDocumentId(null);
     }
@@ -501,8 +792,8 @@ export default function Home() {
       }
       return saved;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Session save failed.");
-      setSessionSaveStatus("Save failed");
+      setError(err instanceof Error ? err.message : "DNDMind could not save that session. Please try again.");
+      setSessionSaveStatus("Could not save");
       return null;
     } finally {
       setIsSavingSession(false);
@@ -526,16 +817,27 @@ export default function Home() {
       ]);
       setSessions(updatedSessions);
       setMemory(updatedMemory);
+      setMemoryError(null);
       setDocuments(updatedDocuments);
       setInput("Who betrayed the party last session?");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Session summarization failed.");
+      setError(err instanceof Error ? err.message : "DNDMind could not summarize that session. Please try again.");
     } finally {
       setIsSummarizing(false);
     }
   }
 
   async function handleManualDiceRoll() {
+    if (!campaignId) {
+      return;
+    }
+
+    const validationError = validateDiceExpression(diceExpression);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
     setIsRolling(true);
     setError(null);
     try {
@@ -543,11 +845,11 @@ export default function Home() {
         campaignId,
         conversationId,
         toolName: "rollDice",
-        arguments: { expression: diceExpression }
+        arguments: { expression: diceExpression.trim() }
       });
       setManualToolCall(response);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Dice roll failed.");
+      setError(err instanceof Error ? err.message : "DNDMind could not roll those dice. Please try again.");
     } finally {
       setIsRolling(false);
     }
@@ -584,7 +886,7 @@ export default function Home() {
       await refreshParty();
       setActivePartyPanel(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Party update failed.");
+      setError(err instanceof Error ? err.message : "DNDMind could not save that character. Please try again.");
     } finally {
       setIsSavingParty(false);
     }
@@ -603,7 +905,7 @@ export default function Home() {
       setActivePartyPanel(null);
       setPartyStatus("Character archived");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Character archive failed.");
+      setError(err instanceof Error ? err.message : "DNDMind could not remove that character. Please try again.");
     } finally {
       setIsSavingParty(false);
     }
@@ -627,7 +929,7 @@ export default function Home() {
       setActivePartyPanel(null);
       setPartyStatus("HP updated");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "HP update failed.");
+      setError(err instanceof Error ? err.message : "DNDMind could not update HP. Please try again.");
     } finally {
       setIsSavingParty(false);
     }
@@ -645,7 +947,7 @@ export default function Home() {
       await refreshParty();
       setPartyStatus(`${character.name} is now level ${nextLevel}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Level update failed.");
+      setError(err instanceof Error ? err.message : "DNDMind could not update the level. Please try again.");
     } finally {
       setIsSavingParty(false);
     }
@@ -674,7 +976,7 @@ export default function Home() {
       setPartyEvents(updatedEvents);
       setPartyStatus("Progress note added");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Progress note failed.");
+      setError(err instanceof Error ? err.message : "DNDMind could not save that progress note. Please try again.");
     } finally {
       setIsSavingParty(false);
     }
@@ -688,7 +990,7 @@ export default function Home() {
     try {
       setCharacterEvents(await getPartyCharacterEvents(character.id));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Character history failed to load.");
+      setError(err instanceof Error ? err.message : "DNDMind could not load that character's history. Refresh the page and try again.");
     } finally {
       setIsLoadingPartyHistory(false);
     }
@@ -702,6 +1004,7 @@ export default function Home() {
     setActionStatus(null);
     setError(null);
     try {
+      let savedEncounter: CampaignMemory["encounters"][number] | null = null;
       if (action.action === "saveNPC") {
         await saveNpc(campaignId, action.payload);
         setActionStatus("NPC saved");
@@ -712,7 +1015,11 @@ export default function Home() {
         await saveLocation(campaignId, action.payload);
         setActionStatus("Location saved");
       } else if (action.action === "saveEncounter") {
-        await saveEncounter(campaignId, action.payload);
+        const response = await saveEncounter(campaignId, {
+          ...action.payload,
+          sessionId: activeSessionId
+        });
+        savedEncounter = response.encounter;
         setActionStatus("Encounter saved");
       } else if (action.action === "saveSessionSummary") {
         await saveCurrentSessionSummary(action.payload);
@@ -726,10 +1033,12 @@ export default function Home() {
         return;
       }
 
-      setMemory(await getCampaignMemory(campaignId));
+      const updatedMemory = await getCampaignMemory(campaignId);
+      setMemory(savedEncounter ? mergeSavedEncounter(updatedMemory, savedEncounter) : updatedMemory);
+      setMemoryError(null);
       setSessions(await getSessions(campaignId));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Action failed.");
+      setError(err instanceof Error ? err.message : "DNDMind could not complete that action. Please try again.");
     }
   }
 
@@ -767,7 +1076,7 @@ export default function Home() {
     setSessionNotes("");
     setSessionSaveStatus(null);
     setDraftStatus(null);
-    setMemory({ npcs: [], quests: [], locations: [], events: [] });
+    setMemory(emptyCampaignMemory);
     setConversationId(null);
     setMessages([]);
     setLastResponse(null);
@@ -779,8 +1088,13 @@ export default function Home() {
       <div className="grid min-h-screen grid-cols-1 lg:h-screen lg:min-h-0 lg:grid-cols-[270px_minmax(0,1fr)_350px] lg:overflow-hidden">
         <aside className="border-b border-white/10 bg-moss px-5 py-5 text-white shadow-2xl shadow-moss/20 lg:h-screen lg:overflow-y-auto lg:border-b-0 lg:border-r">
           <div className="mb-7">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-mist">DNDMind</p>
-            <h1 className="mt-2 text-3xl font-semibold leading-tight">DM Command Center</h1>
+            <div className="flex items-center gap-3">
+              <D20MindSparkLogo />
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-mist">DNDMind</p>
+                <h1 className="mt-1 text-2xl font-semibold leading-tight">DM Command Center</h1>
+              </div>
+            </div>
             <p className="mt-2 text-sm leading-6 text-mist/80">Rules, memory, and table-ready output in one live workspace.</p>
           </div>
 
@@ -799,25 +1113,128 @@ export default function Home() {
             {clientProfileStatus && <p className="mt-2 text-xs font-semibold text-mist">{clientProfileStatus}</p>}
           </div>
 
-          <label className="text-sm font-medium text-mist" htmlFor="campaign">
-            Campaign
-          </label>
-          <select
-            id="campaign"
-            value={campaignId}
-            onChange={(event) => {
-              setCampaignId(event.target.value);
-              setConversationId(null);
-              setLastResponse(null);
-            }}
-            className="mt-2 w-full rounded-md border border-white/15 bg-white/10 px-3 py-2 text-sm text-white"
-          >
-            {campaigns.map((campaign) => (
-              <option className="text-ink" key={campaign.id} value={campaign.id}>
-                {campaign.name}
-              </option>
-            ))}
-          </select>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-mist" htmlFor="campaign">
+                Campaign
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={handleNewCampaign}
+                  className="min-w-0 rounded-md border border-white/20 px-2 py-1.5 text-xs font-semibold text-white hover:border-copper"
+                >
+                  New
+                </button>
+                <button
+                  type="button"
+                  onClick={handleEditCampaign}
+                  disabled={!activeCampaign || isArchivingCampaign}
+                  className="min-w-0 rounded-md border border-white/20 px-2 py-1.5 text-xs font-semibold text-white hover:border-copper disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={handleArchiveCampaign}
+                  disabled={!activeCampaign || isArchivingCampaign}
+                  className="min-w-0 rounded-md border border-white/15 px-2 py-1.5 text-xs font-semibold text-mist hover:border-ember hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isArchivingCampaign ? "Archiving" : "Archive"}
+                </button>
+              </div>
+            </div>
+            <select
+              id="campaign"
+              value={campaignId}
+              onChange={(event) => handleCampaignSelect(event.target.value)}
+              disabled={campaigns.length === 0}
+              className="w-full rounded-md border border-white/15 bg-white/10 px-3 py-2 text-sm text-white"
+            >
+              {campaigns.length === 0 && <option value="">No active campaigns</option>}
+              {campaigns.map((campaign) => (
+                <option className="text-ink" key={campaign.id} value={campaign.id}>
+                  {campaign.name}
+                </option>
+              ))}
+            </select>
+            {activeCampaign?.description && (
+              <p className="line-clamp-3 break-words text-xs leading-5 text-mist/75">{activeCampaign.description}</p>
+            )}
+            {campaignFormMode && (
+              <form onSubmit={handleCampaignFormSubmit} className="rounded-md border border-white/15 bg-white/10 p-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-mist/70">
+                  {campaignFormMode === "new" ? "New campaign" : "Edit campaign"}
+                </p>
+                <div className="mt-3 space-y-2">
+                  <input
+                    value={campaignForm.name}
+                    onChange={(event) => setCampaignForm((current) => ({ ...current, name: event.target.value }))}
+                    className="w-full rounded-md border border-white/15 bg-moss px-3 py-2 text-sm text-white placeholder:text-mist/70"
+                    placeholder="Name"
+                    required
+                  />
+                  <textarea
+                    value={campaignForm.description}
+                    onChange={(event) => setCampaignForm((current) => ({ ...current, description: event.target.value }))}
+                    rows={3}
+                    className="w-full resize-none rounded-md border border-white/15 bg-moss px-3 py-2 text-sm text-white placeholder:text-mist/70"
+                    placeholder="Description"
+                  />
+                  <input
+                    value={campaignForm.systemTone}
+                    onChange={(event) => setCampaignForm((current) => ({ ...current, systemTone: event.target.value }))}
+                    className="w-full rounded-md border border-white/15 bg-moss px-3 py-2 text-sm text-white placeholder:text-mist/70"
+                    placeholder="Campaign response tone"
+                  />
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCancelCampaignForm}
+                    disabled={isSavingCampaign}
+                    className="rounded-md border border-white/20 px-3 py-2 text-xs font-semibold text-mist hover:border-white/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingCampaign || !campaignForm.name.trim()}
+                    className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-moss disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isSavingCampaign ? "Saving" : "Save"}
+                  </button>
+                </div>
+              </form>
+            )}
+            <div className="rounded-md border border-white/10 bg-white/[0.06] p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-mist/70">Archived</p>
+                {archivedCampaigns.length > 0 && <span className="text-[11px] font-semibold text-mist/60">{archivedCampaigns.length}</span>}
+              </div>
+              {archivedCampaigns.length > 0 ? (
+                <div className="mt-2 space-y-1.5">
+                  {archivedCampaigns.map((campaign) => (
+                    <div key={campaign.id} className="flex min-w-0 items-center justify-between gap-2 rounded-md bg-white/5 px-2 py-1.5">
+                      <span className="min-w-0 truncate text-xs font-medium text-mist" title={campaign.name}>
+                        {campaign.name}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleRestoreCampaign(campaign)}
+                        disabled={restoringCampaignId === campaign.id}
+                        className="shrink-0 rounded-md border border-white/15 px-2 py-1 text-[11px] font-semibold text-white hover:border-copper disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {restoringCampaignId === campaign.id ? "Restoring" : "Restore"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-1 text-xs text-mist/55">None</p>
+              )}
+            </div>
+          </div>
 
           <nav className="mt-8 space-y-2 text-sm" aria-label="Workspace sections">
             {navigationItems.map((item) => (
@@ -941,35 +1358,59 @@ export default function Home() {
             <p className="font-medium text-white">Local campaign workspace</p>
             <p className="mt-1 leading-5">Campaigns, sessions, knowledge entries, and saved cards stay organized for this table.</p>
           </div>
+
+          <div className="mt-3 rounded-md border border-white/10 bg-white/[0.06] p-3 text-xs text-mist/75">
+            <p>
+              <span className="font-semibold text-white">DNDMind</span> by Revanza
+            </p>
+            <div className="mt-2 flex flex-wrap gap-3">
+              <a
+                href="https://github.com/revanza-git"
+                target="_blank"
+                rel="noreferrer"
+                className="font-semibold text-mist transition hover:text-copper"
+              >
+                GitHub
+              </a>
+              <a
+                href="https://revanza.vercel.app/"
+                target="_blank"
+                rel="noreferrer"
+                className="font-semibold text-mist transition hover:text-copper"
+              >
+                Portfolio
+              </a>
+            </div>
+          </div>
         </aside>
 
         <section id="command-center" className="flex min-h-[80vh] scroll-mt-4 flex-col lg:h-screen lg:min-h-0 lg:overflow-hidden">
-          <header className="border-b border-moss/15 bg-white/80 px-5 py-5 shadow-sm backdrop-blur">
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+          <header className="border-b border-moss/15 bg-white/80 px-5 py-3 shadow-sm backdrop-blur">
+            <div className="flex flex-col gap-2 xl:flex-row xl:items-end xl:justify-between">
               <div>
                 <p className="text-sm font-medium text-copper">Active campaign</p>
-                <h2 className="text-3xl font-semibold leading-tight">{activeCampaign?.name ?? "Loading campaign..."}</h2>
-                <p className="mt-2 max-w-3xl text-base leading-7 text-moss/75">
-                  {activeCampaign?.description ?? "Campaign context will appear here."}
+                <h2 className="text-2xl font-semibold leading-tight">{activeCampaign?.name ?? (hasLoadedCampaigns ? "No active campaign" : "Loading campaign...")}</h2>
+                <p className="mt-1 max-w-4xl overflow-hidden text-sm leading-6 text-moss/75 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
+                  {activeCampaign?.description ?? (hasLoadedCampaigns ? "Create or restore a campaign to continue." : "Campaign context will appear here.")}
                 </p>
-                <div className="mt-4 grid max-w-3xl grid-cols-2 gap-2 md:grid-cols-4">
+                <div className="mt-3 grid max-w-3xl grid-cols-2 gap-2 md:grid-cols-4">
                   <StatusMetric label="Party" value={`${party.length} PCs`} />
                   <StatusMetric label="Knowledge" value={`${documents.reduce((sum, item) => sum + item.chunkCount, 0)} notes`} />
-                  <StatusMetric label="Memory" value={`${memory.npcs.length + memory.quests.length + memory.locations.length} items`} />
+                  <StatusMetric label="Memory" value={`${memory.npcs.length + memory.quests.length + memory.locations.length + memory.encounters.length} items`} />
                   <StatusMetric label="Open Hooks" value={`${prepSummary.openHooks.length} story threads`} />
                 </div>
               </div>
 
-              <div className="flex flex-col gap-2 xl:items-end">
+              <div className="flex flex-col gap-2 xl:w-[25rem] xl:items-end">
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-moss/60">Task hints</p>
-                <div className="flex flex-wrap gap-2">
+                <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-4">
                   {modes.map((item) => (
                     <button
                       key={item}
                       type="button"
                       aria-pressed={mode === item}
                       onClick={() => setMode(item)}
-                      className={`rounded-md border px-3.5 py-2 text-sm font-semibold shadow-sm transition ${
+                      className={`rounded-md border px-2.5 py-1.5 text-sm font-semibold shadow-sm transition ${
                         mode === item
                           ? item === "Auto"
                             ? "border-ink bg-ink text-white shadow-ink/20 ring-2 ring-ink/15"
@@ -987,7 +1428,7 @@ export default function Home() {
             </div>
           </header>
 
-          <div className="border-b border-moss/15 bg-white px-5 py-3">
+          <div className="border-b border-moss/15 bg-white px-5 py-2">
             <div className="flex flex-wrap gap-3">
               {[
                 ["useRules", "Rules"],
@@ -997,7 +1438,7 @@ export default function Home() {
               ].map(([key, label]) => (
                 <label
                   key={key}
-                  className={`flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium transition ${
+                  className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition ${
                     context[key as keyof ChatContext]
                       ? "border-copper/30 bg-copper/10 text-ink"
                       : "border-moss/15 bg-parchment/50 text-moss/70"
@@ -1015,7 +1456,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-[radial-gradient(circle_at_top,_rgba(216,226,220,0.55),_transparent_36rem)] px-5 pb-32 pt-6">
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-[radial-gradient(circle_at_top,_rgba(216,226,220,0.55),_transparent_36rem)] px-5 pb-6 pt-5">
             {messages.length === 0 && (
               <EmptyChatState onPrompt={handleQuickPrompt} onPreparedScene={handleLoadPreparedScene} />
             )}
@@ -1030,7 +1471,29 @@ export default function Home() {
 
             {error && (
               <div className="rounded-md border border-ember/30 bg-ember/10 px-4 py-3 text-sm text-ember">
-                {error}
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="leading-6">{error}</p>
+                  {lastFailedChatRequest?.errorMessage === error && (
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={handleRetryFailedChat}
+                        disabled={isSending}
+                        className="rounded-md bg-ember px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-copper disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {isSending ? "Trying again" : "Try again"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleEditFailedChat}
+                        disabled={isSending}
+                        className="rounded-md border border-ember/30 bg-white/70 px-3 py-1.5 text-xs font-semibold text-ember shadow-sm hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Edit message
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1043,24 +1506,24 @@ export default function Home() {
             <div ref={timelineEndRef} />
           </div>
 
-          <form onSubmit={handleSubmit} className="shrink-0 border-t border-moss/15 bg-white/95 p-4 shadow-2xl shadow-moss/10">
-            <div className="rounded-xl border border-moss/15 bg-ink p-2 shadow-inner">
-              <div className="mb-2 flex items-center justify-between px-2 pt-1">
+          <form onSubmit={handleSubmit} className="shrink-0 border-t border-moss/15 bg-white/95 p-2 shadow-2xl shadow-moss/10">
+            <div className="rounded-md border border-moss/15 bg-ink p-2 shadow-inner">
+              <div className="mb-1 flex items-center justify-between px-1">
                 <span className="text-xs font-semibold uppercase tracking-[0.18em] text-mist/70">Command Console</span>
-                <span className="rounded-full bg-copper/20 px-2 py-1 text-xs font-semibold text-mist">{mode} hint</span>
+                <span className="rounded-full bg-copper/20 px-2 py-0.5 text-xs font-semibold text-mist">{mode} hint</span>
               </div>
-              <div className="flex flex-col gap-3 md:flex-row">
+              <div className="flex flex-col gap-2 md:flex-row">
               <textarea
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
-                rows={3}
-                className="min-h-24 flex-1 resize-none rounded-md border border-white/10 bg-white px-3 py-3 text-base leading-7 text-ink shadow-inner placeholder:text-moss/50"
+                rows={2}
+                className="min-h-16 flex-1 resize-none rounded-md border border-white/10 bg-white px-3 py-2 text-sm leading-6 text-ink shadow-inner placeholder:text-moss/50"
                 placeholder="Ask for a ruling, NPC, combat beat, session summary, or scene setup..."
               />
               <button
                 type="submit"
                 disabled={isSending || !campaignId}
-                className="rounded-md bg-copper px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-ember disabled:cursor-not-allowed disabled:opacity-50 md:w-36"
+                className="rounded-md bg-copper px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-ember disabled:cursor-not-allowed disabled:opacity-50 md:w-28"
               >
                 {isSending ? "Sending" : "Send"}
               </button>
@@ -1071,23 +1534,52 @@ export default function Home() {
 
         <aside className="border-t border-moss/15 bg-white px-5 py-5 lg:h-screen lg:overflow-y-auto lg:border-l lg:border-t-0">
           <section id="encounters" className="scroll-mt-4">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-copper">Saved Encounters</h2>
+            <SavedEncountersSection encounters={memory.encounters} isLoading={isLoadingMemory} error={memoryError} />
+          </section>
+
+          <section className="mt-7">
             <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-copper">Dice Roller</h2>
             <div className="mt-3 space-y-3 rounded-lg border border-moss/15 bg-parchment/45 p-3 shadow-sm">
               <div className="flex gap-2">
                 <input
                   value={diceExpression}
-                  onChange={(event) => setDiceExpression(event.target.value)}
-                  className="min-w-0 flex-1 rounded-md border border-moss/20 px-3 py-2 text-sm"
+                  onChange={(event) => setDiceExpression(sanitizeDiceExpressionInput(event.target.value))}
+                  className={`min-w-0 flex-1 rounded-md border px-3 py-2 text-sm outline-none transition focus:ring-2 focus:ring-copper/30 ${
+                    diceExpressionError ? "border-ember/50 bg-ember/5" : "border-moss/20 bg-white"
+                  }`}
+                  inputMode="text"
+                  maxLength={12}
+                  pattern="[0-9]{1,2}[dD][0-9]{1,4}([+-][0-9]{1,4})?"
+                  aria-invalid={Boolean(diceExpressionError)}
+                  aria-describedby="dice-format-help"
                   placeholder="1d20+5"
                 />
                 <button
                   type="button"
                   onClick={handleManualDiceRoll}
-                  disabled={isRolling}
-                  className="rounded-md bg-ink px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                  disabled={isRolling || !campaignId || Boolean(diceExpressionError)}
+                  className="rounded-md bg-ink px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isRolling ? "Rolling" : "Roll"}
                 </button>
+              </div>
+              <div id="dice-format-help" className="rounded-md border border-moss/10 bg-white/70 px-3 py-2 text-xs text-moss/75">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-semibold uppercase tracking-[0.08em] text-copper">Format</span>
+                  <code className="rounded bg-parchment px-1.5 py-0.5 font-semibold text-ink">XdY +/- N</code>
+                  {diceExamples.map((example) => (
+                    <button
+                      key={example}
+                      type="button"
+                      onClick={() => setDiceExpression(example)}
+                      className="rounded border border-moss/10 bg-white px-1.5 py-0.5 font-semibold text-moss transition hover:border-copper hover:text-ink"
+                    >
+                      {example}
+                    </button>
+                  ))}
+                </div>
+                {diceExpressionError && <p className="mt-2 leading-5 font-semibold text-ember">{diceExpressionError}</p>}
               </div>
               {manualToolCall && <ToolCallCard toolCall={manualToolCall} />}
             </div>
@@ -1183,7 +1675,7 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={handleSummarizeSession}
-                  disabled={isSummarizing || isSavingSession || !sessionNotes.trim()}
+                  disabled={isSummarizing || isSavingSession || !campaignId || !sessionNotes.trim()}
                   className="rounded-md bg-copper px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isSummarizing ? "Summarizing" : "Summarize"}
@@ -1257,22 +1749,91 @@ export default function Home() {
             </div>
           </section>
 
-          <section className="mt-7">
-            <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-copper">Citations</h2>
-            <pre className="mt-3 max-h-40 overflow-auto rounded-md bg-ink p-3 text-xs leading-5 text-mist">
-              {JSON.stringify(lastResponse?.citations ?? [], null, 2)}
-            </pre>
-          </section>
-
-          <section className="mt-7">
-            <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-copper">Tool Calls</h2>
-            <pre className="mt-3 max-h-40 overflow-auto rounded-md bg-ink p-3 text-xs leading-5 text-mist">
-              {JSON.stringify(lastResponse?.toolCalls ?? [], null, 2)}
-            </pre>
-          </section>
         </aside>
       </div>
     </main>
+  );
+}
+
+function SavedEncountersSection({
+  encounters,
+  isLoading,
+  error
+}: {
+  encounters: CampaignMemory["encounters"];
+  isLoading: boolean;
+  error: string | null;
+}) {
+  if (isLoading) {
+    return (
+      <div className="mt-3 rounded-lg border border-moss/15 bg-parchment/45 p-3 text-sm text-moss/70 shadow-sm">
+        Loading saved encounters...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="mt-3 rounded-lg border border-ember/25 bg-ember/10 p-3 text-sm leading-6 text-ember shadow-sm">
+        Saved encounters could not load. {error}
+      </div>
+    );
+  }
+
+  if (encounters.length === 0) {
+    return (
+      <div className="mt-3 rounded-lg border border-moss/15 bg-parchment/45 p-3 text-sm leading-6 text-moss/70 shadow-sm">
+        No saved encounters yet. Generate an encounter, then use Save Encounter to keep it in campaign memory.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 space-y-3">
+      {encounters.map((encounter) => {
+        const metadata = object(encounter.metadata);
+        const difficulty = text(metadata.difficulty) || text(metadata.Difficulty);
+        const environment = text(metadata.environment) || text(metadata.Environment);
+        const monsters = metadata.monsters ?? metadata.Monsters;
+        const rewards = metadata.rewards ?? metadata.Rewards;
+        const hooks = metadata.campaignHooks ?? metadata.CampaignHooks;
+        return (
+          <article key={encounter.id} className="rounded-lg border border-moss/15 bg-white p-3 text-sm leading-6 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="break-words font-semibold leading-6 text-ink">{encounter.title}</h3>
+                <p className="mt-0.5 text-xs font-semibold uppercase tracking-[0.1em] text-copper">
+                  {[difficulty, environment].filter(Boolean).join(" · ") || "Encounter"}
+                </p>
+              </div>
+              {encounter.createdAt && (
+                <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.12em] text-copper">
+                  {formatEventDate(encounter.createdAt)}
+                </span>
+              )}
+            </div>
+
+            {encounter.summary && <p className="mt-3 rounded-md bg-parchment/70 px-3 py-2 text-moss/80">{encounter.summary}</p>}
+            <EncounterDetail label="Monsters" value={formatEncounterValue(monsters)} />
+            <EncounterDetail label="Rewards" value={formatEncounterValue(rewards)} />
+            <EncounterDetail label="Hooks" value={formatEncounterValue(hooks)} />
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function EncounterDetail({ label, value }: { label: string; value: string }) {
+  if (!value) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 rounded-md bg-parchment/60 px-3 py-2">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-copper">{label}</p>
+      <p className="mt-1 text-moss/75">{value}</p>
+    </div>
   );
 }
 
@@ -1455,37 +2016,37 @@ function EmptyChatState({
   onPreparedScene: () => void;
 }) {
   return (
-    <section className="mx-auto flex min-h-[28rem] w-full max-w-5xl items-center">
-      <div className="w-full rounded-2xl border border-moss/15 bg-white/90 p-6 shadow-xl shadow-moss/10 md:p-8">
+    <section className="mx-auto flex min-h-[18rem] w-full max-w-5xl items-center">
+      <div className="w-full rounded-md border border-moss/15 bg-white/90 p-5 shadow-xl shadow-moss/10 md:p-6">
         <div className="max-w-3xl">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-copper">Ready for the next table beat</p>
-          <h3 className="mt-3 text-3xl font-semibold leading-tight text-ink md:text-4xl">
+          <h3 className="mt-2 text-2xl font-semibold leading-tight text-ink md:text-3xl">
             Ask for rulings, prep scenes, and turn campaign memory into table-ready output.
           </h3>
-          <p className="mt-4 text-base leading-7 text-moss/75">
+          <p className="mt-3 text-sm leading-6 text-moss/75">
             DNDMind blends rules context, session notes, party details, and structured tools so the next answer is useful at the table.
           </p>
         </div>
 
-        <div className="mt-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {quickPrompts.map((prompt) => (
             <button
               key={prompt.label}
               type="button"
               onClick={() => onPrompt(prompt)}
-              className="min-h-28 rounded-xl border border-moss/15 bg-parchment/70 px-4 py-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-copper/50 hover:bg-white hover:shadow-md"
+              className="min-h-20 rounded-md border border-moss/15 bg-parchment/70 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-copper/50 hover:bg-white hover:shadow-md"
             >
               <span className="block text-sm font-semibold text-ink">{prompt.label}</span>
               <span className="mt-2 block text-xs leading-5 text-moss/70">{prompt.mode} hint</span>
             </button>
           ))}
         </div>
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-moss/10 bg-parchment/60 px-4 py-3">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-moss/10 bg-parchment/60 px-4 py-2">
           <p className="text-sm leading-6 text-moss/75">Want a quick starting point? Load a prepared Captain Vey encounter briefing.</p>
           <button
             type="button"
             onClick={onPreparedScene}
-            className="rounded-full border border-copper bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-copper shadow-sm transition hover:bg-copper hover:text-white"
+            className="rounded-md border border-copper bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-copper shadow-sm transition hover:bg-copper hover:text-white"
           >
             Load Prepared Scene
           </button>
@@ -1549,6 +2110,42 @@ function cleanStoredMemoryText(value: string) {
     .replace(/\\n/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function formatEncounterValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (item && typeof item === "object") {
+          const entry = object(item);
+          return [
+            text(entry.name) || text(entry.title) || text(entry.creature),
+            text(entry.count) ? `x${text(entry.count)}` : "",
+            text(entry.role),
+            text(entry.xp) ? `${text(entry.xp)} XP` : ""
+          ].filter(Boolean).join(" ");
+        }
+        return text(item);
+      })
+      .filter(Boolean)
+      .join(" · ");
+  }
+
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, item]) => `${splitCamelCase(key)}: ${text(item) || JSON.stringify(item)}`)
+      .join(" · ");
+  }
+
+  return text(value);
+}
+
+function mergeSavedEncounter(memory: CampaignMemory, encounter: CampaignMemory["encounters"][number]): CampaignMemory {
+  const encounters = memory.encounters.filter((item) => item.id !== encounter.id && item.title !== encounter.title);
+  return {
+    ...memory,
+    encounters: [encounter, ...encounters]
+  };
 }
 
 function MemoryGroup({
@@ -1616,6 +2213,16 @@ function PartyPanel({
   onLevelChange: (character: PartyCharacter, nextLevel: number) => void;
   onCreateNote: (input: { title: string; description: string }) => void;
 }) {
+  const activePanelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!activePanel) {
+      return;
+    }
+
+    activePanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [activePanel]);
+
   return (
     <div>
       <div className="mt-7 flex items-center justify-between gap-3">
@@ -1659,7 +2266,7 @@ function PartyPanel({
       {status && <p className="mt-3 rounded-md bg-mist px-3 py-2 text-xs font-semibold text-moss">{status}</p>}
 
       {activePanel && (
-        <div className="mt-4 rounded-xl border border-moss/15 bg-white p-4 shadow-sm">
+        <div ref={activePanelRef} className="mt-4 scroll-mt-4 rounded-xl border border-moss/15 bg-white p-4 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-copper">
@@ -2076,14 +2683,7 @@ function ToolResult({ toolCall }: { toolCall: ToolCall }) {
   const result = toolCall.result ?? {};
   if (toolCall.toolName === "rollDice") {
     const expression = toolCall.arguments.expression ?? result.expression;
-    return (
-      <div className="grid gap-2 sm:grid-cols-4">
-        <ToolMetric label="Expression" value={String(expression ?? "")} />
-        <ToolMetric label="Rolls" value={JSON.stringify(result.rolls ?? [])} />
-        <ToolMetric label="Modifier" value={formatModifier(result.modifier)} />
-        <ToolMetric label="Total" value={String(result.total ?? "")} emphasis />
-      </div>
-    );
+    return <DiceRollResult expression={String(expression ?? "")} rolls={JSON.stringify(result.rolls ?? [])} modifier={formatModifier(result.modifier)} total={String(result.total ?? "")} />;
   }
   if (toolCall.toolName === "generateInitiativeOrder") {
     const order = Array.isArray(result.order) ? result.order : [];
@@ -2142,10 +2742,45 @@ function ToolResult({ toolCall }: { toolCall: ToolCall }) {
   return <KeyValue value={result} />;
 }
 
+function DiceRollResult({
+  expression,
+  rolls,
+  modifier,
+  total
+}: {
+  expression: string;
+  rolls: string;
+  modifier: string;
+  total: string;
+}) {
+  return (
+    <div className="rounded-lg border border-moss/10 bg-white/75 p-3">
+      <div className="flex items-center justify-between gap-3 border-b border-moss/10 pb-3">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-copper">Total</p>
+        <p className="shrink-0 text-2xl font-semibold leading-none text-ink">{total || "-"}</p>
+      </div>
+      <dl className="mt-3 grid gap-2 text-sm">
+        <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-start gap-3">
+          <dt className="text-[11px] font-semibold uppercase tracking-[0.08em] text-copper">Expression</dt>
+          <dd className="min-w-0 break-words text-right font-medium text-moss">{expression || "-"}</dd>
+        </div>
+        <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-start gap-3">
+          <dt className="text-[11px] font-semibold uppercase tracking-[0.08em] text-copper">Rolls</dt>
+          <dd className="min-w-0 break-words text-right font-medium text-moss">{rolls || "-"}</dd>
+        </div>
+        <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-start gap-3">
+          <dt className="text-[11px] font-semibold uppercase tracking-[0.08em] text-copper">Modifier</dt>
+          <dd className="min-w-0 break-words text-right font-medium text-moss">{modifier || "-"}</dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
+
 function ToolMetric({ label, value, emphasis = false }: { label: string; value: string; emphasis?: boolean }) {
   return (
     <div className="rounded-lg border border-moss/10 bg-white/75 px-3 py-2">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-copper">{label}</p>
+      <p className="break-words text-[11px] font-semibold uppercase tracking-[0.08em] text-copper">{label}</p>
       <p className={`mt-1 break-words ${emphasis ? "text-lg font-semibold text-ink" : "text-sm text-moss"}`}>{value || "-"}</p>
     </div>
   );
@@ -2236,6 +2871,33 @@ function KeyValue({ value }: { value: unknown }) {
 function formatModifier(value: unknown) {
   const numeric = Number(value ?? 0);
   return `${numeric >= 0 ? "+" : ""}${numeric}`;
+}
+
+function sanitizeDiceExpressionInput(value: string) {
+  return value.replace(/[^0-9dD+-]/g, "").replace(/D/g, "d").slice(0, 12);
+}
+
+function validateDiceExpression(value: string) {
+  const expression = value.trim();
+  if (!expression) {
+    return "Enter dice as XdY, such as 1d20.";
+  }
+
+  const match = expression.match(diceExpressionPattern);
+  if (!match) {
+    return "Use one dice term: XdY with an optional +N or -N modifier.";
+  }
+
+  const count = Number(match[1]);
+  const sides = Number(match[2]);
+  if (count < 1 || count > 50) {
+    return "Dice count must be between 1 and 50.";
+  }
+  if (sides < 2 || sides > 1000) {
+    return "Dice sides must be between 2 and 1000.";
+  }
+
+  return null;
 }
 
 function numberOrNull(value: string): number | null {
@@ -2465,12 +3127,12 @@ function enhanceChatResultForPreparedContent(userMessage: string, response: Chat
             {
               label: "Make Harder",
               action: "prompt",
-              payload: { message: "Make the Ambush at the Smuggler Tunnel harder while keeping it fair." }
+              payload: { message: "Make the Ambush at the Smuggler Tunnel encounter harder while keeping it fair." }
             },
             {
               label: "Make Easier",
               action: "prompt",
-              payload: { message: "Make the Ambush at the Smuggler Tunnel easier without losing the evidence chase." }
+              payload: { message: "Make the Ambush at the Smuggler Tunnel encounter easier without losing the evidence chase." }
             }
           ]
     };

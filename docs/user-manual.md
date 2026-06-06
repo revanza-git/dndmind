@@ -12,6 +12,7 @@ Use this manual when you want to know what to click, what each control means, an
 2. Choose a campaign.
    - Use the campaign selector in the left sidebar.
    - To follow this guide, choose `Embers of Blackwater`.
+   - If the selector says **No active campaigns**, click **New** to make one or restore one from **Archived**.
 3. Check the party.
    - Look at the Party panel on the right.
    - Add or update character level, HP, AC, class, race, initiative, passive perception, and notes if needed.
@@ -46,7 +47,7 @@ Expected result: DNDMind shows an encounter briefing, any tool or memory context
 
 | Area | What you use it for |
 | --- | --- |
-| Left Sidebar | Choose campaigns, open Campaign Knowledge, navigate app areas, and return to this manual. |
+| Left Sidebar | Choose, create, edit, archive, or restore campaigns; open Campaign Knowledge; navigate app areas; and return to this manual. |
 | Campaign Knowledge | Add source material DNDMind can search and cite for the active campaign. |
 | Center Workspace | Read the chat, answers, citations, tool results, and generated cards. |
 | Top Summary Cards | See quick counts for party members, knowledge notes, memory items, and open hooks. |
@@ -54,6 +55,70 @@ Expected result: DNDMind shows an encounter briefing, any tool or memory context
 | Task Hints | Tell DNDMind what kind of work the next prompt needs. |
 | Right Panel | Roll dice, manage session notes, review party details, and check memory. |
 | Command Console | Type your request and send it. |
+
+## Campaign Menu
+
+The Campaign menu is the first place to check before you ask DNDMind for help. It tells the app which campaign you are working on right now.
+
+When you choose a campaign, DNDMind uses that campaign for chat, session notes, party details, saved cards, campaign memory, and Campaign Knowledge. If the wrong campaign is selected, your next answer may use the wrong story context.
+
+### What each control means
+
+| Control | What it does | When to use it |
+| --- | --- | --- |
+| **New** | Opens a small form for a new campaign. | You are starting a new table, adventure, one-shot, or test campaign. |
+| **Edit** | Opens the form for the selected campaign. | You want to rename the campaign, update its description, or change the response tone. |
+| **Archive** | Moves the selected campaign out of the active list. It does not delete it. | You are done with a campaign for now and want to keep the active list tidy. |
+| Campaign selector | Chooses the active campaign. | You want DNDMind to use a different campaign. |
+| **Archived** list | Shows campaigns you put away. | You want to restore an older campaign. |
+| **Restore** | Moves an archived campaign back into the active campaign selector. | You want to use an archived campaign again. |
+
+### Create a campaign
+
+1. Click **New**.
+2. Enter a campaign name.
+3. Add a description if you want DNDMind to know the premise, mood, or main conflict.
+4. Add a campaign response tone if you want a consistent style, such as `Wry gothic suspense` or `Direct, table-ready notes`.
+5. Click **Save**.
+
+Expected result: the new campaign becomes the active campaign, and its name appears at the top of the main workspace.
+
+### Edit a campaign
+
+1. Choose the campaign from the selector.
+2. Click **Edit**.
+3. Change the name, description, or response tone.
+4. Click **Save**.
+
+Use **Edit** for campaign-level details only. Party members, session notes, rules documents, and saved NPCs are managed in their own areas.
+
+### Archive a campaign
+
+1. Choose the campaign you want to put away.
+2. Click **Archive**.
+3. Confirm the message.
+
+Expected result: the campaign leaves the active selector and appears under **Archived**. If another active campaign exists, DNDMind selects one for you. If no active campaigns remain, the selector says **No active campaigns**.
+
+Archiving is useful when a campaign is finished, paused, or only needed later. It is not the same as deleting.
+
+### Restore an archived campaign
+
+1. Find the campaign under **Archived**.
+2. Click **Restore**.
+
+Expected result: the campaign returns to the active selector and becomes the selected campaign.
+
+### If you see "No active campaigns"
+
+This means there is no campaign currently ready to use from the active list.
+
+You can:
+
+1. Click **New** to create a campaign.
+2. Look under **Archived** and click **Restore** on an older campaign.
+
+Some parts of DNDMind work best after you have an active campaign. Create or restore one before adding campaign notes, saving cards, or asking story-specific questions.
 
 ## Campaign Knowledge
 
@@ -145,6 +210,16 @@ Task Hints work best when paired with the right context toggles. For example, **
 
 ## Common Tasks
 
+### Create or choose a campaign
+
+1. Find **Campaign** in the left sidebar.
+2. Click **New** if you need a new campaign.
+3. Use the selector to choose an existing active campaign.
+4. If the campaign is under **Archived**, click **Restore** first.
+5. Confirm the campaign name at the top of the main workspace before sending a prompt.
+
+Expected result: DNDMind uses the selected campaign for memory, notes, sources, party context, and saved cards.
+
 ### Ask a rules question
 
 1. Choose **Rules** in Task Hints.
@@ -186,7 +261,7 @@ Expected result: DNDMind creates an NPC with role, personality, motivation, secr
 5. Review the encounter card.
 6. Click **Save Encounter** if it fits your session.
 
-Expected result: DNDMind creates a party-aware encounter with tactics and story context.
+Expected result: DNDMind creates a party-aware encounter with tactics and story context. If you click **Save Encounter**, it appears later in Campaign Memory under saved encounters.
 
 ### Roll dice
 
@@ -328,6 +403,16 @@ Fix:
 1. Return to the same browser profile you used before.
 2. Avoid clearing browser storage during a campaign.
 
+### I see "No active campaigns"
+
+Cause: all campaigns may be archived, or no campaign has been created yet.
+
+Fix:
+
+1. Click **New** to create a campaign.
+2. Or look under **Archived** and click **Restore** on the campaign you want.
+3. Confirm the restored or new campaign name appears at the top.
+
 ### DNDMind is using the wrong campaign
 
 Cause: the active campaign is not the one you intended.
@@ -338,8 +423,20 @@ Fix:
 2. Choose the correct campaign.
 3. Confirm the active campaign name at the top before sending a prompt.
 
+### I archived a campaign by mistake
+
+Cause: the campaign was moved out of the active list.
+
+Fix:
+
+1. Look under **Archived** in the Campaign menu.
+2. Click **Restore** on the campaign.
+3. Confirm it appears in the campaign selector again.
+
 ## Helpful Terms
 
+- **Active Campaign**: the campaign currently selected in the left sidebar.
+- **Archived Campaign**: a campaign moved out of the active list but still available to restore later.
 - **Campaign Knowledge**: source text added to a campaign so DNDMind can search and cite it.
 - **Citation**: the source DNDMind used for an answer.
 - **Context Toggle**: a switch that controls which saved information DNDMind may use for the next prompt.

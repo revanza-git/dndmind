@@ -1,9 +1,10 @@
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 from uuid import uuid4
 
 from app.orchestration.structured_output import build_mock_structured_output, build_suggested_actions
-from app.orchestration.gemini_provider import _fallback_structured_output
+from app.orchestration.gemini_provider import _fallback_structured_output, real_chat_response
 from app.schemas.structured_outputs import EncounterOutput, NpcOutput
 
 
@@ -108,6 +109,68 @@ Wren saw Captain Vey slip into the Serpent's Coil smuggler tunnels shortly after
         npc = NpcOutput(**output["data"])
         self.assertEqual(npc.name, '"Whisper" Wren')
         self.assertIn("Captain Vey", npc.description)
+
+    def test_real_provider_encounter_mode_plain_answer_becomes_save_ready(self):
+        answer = """
+A hard fight erupts on a rain-slick bridge while bandits fire from overturned wagons.
+The enemies use cover, focus isolated heroes, and retreat once their leader falls.
+"""
+        with (
+            patch("app.orchestration.gemini_provider._ensure_gemini_provider"),
+            patch("app.orchestration.gemini_provider._retrieve_context", return_value=("", [])),
+            patch("app.orchestration.gemini_provider.run_provider_tool_loop", return_value=([], [])),
+            patch(
+                "app.orchestration.gemini_provider._call_gemini",
+                return_value={"answer": answer, "structuredOutput": None, "suggestedActions": []},
+            ),
+        ):
+            response = real_chat_response(request("Make something for tonight.", "Encounter"))
+
+        self.assertEqual(response["structuredOutput"]["type"], "encounter")
+        encounter = EncounterOutput(**response["structuredOutput"]["data"])
+        self.assertEqual(encounter.difficulty, "Hard")
+        self.assertGreater(len(encounter.monsters), 0)
+        self.assertEqual(response["suggestedActions"][0]["action"], "saveEncounter")
+
+    def test_real_provider_partial_encounter_output_becomes_valid_fallback(self):
+        answer = """
+This is a Hard encounter.
+Environment: A moonlit toll gate with broken barricades, wagon cover, and a flooded ditch.
+Tactics: Cultists pin the party near the gate while a lookout pressures anyone carrying a torch.
+Rewards: Toll ledger, black iron key.
+Campaign Hooks: The ledger names Captain Vey.
+"""
+        output = _fallback_structured_output(
+            request("Create a hard ambush at the toll gate.", "Auto"),
+            answer,
+            {
+                "type": "encounter",
+                "data": {
+                    "title": "Moonlit Toll Gate",
+                    "difficulty": "Brutal",
+                    "monsters": [{"name": "Gate Cultist", "count": "2"}],
+                },
+            },
+        )
+
+        self.assertIsNotNone(output)
+        self.assertEqual(output["type"], "encounter")
+        encounter = EncounterOutput(**output["data"])
+        self.assertEqual(encounter.title, "Moonlit Toll Gate")
+        self.assertEqual(encounter.difficulty, "Hard")
+        self.assertEqual(encounter.monsters[0].name, "Gate Cultist")
+        self.assertEqual(encounter.monsters[0].count, 2)
+        self.assertTrue(encounter.scalingOptions.easier)
+        self.assertIn("Captain Vey", encounter.campaignHooks[0])
+
+    def test_real_provider_conflicting_prompt_does_not_force_encounter_mode(self):
+        output = _fallback_structured_output(
+            request("Explain the rules for grappling and concentration.", "Encounter"),
+            "Grappling and concentration use separate rules.",
+            None,
+        )
+
+        self.assertIsNone(output)
 
 
 if __name__ == "__main__":

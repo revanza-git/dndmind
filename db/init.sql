@@ -7,6 +7,7 @@ CREATE TABLE campaigns (
   description text NULL,
   system_tone text NOT NULL DEFAULT 'Helpful, cinematic, rules-aware, and concise.',
   current_session_id uuid NULL,
+  archived_at timestamptz NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -167,7 +168,8 @@ CREATE TABLE encounters (
   summary text NULL,
   outcome text NULL,
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-  created_at timestamptz NOT NULL DEFAULT now()
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT encounters_campaign_client_owner_title_key UNIQUE (campaign_id, client_owner_id, title)
 );
 
 CREATE TABLE memory_events (
@@ -183,6 +185,7 @@ CREATE TABLE memory_events (
 );
 
 CREATE INDEX idx_sessions_campaign_id ON sessions(campaign_id);
+CREATE INDEX idx_campaigns_archived_at ON campaigns(archived_at);
 CREATE INDEX idx_sessions_campaign_client_owner ON sessions(campaign_id, client_owner_id);
 CREATE INDEX idx_party_characters_campaign_id ON party_characters(campaign_id);
 CREATE INDEX idx_party_character_events_campaign_id ON party_character_events(campaign_id);

@@ -42,6 +42,13 @@ class ScopeGuardTests(unittest.TestCase):
     def test_short_editorial_follow_up_is_allowed(self):
         self.assertTrue(is_in_scope_prompt("make it darker"))
 
+    def test_encounter_scaling_buttons_are_allowed(self):
+        self.assertTrue(is_in_scope_prompt("Make the Ambush at the Smuggler Tunnel harder while keeping it fair."))
+        self.assertTrue(
+            is_in_scope_prompt("Make the Ambush at the Smuggler Tunnel easier without losing the evidence chase.")
+        )
+        self.assertTrue(is_in_scope_prompt("Make the Moonlit Toll Gate encounter harder while keeping it fair."))
+
     def test_unrelated_prompt_is_refused(self):
         self.assertFalse(is_in_scope_prompt("How do I bake sourdough bread?"))
 

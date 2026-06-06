@@ -5,6 +5,9 @@ using System.Net.Http.Json;
 using Npgsql;
 using NpgsqlTypes;
 
+const string DemoClientOwnerId = "dndmind-demo-client";
+var demoCampaignId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+
 var builder = WebApplication.CreateBuilder(args);
 
 var connectionString =
@@ -28,15 +31,37 @@ builder.Services.AddCors(options =>
 var app = builder.Build();
 app.UseCors();
 await EnsureRagSchema(app.Services.GetRequiredService<NpgsqlDataSource>());
+await EnsureDemoSeedData(app.Services.GetRequiredService<NpgsqlDataSource>(), demoCampaignId, DemoClientOwnerId);
 
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok", service = "api" }));
 
 app.MapGet("/api/campaigns", async (NpgsqlDataSource db) =>
 {
     const string sql = """
-        SELECT id, name, description, system_tone, current_session_id, created_at, updated_at
+        SELECT id, name, description, system_tone, current_session_id, archived_at, created_at, updated_at
         FROM campaigns
+        WHERE archived_at IS NULL
         ORDER BY created_at DESC
+        """;
+
+    var campaigns = new List<CampaignDto>();
+    await using var cmd = db.CreateCommand(sql);
+    await using var reader = await cmd.ExecuteReaderAsync();
+    while (await reader.ReadAsync())
+    {
+        campaigns.Add(ReadCampaign(reader));
+    }
+
+    return Results.Ok(campaigns);
+});
+
+app.MapGet("/api/campaigns/archived", async (NpgsqlDataSource db) =>
+{
+    const string sql = """
+        SELECT id, name, description, system_tone, current_session_id, archived_at, created_at, updated_at
+        FROM campaigns
+        WHERE archived_at IS NOT NULL
+        ORDER BY archived_at DESC, created_at DESC
         """;
 
     var campaigns = new List<CampaignDto>();
@@ -60,7 +85,7 @@ app.MapPost("/api/campaigns", async (CreateCampaignRequest request, NpgsqlDataSo
     const string sql = """
         INSERT INTO campaigns (name, description, system_tone)
         VALUES (@name, @description, @systemTone)
-        RETURNING id, name, description, system_tone, current_session_id, created_at, updated_at
+        RETURNING id, name, description, system_tone, current_session_id, archived_at, created_at, updated_at
         """;
 
     await using var cmd = db.CreateCommand(sql);
@@ -77,8 +102,9 @@ app.MapPost("/api/campaigns", async (CreateCampaignRequest request, NpgsqlDataSo
 
 app.MapGet("/api/campaigns/{campaignId:guid}", async (Guid campaignId, NpgsqlDataSource db) =>
 {
+    // Detail reads include archived campaigns so bookmarked/restored campaign references can still resolve.
     const string sql = """
-        SELECT id, name, description, system_tone, current_session_id, created_at, updated_at
+        SELECT id, name, description, system_tone, current_session_id, archived_at, created_at, updated_at
         FROM campaigns
         WHERE id = @id
         """;
@@ -97,7 +123,8 @@ app.MapPut("/api/campaigns/{campaignId:guid}", async (Guid campaignId, UpdateCam
             description = @description,
             system_tone = COALESCE(NULLIF(@systemTone, ''), system_tone)
         WHERE id = @id
-        RETURNING id, name, description, system_tone, current_session_id, created_at, updated_at
+          AND archived_at IS NULL
+        RETURNING id, name, description, system_tone, current_session_id, archived_at, created_at, updated_at
         """;
 
     await using var cmd = db.CreateCommand(sql);
@@ -108,6 +135,40 @@ app.MapPut("/api/campaigns/{campaignId:guid}", async (Guid campaignId, UpdateCam
 
     await using var reader = await cmd.ExecuteReaderAsync();
     return await reader.ReadAsync() ? Results.Ok(ReadCampaign(reader)) : Results.NotFound();
+});
+
+app.MapPost("/api/campaigns/{campaignId:guid}/archive", async (Guid campaignId, NpgsqlDataSource db) =>
+{
+    const string sql = """
+        UPDATE campaigns
+        SET archived_at = now(),
+            updated_at = now()
+        WHERE id = @id
+          AND archived_at IS NULL
+        RETURNING id, name, description, system_tone, current_session_id, archived_at, created_at, updated_at
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("id", campaignId);
+    await using var reader = await cmd.ExecuteReaderAsync();
+    return await reader.ReadAsync() ? Results.Ok(ReadCampaign(reader)) : Results.NotFound(new { error = "Campaign not found." });
+});
+
+app.MapPost("/api/campaigns/{campaignId:guid}/restore", async (Guid campaignId, NpgsqlDataSource db) =>
+{
+    const string sql = """
+        UPDATE campaigns
+        SET archived_at = NULL,
+            updated_at = now()
+        WHERE id = @id
+          AND archived_at IS NOT NULL
+        RETURNING id, name, description, system_tone, current_session_id, archived_at, created_at, updated_at
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("id", campaignId);
+    await using var reader = await cmd.ExecuteReaderAsync();
+    return await reader.ReadAsync() ? Results.Ok(ReadCampaign(reader)) : Results.NotFound(new { error = "Campaign not found." });
 });
 
 app.MapGet("/api/campaigns/{campaignId:guid}/party", async (Guid campaignId, NpgsqlDataSource db) =>
@@ -407,6 +468,8 @@ app.MapGet("/api/campaigns/{campaignId:guid}/sessions", async (Guid campaignId, 
         return Results.BadRequest(new { error = clientError });
     }
 
+    await EnsureDemoClientSeed(db, campaignId, clientOwnerId, demoCampaignId, DemoClientOwnerId);
+
     const string sql = """
         SELECT id, campaign_id, session_number, title, raw_notes, summary, status, created_at, updated_at
         FROM sessions
@@ -500,6 +563,11 @@ app.MapPut("/api/sessions/{sessionId:guid}", async (Guid sessionId, UpsertSessio
             updated_at = now()
         WHERE id = @sessionId
           AND client_owner_id = @clientOwnerId
+          AND EXISTS (
+            SELECT 1 FROM campaigns c
+            WHERE c.id = sessions.campaign_id
+              AND c.archived_at IS NULL
+          )
         RETURNING id, campaign_id, session_number, title, raw_notes, summary, status, created_at, updated_at
         """;
 
@@ -523,7 +591,16 @@ app.MapDelete("/api/sessions/{sessionId:guid}", async (Guid sessionId, NpgsqlDat
         return Results.BadRequest(new { error = clientError });
     }
 
-    const string sql = "DELETE FROM sessions WHERE id = @sessionId AND client_owner_id = @clientOwnerId";
+    const string sql = """
+        DELETE FROM sessions
+        WHERE id = @sessionId
+          AND client_owner_id = @clientOwnerId
+          AND EXISTS (
+            SELECT 1 FROM campaigns c
+            WHERE c.id = sessions.campaign_id
+              AND c.archived_at IS NULL
+          )
+        """;
     await using var cmd = db.CreateCommand(sql);
     cmd.Parameters.AddWithValue("sessionId", sessionId);
     cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
@@ -542,6 +619,10 @@ app.MapPost("/api/sessions/{sessionId:guid}/summarize", async (Guid sessionId, N
     if (session is null)
     {
         return Results.NotFound(new { error = "Session not found." });
+    }
+    if (await LoadCampaign(session.CampaignId, db) is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
     }
     if (string.IsNullOrWhiteSpace(session.RawNotes))
     {
@@ -565,7 +646,7 @@ app.MapPost("/api/sessions/{sessionId:guid}/summarize", async (Guid sessionId, N
     var summary = await workerResponse.Content.ReadFromJsonAsync<SessionSummaryResponse>();
     if (summary is null)
     {
-        return Results.Problem("AI worker returned an empty summary.", statusCode: 502);
+        return Results.Problem("DNDMind could not create a session summary just now. Please try again in a moment.", statusCode: 502);
     }
 
     await SaveSessionMemory(session, summary, clientOwnerId, db);
@@ -601,6 +682,8 @@ app.MapGet("/api/campaigns/{campaignId:guid}/memory", async (Guid campaignId, Np
         return Results.BadRequest(new { error = clientError });
     }
 
+    await EnsureDemoClientSeed(db, campaignId, clientOwnerId, demoCampaignId, DemoClientOwnerId);
+
     var npcs = await LoadMemoryRows<NpcDto>(db, """
         SELECT id, campaign_id, name, role, description, disposition, last_seen_session_id, metadata, created_at, updated_at
         FROM npcs WHERE campaign_id = @campaignId AND client_owner_id = @clientOwnerId ORDER BY updated_at DESC, name
@@ -613,12 +696,16 @@ app.MapGet("/api/campaigns/{campaignId:guid}/memory", async (Guid campaignId, Np
         SELECT id, campaign_id, name, description, location_type, last_seen_session_id, metadata, created_at, updated_at
         FROM locations WHERE campaign_id = @campaignId AND client_owner_id = @clientOwnerId ORDER BY updated_at DESC, name
         """, campaignId, clientOwnerId, ReadLocation);
+    var encounters = await LoadMemoryRows<EncounterDto>(db, """
+        SELECT id, campaign_id, session_id, title, summary, outcome, metadata, created_at
+        FROM encounters WHERE campaign_id = @campaignId AND client_owner_id = @clientOwnerId ORDER BY created_at DESC, title
+        """, campaignId, clientOwnerId, ReadEncounter);
     var events = await LoadMemoryRows<MemoryEventDto>(db, """
         SELECT id, campaign_id, session_id, event_type, title, description, metadata, created_at
         FROM memory_events WHERE campaign_id = @campaignId AND client_owner_id = @clientOwnerId ORDER BY created_at DESC LIMIT 50
         """, campaignId, clientOwnerId, ReadMemoryEvent);
 
-    return Results.Ok(new CampaignMemoryDto(npcs, quests, locations, events));
+    return Results.Ok(new CampaignMemoryDto(npcs, quests, locations, encounters, events));
 });
 
 app.MapPost("/api/campaigns/{campaignId:guid}/npcs", async (Guid campaignId, SaveNpcRequest request, NpgsqlDataSource db, ICurrentClientService currentClient) =>
@@ -777,7 +864,7 @@ app.MapPost("/api/campaigns/{campaignId:guid}/locations", async (Guid campaignId
     return Results.Ok(new { id = location.Id, location });
 });
 
-app.MapPost("/api/campaigns/{campaignId:guid}/encounters", async (Guid campaignId, SaveEncounterRequest request, NpgsqlDataSource db, ICurrentClientService currentClient) =>
+app.MapPost("/api/campaigns/{campaignId:guid}/encounters", async (Guid campaignId, SaveEncounterRequest request, NpgsqlDataSource db, ICurrentClientService currentClient, IHttpClientFactory httpClientFactory) =>
 {
     if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
     {
@@ -792,16 +879,29 @@ app.MapPost("/api/campaigns/{campaignId:guid}/encounters", async (Guid campaignI
     {
         return Results.NotFound(new { error = "Campaign not found." });
     }
+    if (request.SessionId is not null)
+    {
+        var session = await LoadSession(request.SessionId.Value, clientOwnerId, db);
+        if (session is null || session.CampaignId != campaignId)
+        {
+            return Results.BadRequest(new { error = "Session must belong to this campaign and browser profile." });
+        }
+    }
 
     const string sql = """
-        INSERT INTO encounters (campaign_id, client_owner_id, title, summary, outcome, metadata)
-        VALUES (@campaignId, @clientOwnerId, @title, @summary, NULL, @metadata)
+        INSERT INTO encounters (campaign_id, client_owner_id, session_id, title, summary, outcome, metadata)
+        VALUES (@campaignId, @clientOwnerId, @sessionId, @title, @summary, NULL, @metadata)
+        ON CONFLICT (campaign_id, client_owner_id, title) DO UPDATE
+        SET session_id = EXCLUDED.session_id,
+            summary = COALESCE(EXCLUDED.summary, encounters.summary),
+            metadata = encounters.metadata || EXCLUDED.metadata
         RETURNING id, campaign_id, session_id, title, summary, outcome, metadata, created_at
         """;
 
     await using var cmd = db.CreateCommand(sql);
     cmd.Parameters.AddWithValue("campaignId", campaignId);
     cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
+    cmd.Parameters.AddWithValue("sessionId", (object?)request.SessionId ?? DBNull.Value);
     cmd.Parameters.AddWithValue("title", request.Title.Trim());
     cmd.Parameters.AddWithValue("summary", (object?)request.Tactics?.Trim() ?? DBNull.Value);
     cmd.Parameters.Add(new NpgsqlParameter("metadata", NpgsqlDbType.Jsonb)
@@ -819,10 +919,31 @@ app.MapPost("/api/campaigns/{campaignId:guid}/encounters", async (Guid campaignI
         })
     });
 
-    await using var reader = await cmd.ExecuteReaderAsync();
-    await reader.ReadAsync();
-    var encounter = ReadEncounter(reader);
-    return Results.Ok(new { id = encounter.Id, encounter });
+    EncounterDto encounter;
+    await using (var reader = await cmd.ExecuteReaderAsync())
+    {
+        await reader.ReadAsync();
+        encounter = ReadEncounter(reader);
+    }
+
+    var document = await CreateEncounterMemoryDocument(encounter, request, clientOwnerId, db);
+    var client = httpClientFactory.CreateClient("ai-worker");
+    var ingestResponse = await client.PostAsJsonAsync("/ai/ingest-document", new AiWorkerIngestDocumentRequest(
+        document.Id,
+        document.CampaignId,
+        document.SourceType,
+        document.Title,
+        document.Content ?? string.Empty,
+        document.Metadata,
+        clientOwnerId));
+
+    if (!ingestResponse.IsSuccessStatusCode)
+    {
+        var error = await ingestResponse.Content.ReadAsStringAsync();
+        return Results.Problem(FriendlyWorkerError("AI encounter memory ingestion failed", error), statusCode: 502);
+    }
+
+    return Results.Ok(new { id = encounter.Id, encounter, memoryDocumentId = document.Id });
 });
 
 app.MapPost("/api/campaigns/{campaignId:guid}/documents/upload", async (Guid campaignId, UploadDocumentRequest request, NpgsqlDataSource db) =>
@@ -904,6 +1025,10 @@ app.MapPost("/api/documents/{documentId:guid}/ingest", async (Guid documentId, N
     {
         return Results.NotFound(new { error = "Document not found." });
     }
+    if (document.CampaignId is Guid documentCampaignId && await LoadCampaign(documentCampaignId, db) is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
     if (document.SourceType == "campaign_memory" && !MetadataClientOwnerMatches(document.Metadata, clientOwnerId))
     {
         return Results.NotFound(new { error = "Document not found." });
@@ -941,6 +1066,10 @@ app.MapDelete("/api/documents/{documentId:guid}", async (Guid documentId, Npgsql
     if (document is null)
     {
         return Results.NotFound(new { error = "Document not found." });
+    }
+    if (document.CampaignId is Guid documentCampaignId && await LoadCampaign(documentCampaignId, db) is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
     }
 
     if (document.SourceType == "campaign_memory")
@@ -1005,7 +1134,7 @@ app.MapPost("/api/chat", async (ChatRequest request, NpgsqlDataSource db, IHttpC
     var chatResponse = await workerResponse.Content.ReadFromJsonAsync<ChatResponse>();
     if (chatResponse is null)
     {
-        return Results.Problem("AI worker returned an empty response.", statusCode: 502);
+        return Results.Problem("DNDMind could not get an AI response just now. Please try again in a moment.", statusCode: 502);
     }
 
     var response = chatResponse with { ConversationId = conversationId };
@@ -1032,6 +1161,10 @@ app.MapPost("/api/tools/execute", async (ToolExecuteRequest request, NpgsqlDataS
     {
         return Results.BadRequest(new { error = "toolName is required." });
     }
+    if (request.CampaignId is Guid toolCampaignId && await LoadCampaign(toolCampaignId, db) is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
 
     var client = httpClientFactory.CreateClient("ai-worker");
     var workerResponse = await client.PostAsJsonAsync("/ai/tools/execute", new AiWorkerToolExecuteRequest(
@@ -1049,7 +1182,7 @@ app.MapPost("/api/tools/execute", async (ToolExecuteRequest request, NpgsqlDataS
     var toolResponse = await workerResponse.Content.ReadFromJsonAsync<ToolExecuteResponse>();
     if (toolResponse is null)
     {
-        return Results.Problem("AI worker returned an empty tool response.", statusCode: 502);
+        return Results.Problem("DNDMind could not complete that action just now. Please try again in a moment.", statusCode: 502);
     }
 
     if (request.ConversationId is not null)
@@ -1078,6 +1211,9 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
 
         ALTER TABLE knowledge_documents
         ADD COLUMN IF NOT EXISTS content text NOT NULL DEFAULT '';
+
+        ALTER TABLE campaigns
+        ADD COLUMN IF NOT EXISTS archived_at timestamptz NULL;
 
         ALTER TABLE sessions
         ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
@@ -1162,7 +1298,8 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
           summary text NULL,
           outcome text NULL,
           metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-          created_at timestamptz NOT NULL DEFAULT now()
+          created_at timestamptz NOT NULL DEFAULT now(),
+          CONSTRAINT encounters_campaign_client_owner_title_key UNIQUE (campaign_id, client_owner_id, title)
         );
 
         CREATE TABLE IF NOT EXISTS memory_events (
@@ -1212,6 +1349,17 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
         ALTER TABLE quests DROP CONSTRAINT IF EXISTS quests_campaign_id_title_key;
         ALTER TABLE locations DROP CONSTRAINT IF EXISTS locations_campaign_id_name_key;
 
+        WITH duplicate_encounters AS (
+          SELECT id,
+            row_number() OVER (
+              PARTITION BY campaign_id, client_owner_id, title
+              ORDER BY (metadata->>'source' = 'structured_output') DESC, created_at DESC, id DESC
+            ) AS row_number
+          FROM encounters
+        )
+        DELETE FROM encounters
+        WHERE id IN (SELECT id FROM duplicate_encounters WHERE row_number > 1);
+
         DO $$
         BEGIN
           IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'npcs_campaign_client_owner_name_key') THEN
@@ -1223,6 +1371,9 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
           IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'locations_campaign_client_owner_name_key') THEN
             ALTER TABLE locations ADD CONSTRAINT locations_campaign_client_owner_name_key UNIQUE (campaign_id, client_owner_id, name);
           END IF;
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'encounters_campaign_client_owner_title_key') THEN
+            ALTER TABLE encounters ADD CONSTRAINT encounters_campaign_client_owner_title_key UNIQUE (campaign_id, client_owner_id, title);
+          END IF;
         END $$;
 
         CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_document_id
@@ -1233,6 +1384,7 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
           WITH (lists = 32)
           WHERE embedding IS NOT NULL;
 
+        CREATE INDEX IF NOT EXISTS idx_campaigns_archived_at ON campaigns(archived_at);
         CREATE INDEX IF NOT EXISTS idx_npcs_campaign_id ON npcs(campaign_id);
         CREATE INDEX IF NOT EXISTS idx_quests_campaign_id ON quests(campaign_id);
         CREATE INDEX IF NOT EXISTS idx_locations_campaign_id ON locations(campaign_id);
@@ -1272,14 +1424,228 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
     await cmd.ExecuteNonQueryAsync();
 }
 
+static async Task EnsureDemoSeedData(NpgsqlDataSource db, Guid demoCampaignId, string demoClientOwnerId)
+{
+    const string sql = """
+        INSERT INTO campaigns (id, name, description, system_tone)
+        VALUES (
+          @campaignId,
+          'Shadows of Eldermire',
+          'A demo campaign about a misty frontier town, a betrayed party, and old magic waking under Blackwater Mine.',
+          'Cinematic, practical, and friendly to a busy Dungeon Master.'
+        )
+        ON CONFLICT (id) DO NOTHING;
+
+        INSERT INTO sessions (id, campaign_id, client_owner_id, visibility, session_number, title, raw_notes, summary, status)
+        VALUES (
+          '22222222-2222-2222-2222-222222222222',
+          @campaignId,
+          @clientOwnerId,
+          'private',
+          1,
+          'The Blackwater Betrayal',
+          'Captain Vey betrayed the party at Blackwater Mine. He sold the old royal map to the Ashen Knives and escaped through the smuggler tunnel beneath the collapsed ore lift. Mira Thorn swore to track Vey down. Orren Vale recovered the Dawn Shard from the flooded chapel, but the relic pulsed when it came near the mine''s sealed bronze door.',
+          'Captain Vey betrayed the party at Blackwater Mine, sold the royal map to the Ashen Knives, and escaped through an old smuggler tunnel. The party recovered the Dawn Shard and now needs to learn what the relic unlocks.',
+          'active'
+        )
+        ON CONFLICT (id) DO NOTHING;
+
+        UPDATE campaigns
+        SET current_session_id = '22222222-2222-2222-2222-222222222222'
+        WHERE id = @campaignId
+          AND current_session_id IS NULL;
+
+        INSERT INTO party_characters (campaign_id, name, class_name, race, level, hp_current, hp_max, armor_class, notes)
+        SELECT @campaignId, 'Mira Thorn', 'Ranger', 'Human', 4, 31, 34, 15, 'Tracks ash-marked creatures. Swore to find Captain Vey.'
+        WHERE NOT EXISTS (SELECT 1 FROM party_characters WHERE campaign_id = @campaignId AND name = 'Mira Thorn');
+
+        INSERT INTO party_characters (campaign_id, name, class_name, race, level, hp_current, hp_max, armor_class, notes)
+        SELECT @campaignId, 'Orren Vale', 'Cleric', 'Dwarf', 4, 35, 35, 18, 'Keeper of the Dawn Bell. The Dawn Shard reacts near old ruins.'
+        WHERE NOT EXISTS (SELECT 1 FROM party_characters WHERE campaign_id = @campaignId AND name = 'Orren Vale');
+
+        INSERT INTO party_characters (campaign_id, name, class_name, race, level, hp_current, hp_max, armor_class, notes)
+        SELECT @campaignId, 'Nyx', 'Rogue', 'Tiefling', 4, 24, 28, 14, 'Knows Eldermire smuggling routes and owes a debt to the Silver Lantern Inn.'
+        WHERE NOT EXISTS (SELECT 1 FROM party_characters WHERE campaign_id = @campaignId AND name = 'Nyx');
+
+        INSERT INTO npcs (id, campaign_id, client_owner_id, name, role, description, disposition, last_seen_session_id, metadata)
+        VALUES
+          (
+            '33333333-3333-3333-3333-333333333333',
+            @campaignId,
+            @clientOwnerId,
+            'Captain Vey',
+            'traitor and former guide',
+            'Betrayed the party at Blackwater Mine, sold the old royal map to the Ashen Knives, and escaped through a smuggler tunnel.',
+            'hostile',
+            '22222222-2222-2222-2222-222222222222',
+            '{"source":"demo_seed"}'::jsonb
+          ),
+          (
+            '33333333-3333-3333-3333-333333333334',
+            @campaignId,
+            @clientOwnerId,
+            'Mayor Elowen',
+            'Eldermire patron',
+            'Asked the party to protect Eldermire before the next new moon.',
+            'friendly',
+            '22222222-2222-2222-2222-222222222222',
+            '{"source":"demo_seed"}'::jsonb
+          )
+        ON CONFLICT (campaign_id, client_owner_id, name) DO NOTHING;
+
+        INSERT INTO quests (campaign_id, client_owner_id, title, status, description, last_seen_session_id, metadata)
+        VALUES
+          (@campaignId, @clientOwnerId, 'Hunt Captain Vey', 'open', 'Find Captain Vey and learn who paid him to sell the royal map.', '22222222-2222-2222-2222-222222222222', '{"source":"demo_seed"}'::jsonb),
+          (@campaignId, @clientOwnerId, 'Unlock the Dawn Shard', 'open', 'Discover why the Dawn Shard reacts to the sealed bronze door under Blackwater Mine.', '22222222-2222-2222-2222-222222222222', '{"source":"demo_seed"}'::jsonb)
+        ON CONFLICT (campaign_id, client_owner_id, title) DO NOTHING;
+
+        INSERT INTO locations (campaign_id, client_owner_id, name, description, location_type, last_seen_session_id, metadata)
+        VALUES
+          (@campaignId, @clientOwnerId, 'Blackwater Mine', 'A flooded mine with a sealed bronze door, collapsed ore lift, and old smuggler tunnels.', 'dungeon', '22222222-2222-2222-2222-222222222222', '{"source":"demo_seed"}'::jsonb),
+          (@campaignId, @clientOwnerId, 'Silver Lantern Inn', 'A busy Eldermire tavern where a masked agent left a black feather as a warning.', 'tavern', '22222222-2222-2222-2222-222222222222', '{"source":"demo_seed"}'::jsonb)
+        ON CONFLICT (campaign_id, client_owner_id, name) DO NOTHING;
+
+        INSERT INTO memory_events (campaign_id, client_owner_id, session_id, event_type, title, description, metadata)
+        SELECT @campaignId, @clientOwnerId, '22222222-2222-2222-2222-222222222222', 'important_event', 'Captain Vey betrayed the party', 'Captain Vey sold the old royal map to the Ashen Knives and escaped through Blackwater Mine.', '{"source":"demo_seed"}'::jsonb
+        WHERE NOT EXISTS (
+          SELECT 1 FROM memory_events
+          WHERE campaign_id = @campaignId AND client_owner_id = @clientOwnerId AND title = 'Captain Vey betrayed the party'
+        );
+
+        INSERT INTO memory_events (campaign_id, client_owner_id, session_id, event_type, title, description, metadata)
+        SELECT @campaignId, @clientOwnerId, '22222222-2222-2222-2222-222222222222', 'unresolved_hook', 'Who paid Captain Vey?', 'The party knows Vey sold the map, but not who funded the betrayal.', '{"source":"demo_seed"}'::jsonb
+        WHERE NOT EXISTS (
+          SELECT 1 FROM memory_events
+          WHERE campaign_id = @campaignId AND client_owner_id = @clientOwnerId AND title = 'Who paid Captain Vey?'
+        );
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("campaignId", demoCampaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", demoClientOwnerId);
+    await cmd.ExecuteNonQueryAsync();
+}
+
+static async Task EnsureDemoClientSeed(NpgsqlDataSource db, Guid campaignId, string clientOwnerId, Guid demoCampaignId, string demoClientOwnerId)
+{
+    if (campaignId != demoCampaignId || clientOwnerId == demoClientOwnerId)
+    {
+        return;
+    }
+
+    const string sql = """
+        WITH demo_session AS (
+          SELECT id, campaign_id, session_number, title, raw_notes, summary, status
+          FROM sessions
+          WHERE campaign_id = @campaignId
+            AND client_owner_id = @demoClientOwnerId
+          ORDER BY session_number ASC
+          LIMIT 1
+        ),
+        client_session AS (
+          INSERT INTO sessions (campaign_id, client_owner_id, visibility, session_number, title, raw_notes, summary, status)
+          SELECT campaign_id, @clientOwnerId, 'private', session_number, title, raw_notes, summary, status
+          FROM demo_session
+          WHERE NOT EXISTS (
+            SELECT 1 FROM sessions
+            WHERE campaign_id = @campaignId
+              AND client_owner_id = @clientOwnerId
+          )
+          RETURNING id
+        ),
+        target_session AS (
+          SELECT id FROM client_session
+          UNION ALL
+          SELECT id FROM sessions
+          WHERE campaign_id = @campaignId
+            AND client_owner_id = @clientOwnerId
+          ORDER BY id
+          LIMIT 1
+        )
+        INSERT INTO npcs (campaign_id, client_owner_id, name, role, description, disposition, last_seen_session_id, metadata)
+        SELECT campaign_id, @clientOwnerId, name, role, description, disposition, (SELECT id FROM target_session), metadata || jsonb_build_object('clientOwnerId', @clientOwnerId)
+        FROM npcs
+        WHERE campaign_id = @campaignId
+          AND client_owner_id = @demoClientOwnerId
+        ON CONFLICT (campaign_id, client_owner_id, name) DO NOTHING;
+
+        WITH target_session AS (
+          SELECT id
+          FROM sessions
+          WHERE campaign_id = @campaignId
+            AND client_owner_id = @clientOwnerId
+          ORDER BY session_number ASC, created_at ASC
+          LIMIT 1
+        )
+        INSERT INTO quests (campaign_id, client_owner_id, title, status, description, last_seen_session_id, metadata)
+        SELECT campaign_id, @clientOwnerId, title, status, description, (SELECT id FROM target_session), metadata || jsonb_build_object('clientOwnerId', @clientOwnerId)
+        FROM quests
+        WHERE campaign_id = @campaignId
+          AND client_owner_id = @demoClientOwnerId
+        ON CONFLICT (campaign_id, client_owner_id, title) DO NOTHING;
+
+        WITH target_session AS (
+          SELECT id
+          FROM sessions
+          WHERE campaign_id = @campaignId
+            AND client_owner_id = @clientOwnerId
+          ORDER BY session_number ASC, created_at ASC
+          LIMIT 1
+        )
+        INSERT INTO locations (campaign_id, client_owner_id, name, description, location_type, last_seen_session_id, metadata)
+        SELECT campaign_id, @clientOwnerId, name, description, location_type, (SELECT id FROM target_session), metadata || jsonb_build_object('clientOwnerId', @clientOwnerId)
+        FROM locations
+        WHERE campaign_id = @campaignId
+          AND client_owner_id = @demoClientOwnerId
+        ON CONFLICT (campaign_id, client_owner_id, name) DO NOTHING;
+
+        WITH target_session AS (
+          SELECT id
+          FROM sessions
+          WHERE campaign_id = @campaignId
+            AND client_owner_id = @clientOwnerId
+          ORDER BY session_number ASC, created_at ASC
+          LIMIT 1
+        )
+        INSERT INTO memory_events (campaign_id, client_owner_id, session_id, event_type, title, description, metadata)
+        SELECT campaign_id, @clientOwnerId, (SELECT id FROM target_session), event_type, title, description, metadata || jsonb_build_object('clientOwnerId', @clientOwnerId)
+        FROM memory_events seed
+        WHERE campaign_id = @campaignId
+          AND client_owner_id = @demoClientOwnerId
+          AND NOT EXISTS (
+            SELECT 1 FROM memory_events existing
+            WHERE existing.campaign_id = seed.campaign_id
+              AND existing.client_owner_id = @clientOwnerId
+              AND existing.title = seed.title
+          );
+        """;
+
+    await using var connection = await db.OpenConnectionAsync();
+    await using var transaction = await connection.BeginTransactionAsync();
+
+    await using (var lockCmd = new NpgsqlCommand("SELECT pg_advisory_xact_lock(hashtext(@lockKey));", connection, transaction))
+    {
+        lockCmd.Parameters.AddWithValue("lockKey", $"demo-seed:{campaignId}:{clientOwnerId}");
+        await lockCmd.ExecuteNonQueryAsync();
+    }
+
+    await using var cmd = new NpgsqlCommand(sql, connection, transaction);
+    cmd.Parameters.AddWithValue("campaignId", campaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
+    cmd.Parameters.AddWithValue("demoClientOwnerId", demoClientOwnerId);
+    await cmd.ExecuteNonQueryAsync();
+    await transaction.CommitAsync();
+}
+
 static CampaignDto ReadCampaign(NpgsqlDataReader reader) => new(
     reader.GetGuid(0),
     reader.GetString(1),
     reader.IsDBNull(2) ? null : reader.GetString(2),
     reader.GetString(3),
     reader.IsDBNull(4) ? null : reader.GetGuid(4),
-    reader.GetDateTime(5),
-    reader.GetDateTime(6));
+    reader.IsDBNull(5) ? null : reader.GetDateTime(5),
+    reader.GetDateTime(6),
+    reader.GetDateTime(7));
 
 static PartyCharacterDto ReadPartyCharacter(NpgsqlDataReader reader) => new(
     reader.GetGuid(0),
@@ -1336,9 +1702,10 @@ static DocumentDto ReadDocument(NpgsqlDataReader reader, bool includeContent) =>
 static async Task<CampaignDto?> LoadCampaign(Guid campaignId, NpgsqlDataSource db)
 {
     const string sql = """
-        SELECT id, name, description, system_tone, current_session_id, created_at, updated_at
+        SELECT id, name, description, system_tone, current_session_id, archived_at, created_at, updated_at
         FROM campaigns
         WHERE id = @id
+          AND archived_at IS NULL
         """;
     await using var cmd = db.CreateCommand(sql);
     cmd.Parameters.AddWithValue("id", campaignId);
@@ -1376,6 +1743,11 @@ static async Task<PartyCharacterDto?> LoadPartyCharacter(Guid characterId, Npgsq
         FROM party_characters
         WHERE id = @characterId
           AND archived_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM campaigns c
+            WHERE c.id = party_characters.campaign_id
+              AND c.archived_at IS NULL
+          )
         """;
 
     await using var cmd = db.CreateCommand(sql);
@@ -1621,7 +1993,9 @@ static async Task SaveSessionMemory(SessionDto session, SessionSummaryResponse s
     }
 
     await using (var cleanup = new NpgsqlCommand("""
-        DELETE FROM encounters WHERE session_id = @sessionId;
+        DELETE FROM encounters
+        WHERE session_id = @sessionId
+          AND COALESCE(metadata->>'source', 'session_summary') <> 'structured_output';
         DELETE FROM memory_events WHERE session_id = @sessionId;
         DELETE FROM npcs WHERE last_seen_session_id = @sessionId;
         DELETE FROM quests WHERE last_seen_session_id = @sessionId;
@@ -1702,6 +2076,12 @@ static async Task SaveSessionMemory(SessionDto session, SessionSummaryResponse s
         await using var cmd = new NpgsqlCommand("""
             INSERT INTO encounters (campaign_id, client_owner_id, session_id, title, summary, outcome, metadata)
             VALUES (@campaignId, @clientOwnerId, @sessionId, @title, @summary, @outcome, @metadata)
+            ON CONFLICT (campaign_id, client_owner_id, title) DO UPDATE
+            SET session_id = EXCLUDED.session_id,
+                summary = COALESCE(EXCLUDED.summary, encounters.summary),
+                outcome = COALESCE(EXCLUDED.outcome, encounters.outcome),
+                metadata = encounters.metadata || EXCLUDED.metadata
+            WHERE COALESCE(encounters.metadata->>'source', 'session_summary') <> 'structured_output'
             """, connection, transaction);
         cmd.Parameters.AddWithValue("campaignId", session.CampaignId);
         cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
@@ -1749,6 +2129,7 @@ static async Task<DocumentDto> CreateMemoryDocument(SessionDto session, SessionS
           AND source_type = 'campaign_memory'
           AND metadata->>'sessionId' = @sessionId
           AND metadata->>'clientOwnerId' = @clientOwnerId
+          AND COALESCE(metadata->>'memoryType', 'session') = 'session'
         """;
     await using (var deleteCmd = db.CreateCommand(deleteSql))
     {
@@ -1775,8 +2156,67 @@ static async Task<DocumentDto> CreateMemoryDocument(SessionDto session, SessionS
         Value = JsonSerializer.Serialize(new
         {
             status = "uploaded",
+            memoryType = "session",
             sessionId = session.Id,
             sessionNumber = session.SessionNumber,
+            clientOwnerId
+        })
+    });
+
+    await using var reader = await cmd.ExecuteReaderAsync();
+    await reader.ReadAsync();
+    return ReadDocument(reader, includeContent: true);
+}
+
+static async Task<DocumentDto> CreateEncounterMemoryDocument(EncounterDto encounter, SaveEncounterRequest request, string clientOwnerId, NpgsqlDataSource db)
+{
+    var content = BuildEncounterMemoryDocumentContent(encounter, request);
+    const string sql = """
+        WITH existing AS (
+          SELECT id
+          FROM knowledge_documents
+          WHERE campaign_id = @campaignId
+            AND source_type = 'campaign_memory'
+            AND metadata->>'clientOwnerId' = @clientOwnerId
+            AND metadata->>'encounterId' = @encounterId
+          LIMIT 1
+        ),
+        updated AS (
+          UPDATE knowledge_documents
+          SET title = @title,
+              content = @content,
+              metadata = metadata || @metadata
+          WHERE id IN (SELECT id FROM existing)
+          RETURNING id, campaign_id, source_type, title, original_filename, content, metadata, created_at,
+            (SELECT count(*)::int FROM knowledge_chunks WHERE document_id = knowledge_documents.id) AS chunk_count
+        ),
+        inserted AS (
+          INSERT INTO knowledge_documents (campaign_id, source_type, title, original_filename, content, metadata)
+          SELECT @campaignId, 'campaign_memory', @title, NULL, @content, @metadata
+          WHERE NOT EXISTS (SELECT 1 FROM updated)
+          RETURNING id, campaign_id, source_type, title, original_filename, content, metadata, created_at,
+            (SELECT count(*)::int FROM knowledge_chunks WHERE document_id = knowledge_documents.id) AS chunk_count
+        )
+        SELECT * FROM updated
+        UNION ALL
+        SELECT * FROM inserted
+        LIMIT 1
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("campaignId", encounter.CampaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
+    cmd.Parameters.AddWithValue("encounterId", encounter.Id.ToString());
+    cmd.Parameters.AddWithValue("title", $"Encounter Memory - {encounter.Title}");
+    cmd.Parameters.AddWithValue("content", content);
+    cmd.Parameters.Add(new NpgsqlParameter("metadata", NpgsqlDbType.Jsonb)
+    {
+        Value = JsonSerializer.Serialize(new
+        {
+            status = "uploaded",
+            memoryType = "encounter",
+            encounterId = encounter.Id,
+            sessionId = encounter.SessionId,
             clientOwnerId
         })
     });
@@ -1809,6 +2249,74 @@ static string BuildMemoryDocumentContent(SessionDto session, SessionSummaryRespo
         ## Unresolved Hooks
         {string.Join("\n", summary.UnresolvedHooks.Select(item => $"- {item}"))}
         """;
+}
+
+static string BuildEncounterMemoryDocumentContent(EncounterDto encounter, SaveEncounterRequest request)
+{
+    var monsters = CompactJsonArray(request.Monsters);
+    var rewards = CompactList(request.Rewards);
+    var hooks = CompactList(request.CampaignHooks);
+    return string.Join("\n", new[]
+    {
+        $"# Encounter: {CompactText(encounter.Title, 120)}",
+        $"Difficulty: {CompactText(request.Difficulty, 60)}",
+        $"Environment: {CompactText(request.Environment, 120)}",
+        $"Monsters: {monsters}",
+        $"Tactics: {CompactText(encounter.Summary ?? request.Tactics, 700)}",
+        $"Rewards: {rewards}",
+        $"Campaign hooks: {hooks}"
+    }.Where(line => !line.EndsWith(": ", StringComparison.Ordinal)));
+}
+
+static string CompactList(IEnumerable<string>? values, int itemLimit = 8, int itemLength = 120)
+{
+    var items = values?
+        .Select(value => CompactText(value, itemLength))
+        .Where(value => !string.IsNullOrWhiteSpace(value))
+        .Take(itemLimit)
+        .ToArray() ?? [];
+    return items.Length == 0 ? "" : string.Join("; ", items);
+}
+
+static string CompactJsonArray(IEnumerable<JsonElement>? values, int itemLimit = 8)
+{
+    var items = values?
+        .Select(CompactJsonElement)
+        .Where(value => !string.IsNullOrWhiteSpace(value))
+        .Take(itemLimit)
+        .ToArray() ?? [];
+    return items.Length == 0 ? "" : string.Join("; ", items);
+}
+
+static string CompactJsonElement(JsonElement value)
+{
+    if (value.ValueKind == JsonValueKind.Object)
+    {
+        var fields = new[] { "name", "count", "role", "xp", "cr" }
+            .Select(field => value.TryGetProperty(field, out var property) ? CompactJsonScalar(property) : "")
+            .Where(part => !string.IsNullOrWhiteSpace(part))
+            .ToArray();
+        if (fields.Length > 0)
+        {
+            return CompactText(string.Join(" ", fields), 160);
+        }
+    }
+
+    return CompactText(value.ToString(), 160);
+}
+
+static string CompactJsonScalar(JsonElement value) =>
+    value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : value.ToString();
+
+static string CompactText(string? value, int maxLength)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return "";
+    }
+
+    var compact = Regex.Replace(value.Trim(), @"\s+", " ");
+    return compact.Length <= maxLength ? compact : compact[..maxLength].TrimEnd() + "...";
 }
 
 static async Task<List<T>> LoadMemoryRows<T>(NpgsqlDataSource db, string sql, Guid campaignId, string clientOwnerId, Func<NpgsqlDataReader, T> read)
@@ -1956,32 +2464,48 @@ static string FriendlyWorkerError(string prefix, string workerError)
 
     if (lower.Contains("temporarily overloaded") || lower.Contains("high demand") || lower.Contains("service unavailable"))
     {
-        return "Gemini is temporarily busy and could not finish this request. Please try again in a moment. If it keeps happening, switch to another Gemini model in .env.";
+        return "The AI is busy right now and could not finish. Please try again in a moment.";
     }
 
     if (lower.Contains("api key") || lower.Contains("api_key"))
     {
-        return "Gemini is not available because the API key is missing or invalid. Check GEMINI_API_KEY in .env, then restart the worker.";
+        return "The AI service is not connected correctly. Ask the app admin to check the setup.";
     }
 
     if (lower.Contains("rate-limit") || lower.Contains("rate limit") || lower.Contains("quota"))
     {
-        return "Gemini is rate-limiting this project right now. Wait a bit, then retry the request.";
+        return "The AI is getting too many requests right now. Please wait a moment, then try again.";
     }
 
     if (lower.Contains("embedding dimensions") || lower.Contains("database expects") || lower.Contains("pgvector schema"))
     {
-        return "Gemini returned embeddings in a size that does not match the database vector column. Keep GEMINI_EMBEDDING_DIMENSIONS=1536, restart the worker, and ingest again.";
+        return "Campaign knowledge is not set up correctly. Ask the app admin to check the knowledge setup.";
     }
 
-    return $"{prefix}: {detail}";
+    if (prefix.Contains("session summary", StringComparison.OrdinalIgnoreCase))
+    {
+        return "DNDMind could not summarize that session just now. Please try again in a moment.";
+    }
+
+    if (prefix.Contains("knowledge setup", StringComparison.OrdinalIgnoreCase)
+        || prefix.Contains("memory ingestion", StringComparison.OrdinalIgnoreCase))
+    {
+        return "DNDMind could not prepare that campaign knowledge just now. Please try again in a moment.";
+    }
+
+    if (prefix.Contains("tool", StringComparison.OrdinalIgnoreCase))
+    {
+        return "DNDMind could not complete that action just now. Please try again in a moment.";
+    }
+
+    return "DNDMind could not get an AI response just now. Please try again in a moment.";
 }
 
 static string ExtractWorkerErrorDetail(string workerError)
 {
     if (string.IsNullOrWhiteSpace(workerError))
     {
-        return "The AI worker returned an empty error.";
+        return "DNDMind could not get an AI response just now. Please try again in a moment.";
     }
 
     try
@@ -2014,6 +2538,7 @@ public record CampaignDto(
     string? Description,
     string SystemTone,
     Guid? CurrentSessionId,
+    DateTime? ArchivedAt,
     DateTime CreatedAt,
     DateTime UpdatedAt);
 
@@ -2145,6 +2670,7 @@ public record CampaignMemoryDto(
     IReadOnlyList<NpcDto> Npcs,
     IReadOnlyList<QuestDto> Quests,
     IReadOnlyList<LocationDto> Locations,
+    IReadOnlyList<EncounterDto> Encounters,
     IReadOnlyList<MemoryEventDto> Events);
 
 public record NpcDto(
@@ -2258,7 +2784,8 @@ public record SaveEncounterRequest(
     string? Tactics,
     JsonElement? ScalingOptions,
     string[]? Rewards,
-    string[]? CampaignHooks);
+    string[]? CampaignHooks,
+    Guid? SessionId);
 
 public record AiWorkerChatRequest(
     Guid CampaignId,

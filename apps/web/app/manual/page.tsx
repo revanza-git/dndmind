@@ -33,7 +33,7 @@ type TroubleshootingItem = {
 const quickStart = [
   {
     title: "Choose campaign",
-    detail: "Open the campaign selector and choose the campaign you want DNDMind to use. To follow this guide, choose Embers of Blackwater.",
+    detail: "Open the campaign selector and choose the campaign you want DNDMind to use. If it says No active campaigns, click New or restore one from Archived.",
     result: "The active campaign appears at the top.",
     area: "Left Sidebar"
   },
@@ -76,7 +76,7 @@ const quickStart = [
 ];
 
 const firstRunSteps = [
-  "Select the campaign Embers of Blackwater.",
+  "Select the campaign Embers of Blackwater, or click New if you are starting from an empty campaign list.",
   "Confirm Embers of Blackwater appears as the active campaign at the top.",
   "Make sure Party Info and Campaign Memory toggles are enabled.",
   "Choose Encounter mode.",
@@ -87,7 +87,7 @@ const firstRunSteps = [
 ];
 
 const layoutAreas = [
-  ["Left Sidebar", "Choose campaigns, open Campaign Knowledge, navigate app areas, and return to this manual."],
+  ["Left Sidebar", "Choose, create, edit, archive, or restore campaigns; open Campaign Knowledge; navigate app areas; and return to this manual."],
   ["Center Workspace", "Read the chat timeline, generated encounter briefings, citations, tool results, and structured cards."],
   ["Right Panel", "Use dice, session notes, party details, memory, citations, and tool traces."],
   ["Command Console", "Type your request, choose a mode, set context toggles, and send."]
@@ -136,16 +136,50 @@ const contextToggleGuide = [
   ["Homebrew", "Turn on when custom rules or house mechanics should affect the answer.", "Turn off when you want standard rules or story context only."]
 ];
 
+const campaignMenuControls = [
+  ["New", "Starts a new campaign and opens a short form for name, description, and response tone.", "Use when you are starting a new table, adventure, one-shot, or test campaign."],
+  ["Edit", "Changes the selected campaign's name, description, or response tone.", "Use when the campaign premise or style needs an update."],
+  ["Archive", "Moves the selected campaign out of the active list without deleting it.", "Use when a campaign is finished, paused, or not needed today."],
+  ["Campaign selector", "Chooses which campaign DNDMind uses right now.", "Check this before asking story-specific questions or saving cards."],
+  ["Archived", "Shows campaigns that were put away.", "Use this area when you want to bring an older campaign back."],
+  ["Restore", "Moves an archived campaign back into the active selector.", "Use when you archived the wrong campaign or want to continue an older one."]
+];
+
+const campaignMenuSteps = [
+  {
+    title: "Create",
+    steps: ["Click New.", "Enter a campaign name.", "Add a short description or response tone if helpful.", "Click Save."],
+    expected: "The new campaign becomes active and appears at the top of the workspace."
+  },
+  {
+    title: "Edit",
+    steps: ["Choose the campaign in the selector.", "Click Edit.", "Update the name, description, or response tone.", "Click Save."],
+    expected: "The campaign keeps its saved notes and memory, but uses the updated campaign details."
+  },
+  {
+    title: "Archive",
+    steps: ["Choose the campaign you want to put away.", "Click Archive.", "Confirm the message."],
+    expected: "The campaign leaves the active selector and appears under Archived."
+  },
+  {
+    title: "Restore",
+    steps: ["Find the campaign under Archived.", "Click Restore."],
+    expected: "The campaign returns to the active selector and becomes selected."
+  }
+];
+
 const steps: GuideStep[] = [
   {
     title: "Create Campaign",
     where: "Left Sidebar -> Campaign",
     do: [
-      "Open the campaign selector.",
-      "Select an existing campaign or create a new one. To follow this guide, choose Embers of Blackwater.",
-      "Add a short campaign description if the field is available."
+      "Open the campaign selector to choose an active campaign.",
+      "Click New if the selector says No active campaigns or you want a fresh campaign.",
+      "Add a campaign name, optional description, and optional response tone.",
+      "Click Save.",
+      "Use Restore under Archived if you want to continue a campaign that was put away."
     ],
-    expected: "The campaign appears under Active Campaign at the top.",
+    expected: "The campaign appears in the selector and its name appears at the top.",
     why: "DNDMind uses the active campaign to scope memory, sessions, and generated content."
   },
   {
@@ -316,7 +350,7 @@ const workflows: Workflow[] = [
       "Roll dice from the command console or dice roller.",
       "Ask quick rules questions in Rules mode when a ruling needs support.",
       "Search campaign memory for names, places, and unresolved hooks.",
-      "Save important NPCs, hooks, or encounter results before moving on."
+      "Save important NPCs, hooks, or encounter results before moving on. Saved encounters appear later in Campaign Memory."
     ]
   },
   {
@@ -352,6 +386,11 @@ const troubleshooting: TroubleshootingItem[] = [
     fix: ["Check whether you opened another browser or incognito window.", "Return to the original browser profile.", "Avoid clearing local storage during a campaign."]
   },
   {
+    problem: "The campaign selector says No active campaigns.",
+    cause: "No campaign has been created yet, or all campaigns are currently archived.",
+    fix: ["Click New to create a campaign.", "Or look under Archived and click Restore on the campaign you want.", "Confirm the campaign name appears at the top before asking DNDMind for story help."]
+  },
+  {
     problem: "Memory answer seems empty.",
     cause: "The active campaign has little saved memory, or Campaign Memory is off.",
     fix: ["Enable Campaign Memory.", "Add session notes.", "Summarize and save useful cards before asking again."]
@@ -367,6 +406,11 @@ const troubleshooting: TroubleshootingItem[] = [
     fix: ["Open the campaign selector.", "Choose the correct campaign.", "Confirm the active campaign name at the top before sending the prompt."]
   },
   {
+    problem: "I archived a campaign by mistake.",
+    cause: "The campaign was moved out of the active list, but it was not deleted.",
+    fix: ["Find the campaign under Archived.", "Click Restore.", "Choose it in the campaign selector if it is not already selected."]
+  },
+  {
     problem: "The app says an API key is missing.",
     cause: "The app may need an AI provider setting changed by the person running it.",
     fix: [
@@ -378,6 +422,8 @@ const troubleshooting: TroubleshootingItem[] = [
 ];
 
 const glossary = [
+  ["Active Campaign", "The campaign currently selected in the left sidebar."],
+  ["Archived Campaign", "A campaign moved out of the active list but still available to restore later."],
   ["Campaign Knowledge", "Source text added to a campaign so DNDMind can search and cite it."],
   ["Campaign Memory", "Saved notes, NPCs, quests, locations, encounters, and summaries DNDMind can use later."],
   ["Context Toggle", "A switch that controls which saved information DNDMind may use for the next prompt."],
@@ -392,6 +438,7 @@ const toc = [
   ["Quick Start", "quick-start"],
   ["First Run", "first-run"],
   ["Command Center", "command-center"],
+  ["Campaign Menu", "campaign-menu"],
   ["Knowledge", "campaign-knowledge"],
   ["Context", "context-toggles"],
   ["Guide", "guide"],
@@ -558,6 +605,42 @@ export default function ManualPage() {
                   {commandCenter.map(([title, detail]) => (
                     <InfoCard key={title} title={title} detail={detail} tone="definition" />
                   ))}
+                </div>
+              </ManualSection>
+
+              <ManualSection id="campaign-menu" eyebrow="First Control" title="Campaign Menu">
+                <p className="max-w-4xl text-sm leading-6 text-moss/75">
+                  The Campaign menu tells DNDMind which campaign you are using right now. Check it before asking story-specific questions, saving cards, adding session notes, or uploading campaign knowledge.
+                </p>
+                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                  {campaignMenuControls.map(([control, detail, useWhen]) => (
+                    <article key={control} className="rounded-lg border border-moss/15 border-l-4 border-l-copper bg-white p-4 shadow-sm">
+                      <h4 className="text-base font-semibold text-ink">{control}</h4>
+                      <p className="mt-2 text-sm leading-6 text-moss/75">{detail}</p>
+                      <p className="mt-3 text-sm font-semibold text-moss">Use when</p>
+                      <p className="mt-1 text-sm leading-6 text-moss/75">{useWhen}</p>
+                    </article>
+                  ))}
+                </div>
+                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                  {campaignMenuSteps.map((item) => (
+                    <article key={item.title} className="rounded-lg border border-moss/15 bg-white p-4 shadow-sm">
+                      <h4 className="text-base font-semibold text-ink">{item.title}</h4>
+                      <ol className="mt-4 space-y-2 text-sm leading-6 text-moss/75">
+                        {item.steps.map((step, index) => (
+                          <li key={step} className="flex gap-2">
+                            <span className="text-copper">{index + 1}.</span>
+                            <span>{step}</span>
+                          </li>
+                        ))}
+                      </ol>
+                      <p className="mt-4 rounded-md bg-parchment px-3 py-2 text-sm leading-6 text-moss">{item.expected}</p>
+                    </article>
+                  ))}
+                </div>
+                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                  <InfoCard title="No active campaigns" detail="This means nothing is selected from the active list. Click New to create a campaign, or restore one from Archived." tone="warning" />
+                  <InfoCard title="Archive is not delete" detail="Archive puts a campaign away so the active list stays tidy. Use Restore when you want it back." tone="definition" />
                 </div>
               </ManualSection>
 

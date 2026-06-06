@@ -6,7 +6,7 @@ Dungeon Masters need to manage rules, party context, NPC relationships, quests, 
 
 ## Solution
 
-DNDMind is an AI-powered campaign command center. It combines campaign-aware chat, Campaign Knowledge retrieval, campaign memory, session summarization, tabletop scope guarding, context-aware tool calling, and structured output cards in one interface. The project is mock-first so it can be reviewed locally without paid API calls, while still demonstrating production-shaped AI engineering patterns.
+DNDMind is an AI-powered campaign command center. It combines campaign-aware chat, Campaign Knowledge retrieval, campaign memory, campaign lifecycle controls, guarded response tone, session summarization, tabletop scope guarding, context-aware tool calling, and structured output cards in one interface. The project is mock-first so it can be reviewed locally without paid API calls, while still demonstrating production-shaped AI engineering patterns.
 
 ## Technical Architecture
 
@@ -23,8 +23,10 @@ This separation mirrors a realistic AI product architecture: the app backend own
 ## AI Features
 
 - Campaign Knowledge upload flow with templates, validation, and sanitization
+- Campaign create, edit, archive, and restore flows
+- Guarded campaign response tone for stylistic consistency
 - Rules and Homebrew RAG with citations
-- Campaign memory RAG
+- Campaign memory RAG, including saved encounters
 - Session-note summarization and extraction
 - Lightweight out-of-scope prompt refusal before provider generation
 - Structured cards for NPCs, quests, locations, encounters, initiative, and dice
@@ -42,6 +44,7 @@ DNDMind is a portfolio-ready MVP that shows how an LLM feature becomes a usable 
 - How to turn AI output into persistent product data instead of leaving it as disposable chat text.
 - How to keep a product assistant focused on its domain with deterministic guardrails.
 - How to gate retrieval and party context behind explicit user-facing toggles.
+- How to treat product-specific style settings as low-priority hints instead of authority over safety or grounding.
 - How to design deterministic evals before adding more expensive LLM-as-judge scoring.
 
 ## Skills Demonstrated

@@ -49,6 +49,12 @@ When changing chat, tools, memory, documents, sessions, party data, or structure
 
 Keep these fields especially aligned across services: `citations`, `toolCalls`, `structuredOutput`, `suggestedActions`, `conversationId`, `campaignId`, `sessionId`, `clientOwnerId`, and the `X-Dndmind-Client-Id` header.
 
+Campaign `systemTone` is a guarded style hint only. Keep it aligned across campaign API models, frontend campaign forms/types, mock prompts, and Gemini prompts, and do not let it override scope, grounding, citation behavior, tool results, mode handling, or structured output requirements.
+
+Campaigns support soft archive via `archivedAt` / `archived_at`. Default campaign reads should exclude archived campaigns unless explicitly using archive or restore flows.
+
+Campaign memory includes encounters. Structured encounter saves persist both an encounter row and a campaign-memory document tagged with `memoryType: "encounter"` and `clientOwnerId`; keep encounter contracts aligned across API, worker structured outputs, frontend types/renderers, and `db/init.sql`.
+
 Suggested action names are consumed by the frontend and are case-sensitive. Current examples include `saveNPC`, `saveQuest`, `saveLocation`, `saveEncounter`, `saveSessionSummary`, and `prompt`.
 
 ## Database and RAG
@@ -59,6 +65,7 @@ Suggested action names are consumed by the frontend and are case-sensitive. Curr
 - Uploaded document text is sanitized and capped in `apps/ai-worker/rag/sanitizer.py` before chunking and embedding. If changing ingestion behavior, keep sanitizer tests updated and avoid storing unsafe or unbounded upload content.
 - Preserve campaign scoping on memory, documents, chunks, conversations, messages, and tool calls.
 - Preserve client-owner scoping on sessions and campaign memory entities such as NPCs, quests, locations, encounters, and memory events.
+- Demo campaign memory is seeded per browser client owner. Preserve `DemoClientOwnerId` copy-on-first-access behavior when changing demo data or client-owner scoping.
 - Keep mock embeddings deterministic unless the user explicitly asks to wire or test a real provider.
 
 ## Useful Commands

@@ -21,9 +21,11 @@ Sample cases live in `db/seed/eval_cases.json`.
 - Rules RAG can retrieve a ready Campaign Knowledge rules document and cite it.
 - Homebrew RAG stays separate from rules retrieval and only plans the homebrew search tool when enabled.
 - Campaign memory can answer continuity questions from summarized notes.
+- Saved encounters become campaign memory and can be reloaded in the memory payload.
+- Campaign response tone appears in mock/provider prompts as style-only guidance.
 - Party Info gating prevents saved party details from appearing in answers or tool arguments when disabled.
 - Dice and initiative prompts call deterministic tools.
-- Encounter prompts produce encounter difficulty/tool behavior.
+- Encounter prompts produce encounter difficulty/tool behavior and real-provider fallback cards when provider JSON is missing or partial.
 - NPC prompts produce structured output that can be saved.
 - Out-of-scope prompts short-circuit before mock or real provider generation.
 - Upload sanitization strips unsafe markup/control characters and caps indexed text.
@@ -39,6 +41,8 @@ Mock mode gives stable responses, stable tool results, and stable embeddings. Th
 - a missing structured card means output shaping changed
 - a missing expected fact means context assembly changed
 - an unrelated prompt that reaches the provider means scope guarding changed
+- campaign tone changing scope, citations, tools, or structured-output behavior means style guarding changed
+- a saved encounter missing from memory means persistence or memory-document indexing changed
 
 ## Limitations
 

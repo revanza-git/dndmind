@@ -10,7 +10,7 @@ Dungeon Masters need to manage rules, campaign continuity, party context, sessio
 
 ## Solution
 
-DNDMind combines Campaign Knowledge RAG, campaign memory, structured output, context-aware tool calling, scope guarding, and deterministic evals into one command-center interface. The default path uses `MOCK_LLM=true` and `MOCK_EMBEDDINGS=true`, so the project can be reviewed locally without paid API usage or external model calls.
+DNDMind combines Campaign Knowledge RAG, campaign memory, campaign lifecycle controls, guarded response tone, structured output, context-aware tool calling, scope guarding, and deterministic evals into one command-center interface. The default path uses `MOCK_LLM=true` and `MOCK_EMBEDDINGS=true`, so the project can be reviewed locally without paid API usage or external model calls.
 
 ## Architecture
 
@@ -31,16 +31,17 @@ flowchart LR
   API --> Web
 ```
 
-The frontend renders the DM command center, Campaign Knowledge library, downloadable templates, and local browser profile header for browser-owned sessions. The API owns campaign data, party management, upload validation, chat persistence, memory writes, and worker proxying. The AI worker handles prompt orchestration, scope guarding, upload sanitization, RAG, structured output, context-aware tool execution, and mock or Gemini provider calls. PostgreSQL stores campaign entities, messages, memory, knowledge chunks, party history, and pgvector embeddings.
+The frontend renders the DM command center, Campaign menu, Campaign Knowledge library, downloadable templates, and local browser profile header for browser-owned sessions. The API owns campaign lifecycle, party management, upload validation, chat persistence, memory writes, demo seed hydration, and worker proxying. The AI worker handles prompt orchestration, guarded campaign tone, scope guarding, upload sanitization, RAG, structured output, context-aware tool execution, and mock or Gemini provider calls. PostgreSQL stores campaign entities, archive state, messages, memory, knowledge chunks, party history, and pgvector embeddings.
 
 ## Key Features
 
-- Campaign management
+- Campaign create/edit/archive/restore management
 - Party management
 - AI command center chat
+- Guarded campaign response tone
 - Campaign Knowledge library with `.txt` and `.md` templates
 - Rules and Homebrew RAG with citations
-- Campaign memory RAG
+- Campaign memory RAG, including saved encounters
 - Session notes and summarization
 - Tabletop RPG scope guard with helpful redirect actions
 - NPC, quest, location, encounter, dice roll, and initiative structured cards
@@ -58,6 +59,7 @@ The frontend renders the DM command center, Campaign Knowledge library, download
 - pgvector
 - Vector search
 - Prompt orchestration
+- Guarded style hints
 - Upload validation and sanitization
 - Structured output
 - Tool/function calling
@@ -133,7 +135,7 @@ To use Gemini instead of mock responses, copy `.env.example` to `.env`, set `MOC
 ## Demo Flow
 
 1. Open `http://localhost:3000`.
-2. Create or select a campaign.
+2. Create, restore, or select a campaign.
 3. Add or review party members.
 4. Add sample rules from `db/seed/srd_sample.md` to Campaign Knowledge.
 5. Ask a rules question such as `How does advantage work?`
@@ -141,7 +143,7 @@ To use Gemini instead of mock responses, copy `.env.example` to `.env`, set `MOC
 7. Paste session notes from `db/seed/session_notes.md`.
 8. Save and summarize the session.
 9. Generate an NPC.
-10. Create an encounter.
+10. Create and save an encounter so it becomes campaign memory.
 11. Roll dice from the command center.
 12. Review Session Prep for open hooks, quests, and usable knowledge.
 
@@ -161,10 +163,11 @@ DNDMind is designed for deterministic evaluation in mock mode. The sample eval c
 - Homebrew isolation from rules retrieval
 - Citation correctness
 - Campaign memory recall
+- Campaign tone stays style-only and does not override scope or grounding
 - JSON validity
 - Context-toggle and tool-calling correctness
 - Hallucination and out-of-scope resistance
-- Encounter difficulty correctness
+- Encounter fallback, save, and memory correctness
 
 This makes the project easier to review because AI behavior can be checked repeatedly without model drift or external API cost. See `docs/eval-design.md` for the evaluation plan.
 

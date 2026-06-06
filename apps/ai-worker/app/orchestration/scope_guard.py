@@ -71,6 +71,8 @@ IN_SCOPE_PATTERNS = [
     r"\b(?:str|dex|con|int|wis|cha)\b",
     r"\b(?:ability|skill|death)\s+checks?\b",
     r"\b(?:attack|damage)\s+rolls?\b",
+    r"\b(?:make|adjust|scale)\b.{1,120}\b(?:encounter|ambush|combat)\b.{0,120}\b(?:harder|easier)\b",
+    r"\b(?:make|adjust|scale)\b.{1,120}\b(?:harder|easier)\b.{0,120}\b(?:encounter|ambush|combat|party)\b",
     r"\b(?:save|saving throw)s?\b",
     r"\b(?:town|city|location|region|ruins?|forest|swamp)\b",
     r"\b(?:orc|undead|vampire|bandit|beholder|lich|dragon)s?\b",

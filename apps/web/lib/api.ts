@@ -6,8 +6,15 @@ export type Campaign = {
   description: string | null;
   systemTone: string;
   currentSessionId: string | null;
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type CampaignInput = {
+  name: string;
+  description?: string | null;
+  systemTone?: string | null;
 };
 
 export type PartyCharacter = {
@@ -169,6 +176,23 @@ export type MemoryLocation = {
   locationType: string | null;
 };
 
+export type MemoryEncounter = {
+  id: string;
+  campaignId: string;
+  sessionId: string | null;
+  title: string;
+  summary: string | null;
+  outcome: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type ExtractedEncounterSummary = {
+  title: string;
+  summary: string | null;
+  outcome: string | null;
+};
+
 export type MemoryEvent = {
   id: string;
   eventType: string;
@@ -180,6 +204,7 @@ export type CampaignMemory = {
   npcs: MemoryNpc[];
   quests: MemoryQuest[];
   locations: MemoryLocation[];
+  encounters: MemoryEncounter[];
   events: MemoryEvent[];
 };
 
@@ -191,6 +216,7 @@ export type SessionSummaryResponse = {
     npcs: MemoryNpc[];
     locations: MemoryLocation[];
     quests: MemoryQuest[];
+    encounters: ExtractedEncounterSummary[];
     items: string[];
     unresolvedHooks: string[];
   };
@@ -235,19 +261,22 @@ async function apiErrorMessage(response: Response, fallback: string) {
 function friendlyError(message: string, fallback: string) {
   const lower = message.toLowerCase();
   if (lower.includes("temporarily busy") || lower.includes("temporarily overloaded") || lower.includes("high demand") || lower.includes("service unavailable")) {
-    return "Gemini is temporarily busy and could not finish that request. Please try again in a moment. If it keeps happening, switch to another Gemini model in .env.";
+    return "The AI is busy right now and could not finish. Please try again in a moment.";
   }
   if (lower.includes("api key") || lower.includes("api_key")) {
-    return "Gemini is not available because the API key is missing or invalid. Check GEMINI_API_KEY in .env, then restart the worker.";
+    return "The AI service is not connected correctly. Ask the app admin to check the setup.";
   }
   if (lower.includes("rate limit") || lower.includes("rate-limit") || lower.includes("quota")) {
-    return "Gemini is rate-limiting this project right now. Wait a bit, then retry the request.";
+    return "The AI is getting too many requests right now. Please wait a moment, then try again.";
   }
   if (lower.includes("embedding dimensions") || lower.includes("database expects") || lower.includes("pgvector schema")) {
-    return "Gemini returned embeddings in a size that does not match the database vector column. Keep GEMINI_EMBEDDING_DIMENSIONS=1536, restart the worker, and ingest again.";
+    return "Campaign knowledge is not set up correctly. Ask the app admin to check the knowledge setup.";
   }
   if (lower.includes("bad gateway") || lower.includes("ai worker failed") || lower.includes("internal server error")) {
-    return "DNDMind reached the AI worker, but the provider request failed. Please retry in a moment; check the worker logs if it keeps happening.";
+    return "DNDMind could not get an AI response just now. Please try again in a moment.";
+  }
+  if (lower.includes("bad request") || lower.includes("not found") || lower.includes("unauthorized") || lower.includes("forbidden")) {
+    return fallback;
   }
   return message || fallback;
 }
@@ -255,15 +284,79 @@ function friendlyError(message: string, fallback: string) {
 export async function getCampaigns(): Promise<Campaign[]> {
   const response = await apiFetch("/api/campaigns", { cache: "no-store" });
   if (!response.ok) {
-    throw new Error("Failed to load campaigns");
+    throw new Error("DNDMind could not load your campaigns. Refresh the page and try again.");
   }
+  return response.json();
+}
+
+export async function getArchivedCampaigns(): Promise<Campaign[]> {
+  const response = await apiFetch("/api/campaigns/archived", { cache: "no-store" });
+  if (response.status === 204) {
+    return [];
+  }
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "DNDMind could not load archived campaigns. Refresh the page and try again."));
+  }
+  const campaigns = await response.json();
+  return Array.isArray(campaigns) ? campaigns : [];
+}
+
+export async function createCampaign(input: CampaignInput): Promise<Campaign> {
+  const response = await apiFetch("/api/campaigns", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "DNDMind could not create that campaign. Please try again."));
+  }
+
+  return response.json();
+}
+
+export async function archiveCampaign(campaignId: string): Promise<Campaign> {
+  const response = await apiFetch(`/api/campaigns/${campaignId}/archive`, {
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "DNDMind could not archive that campaign. Please try again."));
+  }
+
+  return response.json();
+}
+
+export async function restoreCampaign(campaignId: string): Promise<Campaign> {
+  const response = await apiFetch(`/api/campaigns/${campaignId}/restore`, {
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "DNDMind could not restore that campaign. Please try again."));
+  }
+
+  return response.json();
+}
+
+export async function updateCampaign(campaignId: string, input: CampaignInput): Promise<Campaign> {
+  const response = await apiFetch(`/api/campaigns/${campaignId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "DNDMind could not save that campaign. Please try again."));
+  }
+
   return response.json();
 }
 
 export async function getParty(campaignId: string): Promise<PartyCharacter[]> {
   const response = await apiFetch(`/api/campaigns/${campaignId}/party`, { cache: "no-store" });
   if (!response.ok) {
-    throw new Error("Failed to load party");
+    throw new Error("DNDMind could not load the party. Refresh the page and try again.");
   }
   return response.json();
 }
@@ -275,8 +368,7 @@ export async function createPartyCharacter(campaignId: string, input: PartyChara
     body: JSON.stringify(input)
   });
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || "Character creation failed");
+    throw new Error(await apiErrorMessage(response, "DNDMind could not add that character. Please try again."));
   }
   return response.json();
 }
@@ -288,8 +380,7 @@ export async function updatePartyCharacter(characterId: string, input: PartyChar
     body: JSON.stringify(input)
   });
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || "Character update failed");
+    throw new Error(await apiErrorMessage(response, "DNDMind could not save that character. Please try again."));
   }
   return response.json();
 }
@@ -297,8 +388,7 @@ export async function updatePartyCharacter(characterId: string, input: PartyChar
 export async function deletePartyCharacter(characterId: string): Promise<void> {
   const response = await apiFetch(`/api/party/${characterId}`, { method: "DELETE" });
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || "Character delete failed");
+    throw new Error(await apiErrorMessage(response, "DNDMind could not remove that character. Please try again."));
   }
 }
 
@@ -314,8 +404,7 @@ export async function updatePartyCharacterHp(input: {
     body: JSON.stringify({ hpCurrent: input.hpCurrent, tempHp: input.tempHp, note: input.note ?? null })
   });
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || "HP update failed");
+    throw new Error(await apiErrorMessage(response, "DNDMind could not update HP. Please try again."));
   }
   return response.json();
 }
@@ -331,8 +420,7 @@ export async function updatePartyCharacterLevel(input: {
     body: JSON.stringify({ level: input.level, note: input.note ?? null })
   });
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || "Level update failed");
+    throw new Error(await apiErrorMessage(response, "DNDMind could not update the level. Please try again."));
   }
   return response.json();
 }
@@ -350,8 +438,7 @@ export async function createPartyCharacterEvent(input: {
     body: JSON.stringify(input)
   });
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || "Character event creation failed");
+    throw new Error(await apiErrorMessage(response, "DNDMind could not save that character note. Please try again."));
   }
   return response.json();
 }
@@ -359,7 +446,7 @@ export async function createPartyCharacterEvent(input: {
 export async function getPartyCharacterEvents(characterId: string): Promise<PartyCharacterEvent[]> {
   const response = await apiFetch(`/api/party/${characterId}/events`, { cache: "no-store" });
   if (!response.ok) {
-    throw new Error("Failed to load character history");
+    throw new Error("DNDMind could not load that character's history. Refresh the page and try again.");
   }
   return response.json();
 }
@@ -367,7 +454,7 @@ export async function getPartyCharacterEvents(characterId: string): Promise<Part
 export async function getRecentPartyEvents(campaignId: string): Promise<PartyCharacterEvent[]> {
   const response = await apiFetch(`/api/campaigns/${campaignId}/party/events`, { cache: "no-store" });
   if (!response.ok) {
-    throw new Error("Failed to load party history");
+    throw new Error("DNDMind could not load the party history. Refresh the page and try again.");
   }
   return response.json();
 }
@@ -375,7 +462,7 @@ export async function getRecentPartyEvents(campaignId: string): Promise<PartyCha
 export async function getSessions(campaignId: string): Promise<Session[]> {
   const response = await apiFetch(`/api/campaigns/${campaignId}/sessions`, { cache: "no-store" });
   if (!response.ok) {
-    throw new Error("Failed to load sessions");
+    throw new Error("DNDMind could not load your sessions. Refresh the page and try again.");
   }
   return response.json();
 }
@@ -398,8 +485,7 @@ export async function createSession(input: {
   });
 
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || "Session creation failed");
+    throw new Error(await apiErrorMessage(response, "DNDMind could not create that session. Please try again."));
   }
 
   return response.json();
@@ -426,8 +512,7 @@ export async function updateSession(input: {
   });
 
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || "Session update failed");
+    throw new Error(await apiErrorMessage(response, "DNDMind could not save that session. Please try again."));
   }
 
   return response.json();
@@ -439,7 +524,7 @@ export async function summarizeSession(sessionId: string): Promise<SessionSummar
   });
 
   if (!response.ok) {
-    throw new Error(await apiErrorMessage(response, "Session summarization failed"));
+    throw new Error(await apiErrorMessage(response, "DNDMind could not summarize that session. Please try again."));
   }
 
   return response.json();
@@ -448,15 +533,26 @@ export async function summarizeSession(sessionId: string): Promise<SessionSummar
 export async function getCampaignMemory(campaignId: string): Promise<CampaignMemory> {
   const response = await apiFetch(`/api/campaigns/${campaignId}/memory`, { cache: "no-store" });
   if (!response.ok) {
-    throw new Error("Failed to load campaign memory");
+    throw new Error("DNDMind could not load campaign memory. Refresh the page and try again.");
   }
-  return response.json();
+  return normalizeCampaignMemory(await response.json());
+}
+
+function normalizeCampaignMemory(value: unknown): CampaignMemory {
+  const memory = value && typeof value === "object" ? (value as Partial<CampaignMemory>) : {};
+  return {
+    npcs: Array.isArray(memory.npcs) ? memory.npcs : [],
+    quests: Array.isArray(memory.quests) ? memory.quests : [],
+    locations: Array.isArray(memory.locations) ? memory.locations : [],
+    encounters: Array.isArray(memory.encounters) ? memory.encounters : [],
+    events: Array.isArray(memory.events) ? memory.events : []
+  };
 }
 
 export async function getDocuments(campaignId: string): Promise<KnowledgeDocument[]> {
   const response = await apiFetch(`/api/campaigns/${campaignId}/documents`, { cache: "no-store" });
   if (!response.ok) {
-    throw new Error("Failed to load documents");
+    throw new Error("DNDMind could not load campaign knowledge. Refresh the page and try again.");
   }
   return response.json();
 }
@@ -481,7 +577,7 @@ export async function uploadDocument(input: {
   });
 
   if (!response.ok) {
-    throw new Error(await apiErrorMessage(response, "Document upload failed"));
+    throw new Error(await apiErrorMessage(response, "DNDMind could not add that campaign knowledge. Please try again."));
   }
 
   return response.json();
@@ -493,7 +589,7 @@ export async function ingestDocument(documentId: string): Promise<IngestDocument
   });
 
   if (!response.ok) {
-    throw new Error(await apiErrorMessage(response, "Campaign knowledge setup failed"));
+    throw new Error(await apiErrorMessage(response, "DNDMind could not prepare that campaign knowledge. Please try again."));
   }
 
   return response.json();
@@ -502,7 +598,7 @@ export async function ingestDocument(documentId: string): Promise<IngestDocument
 export async function deleteDocument(documentId: string): Promise<void> {
   const response = await apiFetch(`/api/documents/${documentId}`, { method: "DELETE" });
   if (!response.ok) {
-    throw new Error(await apiErrorMessage(response, "Document delete failed"));
+    throw new Error(await apiErrorMessage(response, "DNDMind could not remove that campaign knowledge. Please try again."));
   }
 }
 
@@ -520,7 +616,7 @@ export async function sendChat(input: {
   });
 
   if (!response.ok) {
-    throw new Error(await apiErrorMessage(response, "Chat request failed"));
+    throw new Error(await apiErrorMessage(response, "DNDMind could not send that message. Please try again."));
   }
 
   return response.json();
@@ -539,7 +635,7 @@ export async function executeTool(input: {
   });
 
   if (!response.ok) {
-    throw new Error(await apiErrorMessage(response, "Tool execution failed"));
+    throw new Error(await apiErrorMessage(response, "DNDMind could not complete that action. Please try again."));
   }
 
   return response.json();
@@ -552,8 +648,7 @@ export async function saveNpc(campaignId: string, payload: Record<string, unknow
     body: JSON.stringify(payload)
   });
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || "NPC save failed");
+    throw new Error(await apiErrorMessage(response, "DNDMind could not save that NPC. Please try again."));
   }
   return response.json();
 }
@@ -565,8 +660,7 @@ export async function saveQuest(campaignId: string, payload: Record<string, unkn
     body: JSON.stringify(payload)
   });
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || "Quest save failed");
+    throw new Error(await apiErrorMessage(response, "DNDMind could not save that quest. Please try again."));
   }
   return response.json();
 }
@@ -578,21 +672,19 @@ export async function saveLocation(campaignId: string, payload: Record<string, u
     body: JSON.stringify(payload)
   });
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || "Location save failed");
+    throw new Error(await apiErrorMessage(response, "DNDMind could not save that location. Please try again."));
   }
   return response.json();
 }
 
-export async function saveEncounter(campaignId: string, payload: Record<string, unknown>): Promise<{ id: string; encounter: Record<string, unknown> }> {
+export async function saveEncounter(campaignId: string, payload: Record<string, unknown>): Promise<{ id: string; encounter: MemoryEncounter; memoryDocumentId: string }> {
   const response = await apiFetch(`/api/campaigns/${campaignId}/encounters`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || "Encounter save failed");
+    throw new Error(await apiErrorMessage(response, "DNDMind could not save that encounter. Please try again."));
   }
   return response.json();
 }

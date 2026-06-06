@@ -23,7 +23,13 @@ def party_member(name: str = "Aria") -> PartyCharacter:
     )
 
 
-def chat_request(message: str, context: ChatContext, party: list[PartyCharacter] | None = None, mode: str = "Auto") -> ChatRequest:
+def chat_request(
+    message: str,
+    context: ChatContext,
+    party: list[PartyCharacter] | None = None,
+    mode: str = "Auto",
+    system_tone: str = "Heroic",
+) -> ChatRequest:
     campaign_id = uuid4()
     members = party if party is not None else [party_member()]
     return ChatRequest(
@@ -33,7 +39,7 @@ def chat_request(message: str, context: ChatContext, party: list[PartyCharacter]
         mode=mode,
         clientOwnerId="test-client",
         context=context,
-        campaign=Campaign(id=campaign_id, name="Test Campaign", description=None, systemTone="Heroic"),
+        campaign=Campaign(id=campaign_id, name="Test Campaign", description=None, systemTone=system_tone),
         party=[member.model_copy(update={"campaignId": campaign_id}) for member in members],
     )
 
@@ -56,6 +62,47 @@ class ContextToggleTests(unittest.TestCase):
         self.assertIn("Party snapshot", response.answer)
         self.assertIn("Aria level 4", response.answer)
         self.assertIn("Moon Key", response.answer)
+
+    def test_mock_response_reflects_campaign_tone_deterministically(self):
+        request = chat_request(
+            "How should I open tonight's session?",
+            ChatContext(usePartyInfo=False),
+            system_tone="Wry gothic suspense",
+        )
+
+        response = mock_chat_response(request)
+
+        self.assertIn("Campaign response tone: Wry gothic suspense.", response.answer)
+        self.assertIn("Use this as style only", response.answer)
+        self.assertIn("scope, safety, facts, citations, tools, selected mode, and structured output requirements", response.answer)
+
+    def test_mock_response_uses_default_style_when_campaign_tone_is_blank(self):
+        request = chat_request(
+            "How should I open tonight's session?",
+            ChatContext(usePartyInfo=False),
+            system_tone=" ",
+        )
+
+        response = mock_chat_response(request)
+
+        self.assertIn("Campaign response tone: default DNDMind style.", response.answer)
+
+    def test_mock_response_uses_default_style_when_campaign_tone_is_missing(self):
+        campaign_id = uuid4()
+        request = ChatRequest(
+            campaignId=campaign_id,
+            conversationId=uuid4(),
+            message="How should I open tonight's session?",
+            mode="Auto",
+            clientOwnerId="test-client",
+            context=ChatContext(usePartyInfo=False),
+            campaign=Campaign(id=campaign_id, name="Test Campaign"),
+            party=[],
+        )
+
+        response = mock_chat_response(request)
+
+        self.assertIn("Campaign response tone: default DNDMind style.", response.answer)
 
     def test_party_info_disabled_prevents_saved_party_tool_planning(self):
         request = chat_request("Roll initiative for the party and create an encounter.", ChatContext(usePartyInfo=False))

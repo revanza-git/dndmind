@@ -46,8 +46,9 @@ class Campaign(BaseModel):
     id: UUID
     name: str
     description: str | None = None
-    systemTone: str
+    systemTone: str = ""
     currentSessionId: UUID | None = None
+    archivedAt: str | None = None
 
 
 class PartyCharacter(BaseModel):
@@ -403,10 +404,12 @@ def mock_chat_response(request: ChatRequest) -> ChatResponse:
     tool_section = _format_tool_section(tool_calls)
     structured_section = _format_structured_section(structured_output)
     party_section = f"Party snapshot: {party_line}.\n\n" if party_line is not None else ""
+    tone_section = _format_campaign_tone_section(request)
 
     answer = (
         f"Mode: {request.mode}. For {request.campaign.name}, I would handle this as a DM co-pilot request: "
         f"'{request.message}'.\n\n"
+        f"{tone_section}"
         f"Available context: {', '.join(enabled_context) if enabled_context else 'none'}.\n"
         f"{party_section}"
         "Confirmed memory and rules results are treated as established context. Creative suggestions should build on them without replacing them."
@@ -422,6 +425,16 @@ def mock_chat_response(request: ChatRequest) -> ChatResponse:
         toolCalls=tool_calls,
         structuredOutput=structured_output,
         suggestedActions=suggested_actions,
+    )
+
+
+def _format_campaign_tone_section(request: ChatRequest) -> str:
+    tone = str(getattr(request.campaign, "systemTone", "") or "").strip()
+    if not tone:
+        return "Campaign response tone: default DNDMind style.\n"
+    return (
+        f"Campaign response tone: {tone}. "
+        "Use this as style only; scope, safety, facts, citations, tools, selected mode, and structured output requirements still take priority.\n"
     )
 
 
@@ -499,19 +512,17 @@ def friendly_provider_error(message: str) -> str:
     lower = message.lower()
     if "high demand" in lower or "503" in lower or "service unavailable" in lower:
         return (
-            "Gemini is temporarily overloaded, so DNDMind could not finish this AI request. "
-            "Please try again in a moment. If it keeps happening, switch to another Gemini model in .env."
+            "The AI is busy right now and could not finish. Please try again in a moment."
         )
     if "api_key" in lower or "api key" in lower:
-        return "Gemini is not available because the API key is missing or invalid. Check GEMINI_API_KEY in .env and restart the worker."
+        return "The AI service is not connected correctly. Ask the app admin to check the setup."
     if "429" in lower or "quota" in lower or "rate limit" in lower:
-        return "Gemini is rate-limiting this project right now. Wait a bit, then retry the request."
+        return "The AI is getting too many requests right now. Please wait a moment, then try again."
     if "embedding dimensions" in lower or "database expects" in lower or "pgvector schema" in lower:
         return (
-            "Gemini returned embeddings in a size that does not match the database vector column. "
-            "Keep GEMINI_EMBEDDING_DIMENSIONS=1536, restart the worker, and ingest again."
+            "Campaign knowledge is not set up correctly. Ask the app admin to check the knowledge setup."
         )
-    return f"The AI provider could not complete this request. {message}"
+    return "DNDMind could not get an AI response just now. Please try again in a moment."
 
 
 def mock_session_summary(request: SummarizeSessionRequest) -> SummarizeSessionResponse:

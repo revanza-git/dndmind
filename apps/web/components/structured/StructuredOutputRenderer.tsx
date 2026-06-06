@@ -148,11 +148,25 @@ function InitiativeOrderCard({ data }: { data: Record<string, unknown> }) {
 
 function DiceRollCard({ data }: { data: Record<string, unknown> }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-4">
-      <Metric label="Expression" value={text(data.expression)} />
-      <Metric label="Rolls" value={strings(data.rolls).join(", ")} />
-      <Metric label="Modifier" value={formatModifier(data.modifier)} />
-      <Metric label="Total" value={String(number(data.total))} emphasis />
+    <div className="rounded-xl border border-moss/10 bg-parchment px-4 py-3">
+      <div className="flex items-center justify-between gap-3 border-b border-moss/10 pb-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-copper">Total</p>
+        <p className="shrink-0 text-2xl font-semibold leading-none text-ink">{number(data.total)}</p>
+      </div>
+      <dl className="mt-3 grid gap-2 text-sm">
+        <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-start gap-3">
+          <dt className="text-xs font-semibold uppercase tracking-[0.08em] text-copper">Expression</dt>
+          <dd className="min-w-0 break-words text-right text-moss">{text(data.expression) || "-"}</dd>
+        </div>
+        <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-start gap-3">
+          <dt className="text-xs font-semibold uppercase tracking-[0.08em] text-copper">Rolls</dt>
+          <dd className="min-w-0 break-words text-right text-moss">{strings(data.rolls).join(", ") || "-"}</dd>
+        </div>
+        <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-start gap-3">
+          <dt className="text-xs font-semibold uppercase tracking-[0.08em] text-copper">Modifier</dt>
+          <dd className="min-w-0 break-words text-right text-moss">{formatModifier(data.modifier)}</dd>
+        </div>
+      </dl>
     </div>
   );
 }
@@ -215,7 +229,7 @@ function ListBlock({ title, items }: { title: string; items: string[] }) {
 function Metric({ label, value, emphasis = false }: { label: string; value: string; emphasis?: boolean }) {
   return (
     <div className="rounded-xl border border-moss/10 bg-parchment px-4 py-3">
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-copper">{label}</p>
+      <p className="break-words text-xs font-semibold uppercase tracking-[0.08em] text-copper">{label}</p>
       <p className={`mt-1 ${emphasis ? "text-xl font-semibold" : "text-sm"} text-ink`}>{value}</p>
     </div>
   );
@@ -285,7 +299,8 @@ function difficultyBadgeClass(difficulty: string) {
 
 function defaultActionsFor(output: StructuredOutput): SuggestedAction[] {
   if (output.type === "encounter") {
-    const title = text(output.data.title) || "this encounter";
+    const title = text(output.data.title);
+    const encounterSubject = title ? (/\bencounter\b/i.test(title) ? title : `${title} encounter`) : "this encounter";
     return [
       { label: "Save Encounter", action: "saveEncounter", payload: output.data },
       {
@@ -296,12 +311,12 @@ function defaultActionsFor(output: StructuredOutput): SuggestedAction[] {
       {
         label: "Make Harder",
         action: "prompt",
-        payload: { message: `Make ${title} harder while keeping it fair for this party.` }
+        payload: { message: `Make ${encounterSubject} harder while keeping it fair for this party.` }
       },
       {
         label: "Make Easier",
         action: "prompt",
-        payload: { message: `Make ${title} easier without losing the Captain Vey and Ashen Knives tension.` }
+        payload: { message: `Make ${encounterSubject} easier without losing the Captain Vey and Ashen Knives tension.` }
       }
     ];
   }
