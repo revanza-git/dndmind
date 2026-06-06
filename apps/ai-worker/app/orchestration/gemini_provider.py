@@ -2,6 +2,7 @@ import json
 import os
 import re
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from pydantic import ValidationError
@@ -19,6 +20,7 @@ from app.schemas.structured_outputs import (
     StructuredOutput,
     SuggestedAction,
 )
+from app.tools.encounters import calculate_encounter_difficulty
 from rag.retriever import search_homebrew, search_memory, search_rules
 
 
@@ -30,6 +32,40 @@ STRUCTURED_MODELS = {
     "session_summary": SessionSummaryOutput,
     "initiative_order": InitiativeOrderOutput,
     "dice_roll": DiceRollOutput,
+}
+
+_KNOWN_MONSTERS: tuple[tuple[str, str, int], ...] = (
+    ("Cult Fanatic", "spellcasting leader", 450),
+    ("Bandit Captain", "battlefield leader", 450),
+    ("Bugbear", "ambush bruiser", 200),
+    ("Hobgoblin", "disciplined soldier", 100),
+    ("Gnoll", "feral striker", 100),
+    ("Orc", "bruiser", 100),
+    ("Thug", "melee enforcer", 100),
+    ("Scout", "ranged skirmisher", 100),
+    ("Goblin", "mobile skirmisher", 50),
+    ("Skeleton", "front-line minion", 50),
+    ("Zombie", "durable minion", 50),
+    ("Wolf", "pack harrier", 50),
+    ("Kobold", "trap skirmisher", 25),
+    ("Cultist", "fanatic striker", 25),
+    ("Bandit", "mobile skirmisher", 25),
+    ("Guard", "trained defender", 25),
+    ("Ogre", "heavy brute", 450),
+    ("Dragon", "solo boss", 1800),
+)
+
+_COUNT_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
 }
 
 
@@ -47,7 +83,7 @@ def real_chat_response(request: Any) -> dict[str, Any]:
         answer = "Gemini returned an empty answer. Try rephrasing the request or checking the model configuration."
     used_structured_fallback = False
     if structured_output is None:
-        structured_output = _fallback_structured_output(request, answer, model_payload.get("structuredOutput"))
+        structured_output = _fallback_structured_output(request, answer, model_payload.get("structuredOutput"), tool_calls)
         used_structured_fallback = structured_output is not None
     if structured_output and (used_structured_fallback or not suggested_actions):
         suggested_actions = build_suggested_actions(structured_output)
@@ -87,8 +123,11 @@ def real_session_summary(request: Any) -> dict[str, Any]:
 
 def _ensure_gemini_provider() -> None:
     provider = os.getenv("LLM_PROVIDER", "gemini").lower()
-    if provider != "gemini":
-        raise RuntimeError(f"Unsupported LLM_PROVIDER '{provider}'. Set LLM_PROVIDER=gemini for Gemini AI mode.")
+    if provider not in {"gemini", "vertex"}:
+        raise RuntimeError(
+            f"Unsupported LLM_PROVIDER '{provider}'. Set LLM_PROVIDER=gemini for Gemini API-key mode "
+            "or LLM_PROVIDER=vertex for Vertex AI ADC mode."
+        )
 
 
 def _call_gemini(request: Any, retrieved_context: str, tool_calls: list[dict[str, Any]]) -> dict[str, Any]:
@@ -97,6 +136,18 @@ def _call_gemini(request: Any, retrieved_context: str, tool_calls: list[dict[str
 
 
 def _generate_json(system_instruction: str, user_prompt: str) -> dict[str, Any] | None:
+    provider = os.getenv("LLM_PROVIDER", "gemini").lower()
+    if provider == "vertex":
+        return _generate_json_vertex(system_instruction, user_prompt)
+    if provider == "gemini":
+        return _generate_json_gemini_api_key(system_instruction, user_prompt)
+    raise RuntimeError(
+        f"Unsupported LLM_PROVIDER '{provider}'. Set LLM_PROVIDER=gemini for Gemini API-key mode "
+        "or LLM_PROVIDER=vertex for Vertex AI ADC mode."
+    )
+
+
+def _generate_json_gemini_api_key(system_instruction: str, user_prompt: str) -> dict[str, Any] | None:
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is required when MOCK_LLM=false and LLM_PROVIDER=gemini.")
@@ -104,22 +155,7 @@ def _generate_json(system_instruction: str, user_prompt: str) -> dict[str, Any] 
     model = os.getenv("GEMINI_MODEL") or os.getenv("CHAT_MODEL") or "gemini-2.5-flash"
     model_path = model if model.startswith("models/") else f"models/{model}"
     url = f"https://generativelanguage.googleapis.com/v1beta/{model_path}:generateContent"
-
-    payload = {
-        "systemInstruction": {
-            "parts": [{"text": system_instruction}],
-        },
-        "contents": [
-            {
-                "role": "user",
-                "parts": [{"text": user_prompt}],
-            }
-        ],
-        "generationConfig": {
-            "temperature": float(os.getenv("GEMINI_TEMPERATURE", "0.7")),
-            "responseMimeType": "application/json",
-        },
-    }
+    payload = _generate_content_payload(system_instruction, user_prompt, float(os.getenv("GEMINI_TEMPERATURE", "0.7")))
 
     try:
         response = httpx.post(
@@ -130,15 +166,104 @@ def _generate_json(system_instruction: str, user_prompt: str) -> dict[str, Any] 
         )
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
-        detail = _safe_error_detail(exc.response)
-        raise RuntimeError(f"Gemini request failed with HTTP {exc.response.status_code}: {detail}") from exc
+        detail = _safe_error_detail(exc.response, "Gemini")
+        raise RuntimeError(f"Gemini API-key request failed with HTTP {exc.response.status_code}: {detail}") from exc
     except httpx.HTTPError as exc:
-        raise RuntimeError(f"Gemini request failed: {exc}") from exc
+        raise RuntimeError(f"Gemini API-key request failed: {exc}") from exc
 
     text = _extract_text(response.json())
     if not text:
         return None
     return _parse_json_object(text) or {"answer": text}
+
+
+def _generate_json_vertex(system_instruction: str, user_prompt: str) -> dict[str, Any] | None:
+    url = _vertex_endpoint()
+    token = _vertex_access_token()
+    payload = _generate_content_payload(system_instruction, user_prompt, float(os.getenv("VERTEX_TEMPERATURE", "0.7")))
+
+    try:
+        response = httpx.post(
+            url,
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+            json=payload,
+            timeout=float(os.getenv("VERTEX_TIMEOUT_SECONDS", "45")),
+        )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        detail = _safe_error_detail(exc.response, "Vertex")
+        raise RuntimeError(f"Vertex AI request failed with HTTP {exc.response.status_code}: {detail}") from exc
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"Vertex AI request failed: {exc}") from exc
+
+    text = _extract_text(response.json())
+    if not text:
+        return None
+    return _parse_json_object(text) or {"answer": text}
+
+
+def _generate_content_payload(system_instruction: str, user_prompt: str, temperature: float) -> dict[str, Any]:
+    return {
+        "systemInstruction": {
+            "parts": [{"text": system_instruction}],
+        },
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": user_prompt}],
+            }
+        ],
+        "generationConfig": {
+            "temperature": temperature,
+            "responseMimeType": "application/json",
+        },
+    }
+
+
+def _vertex_endpoint() -> str:
+    project_id = str(os.getenv("VERTEX_PROJECT_ID") or "").strip()
+    if not project_id:
+        raise RuntimeError("VERTEX_PROJECT_ID is required when MOCK_LLM=false and LLM_PROVIDER=vertex.")
+
+    location = str(os.getenv("VERTEX_LOCATION") or "global").strip()
+    if not location:
+        raise RuntimeError("VERTEX_LOCATION is required when MOCK_LLM=false and LLM_PROVIDER=vertex.")
+
+    model = _vertex_model_id()
+    base_url = "https://aiplatform.googleapis.com/v1" if location == "global" else f"https://{location}-aiplatform.googleapis.com/v1"
+    return (
+        f"{base_url}/projects/{quote(project_id, safe='')}/locations/{quote(location, safe='')}/"
+        f"publishers/google/models/{quote(model, safe='')}:generateContent"
+    )
+
+
+def _vertex_model_id() -> str:
+    model = str(os.getenv("VERTEX_MODEL") or os.getenv("CHAT_MODEL") or "gemini-2.5-flash").strip()
+    if not model:
+        raise RuntimeError("VERTEX_MODEL is required when MOCK_LLM=false and LLM_PROVIDER=vertex.")
+    for prefix in ("publishers/google/models/", "models/"):
+        if model.startswith(prefix):
+            return model[len(prefix) :]
+    return model
+
+
+def _vertex_access_token() -> str:
+    try:
+        import google.auth
+        from google.auth.transport.requests import Request
+    except ImportError as exc:
+        raise RuntimeError("google-auth is required when MOCK_LLM=false and LLM_PROVIDER=vertex.") from exc
+
+    try:
+        credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        if not getattr(credentials, "valid", False) or not getattr(credentials, "token", None):
+            credentials.refresh(Request())
+        token = getattr(credentials, "token", None)
+        if not token:
+            raise RuntimeError("Application Default Credentials did not return an access token.")
+        return str(token)
+    except Exception as exc:
+        raise RuntimeError(f"Vertex ADC authentication failed: {exc}") from exc
 
 
 def _retrieve_context(request: Any) -> tuple[str, list[dict[str, Any]]]:
@@ -309,7 +434,12 @@ def _normalize_structured_output(value: Any) -> dict[str, Any] | None:
         return None
 
 
-def _fallback_structured_output(request: Any, answer: str, raw_output: Any) -> dict[str, Any] | None:
+def _fallback_structured_output(
+    request: Any,
+    answer: str,
+    raw_output: Any,
+    tool_calls: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
     requested_type = _requested_structured_type(request)
     if requested_type not in {"npc", "encounter"}:
         return None
@@ -319,7 +449,7 @@ def _fallback_structured_output(request: Any, answer: str, raw_output: Any) -> d
         candidate = _npc_fallback_data(request, answer, data)
         model = NpcOutput
     else:
-        candidate = _encounter_fallback_data(request, answer, data)
+        candidate = _encounter_fallback_data(request, answer, data, tool_calls or [])
         model = EncounterOutput
 
     try:
@@ -343,7 +473,8 @@ def _requested_structured_type(request: Any) -> str | None:
     return None
 
 
-def _encounter_fallback_data(request: Any, answer: str, data: dict[str, Any]) -> dict[str, Any]:
+def _encounter_fallback_data(request: Any, answer: str, data: dict[str, Any], tool_calls: list[dict[str, Any]]) -> dict[str, Any]:
+    monsters = _encounter_monsters(data, answer)
     return {
         "title": (
             _text_field(data, "title")
@@ -351,7 +482,7 @@ def _encounter_fallback_data(request: Any, answer: str, data: dict[str, Any]) ->
             or _extract_encounter_title(answer)
             or _title_from_request(request, "Generated Encounter")
         ),
-        "difficulty": _encounter_difficulty(request, answer, data),
+        "difficulty": _encounter_difficulty(request, answer, data, tool_calls, monsters),
         "environment": (
             _text_field(data, "environment")
             or _extract_labeled(answer, "Environment")
@@ -359,7 +490,7 @@ def _encounter_fallback_data(request: Any, answer: str, data: dict[str, Any]) ->
             or _extract_environment_sentence(answer)
             or "A flexible battlefield with useful cover, a clear objective, and one terrain complication the DM can emphasize."
         ),
-        "monsters": _encounter_monsters(data, answer),
+        "monsters": monsters,
         "tactics": (
             _text_field(data, "tactics")
             or _extract_labeled(answer, "Tactics")
@@ -384,11 +515,20 @@ def _encounter_fallback_data(request: Any, answer: str, data: dict[str, Any]) ->
 
 
 def _normalize_difficulty(value: str) -> str:
-    match = re.search(r"\b(easy|medium|hard|deadly|unknown)\b", str(value or ""), flags=re.IGNORECASE)
-    return match.group(1).capitalize() if match else "Unknown"
+    match = re.search(r"\b(easy|medium|hard|deadly|trivial|unknown)\b", str(value or ""), flags=re.IGNORECASE)
+    if not match:
+        return "Unknown"
+    normalized = match.group(1).capitalize()
+    return "Easy" if normalized == "Trivial" else normalized
 
 
-def _encounter_difficulty(request: Any, answer: str, data: dict[str, Any]) -> str:
+def _encounter_difficulty(
+    request: Any,
+    answer: str,
+    data: dict[str, Any],
+    tool_calls: list[dict[str, Any]],
+    monsters: list[dict[str, Any]],
+) -> str:
     for value in (
         _text_field(data, "difficulty"),
         _extract_difficulty(answer),
@@ -397,14 +537,82 @@ def _encounter_difficulty(request: Any, answer: str, data: dict[str, Any]) -> st
         if not value:
             continue
         normalized = _normalize_difficulty(value)
-        if normalized != "Unknown" or re.search(r"\bunknown\b", value, flags=re.IGNORECASE):
+        if normalized in {"Easy", "Medium", "Hard", "Deadly"}:
             return normalized
+
+    tool_difficulty = _tool_call_encounter_difficulty(tool_calls)
+    if tool_difficulty:
+        return tool_difficulty
+
+    calculated = _calculate_fallback_difficulty(request, monsters)
+    if calculated:
+        return calculated
     return "Unknown"
 
 
 def _extract_difficulty(text: str) -> str:
     match = re.search(r"\b(easy|medium|hard|deadly|unknown)\b", str(text or ""), flags=re.IGNORECASE)
     return match.group(1) if match else ""
+
+
+def _tool_call_encounter_difficulty(tool_calls: list[dict[str, Any]]) -> str:
+    for call in tool_calls:
+        if not call.get("success") or call.get("toolName") != "calculateEncounterDifficulty":
+            continue
+        normalized = _normalize_difficulty(str((call.get("result") or {}).get("difficulty") or ""))
+        if normalized in {"Easy", "Medium", "Hard", "Deadly"}:
+            return normalized
+    return ""
+
+
+def _calculate_fallback_difficulty(request: Any, monsters: list[dict[str, Any]]) -> str:
+    if selected_mode_intent(str(getattr(request, "mode", "") or "")) != "encounter":
+        return ""
+    context = getattr(request, "context", None)
+    if context is not None and not getattr(context, "usePartyInfo", False):
+        return ""
+
+    party = _party_for_difficulty(request)
+    if not party:
+        return ""
+
+    difficulty_monsters = [
+        {
+            "name": monster.get("name"),
+            "count": _positive_int(monster.get("count"), 1),
+            "xp": _known_monster_xp(str(monster.get("name") or "")) or _nonnegative_int(monster.get("xp"), 0),
+        }
+        for monster in monsters
+    ]
+    if not difficulty_monsters or not any(monster["xp"] > 0 for monster in difficulty_monsters):
+        return ""
+
+    try:
+        result = calculate_encounter_difficulty({"party": party, "monsters": difficulty_monsters})
+    except (TypeError, ValueError):
+        return ""
+
+    normalized = _normalize_difficulty(str(result.get("difficulty") or ""))
+    return normalized if normalized in {"Easy", "Medium", "Hard", "Deadly"} else ""
+
+
+def _party_for_difficulty(request: Any) -> list[dict[str, Any]]:
+    party: list[dict[str, Any]] = []
+    for member in getattr(request, "party", []) or []:
+        if isinstance(member, dict):
+            level = member.get("level")
+            name = member.get("name")
+        else:
+            level = getattr(member, "level", None)
+            name = getattr(member, "name", None)
+        try:
+            parsed_level = int(level)
+        except (TypeError, ValueError):
+            continue
+        if parsed_level <= 0:
+            continue
+        party.append({"name": str(name or "Party Member"), "level": parsed_level})
+    return party
 
 
 def _extract_encounter_title(answer: str) -> str:
@@ -451,7 +659,11 @@ def _encounter_monsters(data: dict[str, Any], answer: str) -> list[dict[str, Any
     if monsters:
         return monsters
 
-    return [_monster_from_answer(answer) or {"name": "Encounter Foe", "count": 1, "role": "primary threat", "xp": 0}]
+    monsters = _monsters_from_answer(answer)
+    if monsters:
+        return monsters
+
+    return [{"name": "Encounter Foe", "count": 1, "role": "primary threat", "xp": 0}]
 
 
 def _normalize_monster_list(value: Any) -> list[dict[str, Any]]:
@@ -469,7 +681,7 @@ def _normalize_monster_list(value: Any) -> list[dict[str, Any]]:
                     "name": name,
                     "count": _positive_int(item.get("count"), 1),
                     "role": _text_field(item, "role") or "combatant",
-                    "xp": _nonnegative_int(item.get("xp"), 0),
+                    "xp": _known_monster_xp(name) or _nonnegative_int(item.get("xp"), 0),
                 }
             )
         elif str(item).strip():
@@ -478,27 +690,72 @@ def _normalize_monster_list(value: Any) -> list[dict[str, Any]]:
 
 
 def _monster_from_answer(answer: str) -> dict[str, Any] | None:
-    lower = str(answer or "").lower()
-    for name, role in (
-        ("Cultist", "fanatic striker"),
-        ("Bandit", "mobile skirmisher"),
-        ("Orc", "bruiser"),
-        ("Skeleton", "front-line minion"),
-        ("Goblin", "mobile skirmisher"),
-        ("Dragon", "solo boss"),
-    ):
-        if name.lower() in lower:
-            return {"name": name, "count": 1, "role": role, "xp": 0}
-    return None
+    monsters = _monsters_from_answer(answer)
+    return monsters[0] if monsters else None
+
+
+def _monsters_from_answer(answer: str) -> list[dict[str, Any]]:
+    text = str(answer or "")
+    found: list[tuple[int, dict[str, Any]]] = []
+    for name, role, xp in _KNOWN_MONSTERS:
+        match = re.search(rf"\b{re.escape(name)}s?\b", text, flags=re.IGNORECASE)
+        if match:
+            found.append((match.start(), {"name": name, "count": _count_near_monster(text, name), "role": role, "xp": xp}))
+
+    monsters: list[dict[str, Any]] = []
+    seen_names: set[str] = set()
+    for _, monster in sorted(found, key=lambda item: item[0]):
+        key = str(monster["name"]).lower()
+        if key in seen_names:
+            continue
+        seen_names.add(key)
+        monsters.append(monster)
+    return monsters
 
 
 def _monster_from_text(text: str) -> dict[str, Any]:
-    count_match = re.search(r"\b(\d+)\b", text)
-    count = _positive_int(count_match.group(1) if count_match else None, 1)
+    count = _count_from_text(text)
     cleaned = re.sub(r"\b\d+\b", "", text)
+    cleaned = re.sub(r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\b", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\([^)]*\)", "", cleaned)
     name = _clean_markdown_text(cleaned).strip(" ,:-") or "Encounter Foe"
-    return {"name": name, "count": count, "role": "combatant", "xp": 0}
+    xp = _known_monster_xp(name)
+    return {"name": name, "count": count, "role": _known_monster_role(name) or "combatant", "xp": xp}
+
+
+def _known_monster_xp(name: str) -> int:
+    lower = str(name or "").lower()
+    for monster_name, _, xp in _KNOWN_MONSTERS:
+        if re.search(rf"\b{re.escape(monster_name.lower())}s?\b", lower):
+            return xp
+    return 0
+
+
+def _known_monster_role(name: str) -> str:
+    lower = str(name or "").lower()
+    for monster_name, role, _ in _KNOWN_MONSTERS:
+        if re.search(rf"\b{re.escape(monster_name.lower())}s?\b", lower):
+            return role
+    return ""
+
+
+def _count_near_monster(text: str, monster_name: str) -> int:
+    pattern = rf"\b(?P<count>\d+|{'|'.join(_COUNT_WORDS)})\s+{re.escape(monster_name)}s?\b"
+    match = re.search(pattern, str(text or ""), flags=re.IGNORECASE)
+    if match:
+        return _count_from_text(match.group("count"))
+    return 1
+
+
+def _count_from_text(text: str) -> int:
+    digit = re.search(r"\b(\d+)\b", str(text or ""))
+    if digit:
+        return _positive_int(digit.group(1), 1)
+
+    word = re.search(r"\b(one|two|three|four|five|six|seven|eight|nine|ten)\b", str(text or ""), flags=re.IGNORECASE)
+    if word:
+        return _COUNT_WORDS[word.group(1).lower()]
+    return 1
 
 
 def _encounter_scaling_options(data: dict[str, Any], answer: str) -> dict[str, str]:
@@ -763,7 +1020,7 @@ def _dedupe_citations(citations: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return deduped
 
 
-def _safe_error_detail(response: httpx.Response) -> str:
+def _safe_error_detail(response: httpx.Response, provider_label: str = "Gemini") -> str:
     try:
         payload = response.json()
     except ValueError:
@@ -771,5 +1028,5 @@ def _safe_error_detail(response: httpx.Response) -> str:
 
     error = payload.get("error") if isinstance(payload, dict) else None
     if isinstance(error, dict):
-        return str(error.get("message") or error.get("status") or "Unknown Gemini error")
+        return str(error.get("message") or error.get("status") or f"Unknown {provider_label} error")
     return str(payload)[:500]

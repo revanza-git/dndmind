@@ -22,7 +22,12 @@ import {
   createPartyCharacterEvent,
   createSession,
   deleteDocument,
+  deleteEncounter,
+  deleteLocation,
+  deleteMemoryEvent,
+  deleteNpc,
   deletePartyCharacter,
+  deleteQuest,
   executeTool,
   getCampaignMemory,
   getArchivedCampaigns,
@@ -169,6 +174,8 @@ type CampaignFormState = {
   systemTone: string;
 };
 
+type MemoryItemKind = "npc" | "quest" | "location" | "hook";
+
 const emptyCampaignForm: CampaignFormState = {
   name: "",
   description: "",
@@ -212,6 +219,7 @@ export default function Home() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [lastResponse, setLastResponse] = useState<ChatResponse | null>(null);
+  const [isClearChatDialogOpen, setIsClearChatDialogOpen] = useState(false);
   const [input, setInput] = useState("How should I open tonight's session?");
   const [documentTitle, setDocumentTitle] = useState("Campaign Notes");
   const [documentContent, setDocumentContent] = useState("");
@@ -221,6 +229,8 @@ export default function Home() {
   const [manualToolCall, setManualToolCall] = useState<ToolCall | null>(null);
   const [isIngesting, setIsIngesting] = useState(false);
   const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
+  const [deletingEncounterId, setDeletingEncounterId] = useState<string | null>(null);
+  const [deletingMemoryItemKey, setDeletingMemoryItemKey] = useState<string | null>(null);
   const [isRolling, setIsRolling] = useState(false);
   const [isSavingSession, setIsSavingSession] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
@@ -591,6 +601,28 @@ export default function Home() {
     setLastFailedChatRequest(null);
   }
 
+  function handleClearChat() {
+    if (isSending || messages.length === 0) {
+      return;
+    }
+
+    setIsClearChatDialogOpen(true);
+  }
+
+  function confirmClearChat() {
+    if (isSending) {
+      return;
+    }
+
+    setMessages([]);
+    setConversationId(null);
+    setLastResponse(null);
+    setError(null);
+    setActionStatus(null);
+    setLastFailedChatRequest(null);
+    setIsClearChatDialogOpen(false);
+  }
+
   function toggleContext(key: keyof ChatContext) {
     setContext((current) => ({ ...current, [key]: !current[key] }));
   }
@@ -696,6 +728,75 @@ export default function Home() {
       setError(err instanceof Error ? err.message : "DNDMind could not remove that campaign knowledge. Please try again.");
     } finally {
       setDeletingDocumentId(null);
+    }
+  }
+
+  async function handleDeleteEncounter(encounterId: string) {
+    if (!campaignId) {
+      return;
+    }
+
+    setDeletingEncounterId(encounterId);
+    setError(null);
+    try {
+      await deleteEncounter(campaignId, encounterId);
+      setMemory((currentMemory) => ({
+        ...currentMemory,
+        encounters: currentMemory.encounters.filter((encounter) => encounter.id !== encounterId)
+      }));
+      setDocuments((currentDocuments) =>
+        currentDocuments.filter((document) => {
+          const metadata = object(document.metadata);
+          return !(document.sourceType === "campaign_memory" && text(metadata.memoryType) === "encounter" && text(metadata.encounterId) === encounterId);
+        })
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "DNDMind could not delete that encounter. Please try again.");
+      throw err;
+    } finally {
+      setDeletingEncounterId(null);
+    }
+  }
+
+  async function handleDeleteMemoryItem(kind: MemoryItemKind, itemId: string) {
+    if (!campaignId) {
+      return;
+    }
+
+    const itemKey = `${kind}:${itemId}`;
+    setDeletingMemoryItemKey(itemKey);
+    setError(null);
+    try {
+      if (kind === "npc") {
+        await deleteNpc(campaignId, itemId);
+        setMemory((currentMemory) => ({
+          ...currentMemory,
+          npcs: currentMemory.npcs.filter((npc) => npc.id !== itemId)
+        }));
+      } else if (kind === "quest") {
+        await deleteQuest(campaignId, itemId);
+        setMemory((currentMemory) => ({
+          ...currentMemory,
+          quests: currentMemory.quests.filter((quest) => quest.id !== itemId)
+        }));
+      } else if (kind === "location") {
+        await deleteLocation(campaignId, itemId);
+        setMemory((currentMemory) => ({
+          ...currentMemory,
+          locations: currentMemory.locations.filter((location) => location.id !== itemId)
+        }));
+      } else {
+        await deleteMemoryEvent(campaignId, itemId);
+        setMemory((currentMemory) => ({
+          ...currentMemory,
+          events: currentMemory.events.filter((event) => event.id !== itemId)
+        }));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "DNDMind could not delete that memory item. Please try again.");
+      throw err;
+    } finally {
+      setDeletingMemoryItemKey(null);
     }
   }
 
@@ -893,10 +994,6 @@ export default function Home() {
   }
 
   async function handleDeletePartyCharacter(character: PartyCharacter) {
-    if (!window.confirm(`Archive ${character.name}? Their history will stay in the campaign log.`)) {
-      return;
-    }
-
     setIsSavingParty(true);
     setError(null);
     try {
@@ -1429,32 +1526,96 @@ export default function Home() {
           </header>
 
           <div className="border-b border-moss/15 bg-white px-5 py-2">
-            <div className="flex flex-wrap gap-3">
-              {[
-                ["useRules", "Rules"],
-                ["useCampaignMemory", "Campaign Memory"],
-                ["usePartyInfo", "Party Info"],
-                ["useHomebrew", "Homebrew"]
-              ].map(([key, label]) => (
-                <label
-                  key={key}
-                  className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition ${
-                    context[key as keyof ChatContext]
-                      ? "border-copper/30 bg-copper/10 text-ink"
-                      : "border-moss/15 bg-parchment/50 text-moss/70"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={context[key as keyof ChatContext]}
-                    onChange={() => toggleContext(key as keyof ChatContext)}
-                    className="h-4 w-4 rounded accent-copper"
-                  />
-                  {label}
-                </label>
-              ))}
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div className="flex flex-wrap gap-3">
+                {[
+                  ["useRules", "Rules"],
+                  ["useCampaignMemory", "Campaign Memory"],
+                  ["usePartyInfo", "Party Info"],
+                  ["useHomebrew", "Homebrew"]
+                ].map(([key, label]) => (
+                  <label
+                    key={key}
+                    className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition ${
+                      context[key as keyof ChatContext]
+                        ? "border-copper/30 bg-copper/10 text-ink"
+                        : "border-moss/15 bg-parchment/50 text-moss/70"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={context[key as keyof ChatContext]}
+                      onChange={() => toggleContext(key as keyof ChatContext)}
+                      className="h-4 w-4 rounded accent-copper"
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={handleClearChat}
+                disabled={isSending || messages.length === 0}
+                aria-haspopup="dialog"
+                aria-expanded={isClearChatDialogOpen}
+                aria-label="Clear chat"
+                title="Clear chat"
+                className="self-start rounded-md border border-moss/20 bg-white px-3 py-1.5 text-sm font-semibold text-moss shadow-sm transition hover:border-ember/40 hover:bg-ember/10 hover:text-ember disabled:cursor-not-allowed disabled:opacity-50 md:self-auto"
+              >
+                Clear
+              </button>
             </div>
           </div>
+
+          {isClearChatDialogOpen && (
+            <div
+              className="fixed inset-0 z-50 flex items-start justify-center bg-ink/45 px-4 pt-24 backdrop-blur-[1px] sm:pt-28"
+              role="presentation"
+              onClick={() => setIsClearChatDialogOpen(false)}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="clear-chat-title"
+                aria-describedby="clear-chat-description"
+                className="w-full max-w-md rounded-lg border border-copper/25 bg-parchment p-4 text-left shadow-2xl shadow-ink/25"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-copper">New conversation</p>
+                    <h2 id="clear-chat-title" className="mt-2 text-lg font-semibold text-ink">
+                      Clear the current chat?
+                    </h2>
+                  </div>
+                  <span className="rounded-full border border-ember/20 bg-ember/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-ember">
+                    Local only
+                  </span>
+                </div>
+                <p id="clear-chat-description" className="mt-3 text-sm leading-6 text-moss/80">
+                  This removes the visible command timeline and starts a fresh conversation. Saved campaign memory,
+                  encounters, sessions, and knowledge stay intact.
+                </p>
+                <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setIsClearChatDialogOpen(false)}
+                    className="rounded-md border border-moss/20 bg-white px-4 py-2 text-sm font-semibold text-moss shadow-sm transition hover:border-copper/40 hover:bg-white"
+                  >
+                    Keep chat
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmClearChat}
+                    disabled={isSending}
+                    className="rounded-md bg-ember px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-copper disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Clear chat
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-[radial-gradient(circle_at_top,_rgba(216,226,220,0.55),_transparent_36rem)] px-5 pb-6 pt-5">
             {messages.length === 0 && (
@@ -1535,7 +1696,13 @@ export default function Home() {
         <aside className="border-t border-moss/15 bg-white px-5 py-5 lg:h-screen lg:overflow-y-auto lg:border-l lg:border-t-0">
           <section id="encounters" className="scroll-mt-4">
             <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-copper">Saved Encounters</h2>
-            <SavedEncountersSection encounters={memory.encounters} isLoading={isLoadingMemory} error={memoryError} />
+            <SavedEncountersSection
+              encounters={memory.encounters}
+              isLoading={isLoadingMemory}
+              error={memoryError}
+              deletingEncounterId={deletingEncounterId}
+              onDeleteEncounter={handleDeleteEncounter}
+            />
           </section>
 
           <section className="mt-7">
@@ -1718,34 +1885,92 @@ export default function Home() {
           <section id="campaign-memory" className="scroll-mt-4 mt-7">
             <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-copper">Memory</h2>
             <div className="mt-3 space-y-3">
-              <MemoryGroup title="NPCs" badge={`${memory.npcs.length}`} items={memory.npcs.map((npc) => ({
-                id: npc.id,
-                title: npc.name,
-                detail: [npc.role, npc.disposition, npc.description].filter(Boolean).join(" · ")
-              })).slice(0, 6)} />
-              <MemoryGroup title="Open Quests" badge={`${memory.quests.filter((quest) => quest.status !== "closed").length}`} items={memory.quests
-                .filter((quest) => quest.status !== "closed")
-                .map((quest) => ({
-                id: quest.id,
-                title: quest.title,
-                detail: [quest.status, quest.description].filter(Boolean).join(" · ")
-              })).slice(0, 6)} />
-              <MemoryGroup title="Recent Locations" badge={`${memory.locations.length}`} items={memory.locations.map((location) => ({
-                id: location.id,
-                title: location.name,
-                detail: [location.locationType, location.description].filter(Boolean).join(" · ")
-              })).slice(0, 6)} />
-              <MemoryGroup title="Hooks" badge={`${memory.events.filter((event) => event.eventType === "unresolved_hook").length}`} items={memory.events
-                .filter((event) => event.eventType === "unresolved_hook")
-                .slice(0, 6)
-                .map((event) => {
-                  const display = formatMemoryHook(event);
-                  return {
-                    id: event.id,
-                    title: display.title,
-                    detail: display.detail
-                  };
-                })} />
+              <MemoryAccordionGroup
+                title="NPCs"
+                badge={`${memory.npcs.length}`}
+                emptyLabel="No NPCs saved yet."
+                deleteLabel="Delete NPC"
+                deletingItemKey={deletingMemoryItemKey}
+                onDelete={(itemId) => handleDeleteMemoryItem("npc", itemId)}
+                items={memory.npcs.slice(0, 6).map((npc) => ({
+                  id: npc.id,
+                  deleteKey: `npc:${npc.id}`,
+                  title: npc.name,
+                  summary: compactEncounterPreview([npc.role, npc.disposition, npc.description].filter(Boolean).join(" · ") || "Saved NPC"),
+                  pills: [npc.role, npc.disposition].filter(Boolean) as string[],
+                  details: [
+                    { label: "Role", value: npc.role },
+                    { label: "Disposition", value: npc.disposition },
+                    { label: "Description", value: npc.description }
+                  ]
+                }))}
+              />
+              <MemoryAccordionGroup
+                title="Open Quests"
+                badge={`${memory.quests.filter((quest) => quest.status !== "closed").length}`}
+                emptyLabel="No open quests yet."
+                deleteLabel="Delete Quest"
+                deletingItemKey={deletingMemoryItemKey}
+                onDelete={(itemId) => handleDeleteMemoryItem("quest", itemId)}
+                items={memory.quests
+                  .filter((quest) => quest.status !== "closed")
+                  .slice(0, 6)
+                  .map((quest) => ({
+                    id: quest.id,
+                    deleteKey: `quest:${quest.id}`,
+                    title: quest.title,
+                    summary: compactEncounterPreview(quest.description || quest.status || "Open quest"),
+                    pills: [quest.status],
+                    details: [
+                      { label: "Status", value: quest.status },
+                      { label: "Description", value: quest.description }
+                    ]
+                  }))}
+              />
+              <MemoryAccordionGroup
+                title="Recent Locations"
+                badge={`${memory.locations.length}`}
+                emptyLabel="No locations saved yet."
+                deleteLabel="Delete Location"
+                deletingItemKey={deletingMemoryItemKey}
+                onDelete={(itemId) => handleDeleteMemoryItem("location", itemId)}
+                items={memory.locations.slice(0, 6).map((location) => ({
+                  id: location.id,
+                  deleteKey: `location:${location.id}`,
+                  title: location.name,
+                  summary: compactEncounterPreview([location.locationType, location.description].filter(Boolean).join(" · ") || "Saved location"),
+                  pills: [location.locationType].filter(Boolean) as string[],
+                  details: [
+                    { label: "Type", value: location.locationType },
+                    { label: "Description", value: location.description }
+                  ]
+                }))}
+              />
+              <MemoryAccordionGroup
+                title="Hooks"
+                badge={`${memory.events.filter((event) => event.eventType === "unresolved_hook").length}`}
+                emptyLabel="No unresolved hooks yet."
+                deleteLabel="Delete Hook"
+                deletingItemKey={deletingMemoryItemKey}
+                onDelete={(itemId) => handleDeleteMemoryItem("hook", itemId)}
+                items={memory.events
+                  .filter((event) => event.eventType === "unresolved_hook")
+                  .slice(0, 6)
+                  .map((event) => {
+                    const display = formatMemoryHook(event);
+                    return {
+                      id: event.id,
+                      deleteKey: `hook:${event.id}`,
+                      title: display.title,
+                      summary: compactEncounterPreview(display.detail || "Unresolved hook"),
+                      pills: ["Hook"],
+                      details: [
+                        { label: "Type", value: splitCamelCase(event.eventType) },
+                        { label: "Detail", value: display.detail }
+                      ]
+                    };
+                  })}
+              />
             </div>
           </section>
 
@@ -1758,12 +1983,28 @@ export default function Home() {
 function SavedEncountersSection({
   encounters,
   isLoading,
-  error
+  error,
+  deletingEncounterId,
+  onDeleteEncounter
 }: {
   encounters: CampaignMemory["encounters"];
   isLoading: boolean;
   error: string | null;
+  deletingEncounterId: string | null;
+  onDeleteEncounter: (encounterId: string) => Promise<void>;
 }) {
+  const [expandedEncounterId, setExpandedEncounterId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (expandedEncounterId && !encounters.some((encounter) => encounter.id === expandedEncounterId)) {
+      setExpandedEncounterId(null);
+    }
+    if (confirmDeleteId && !encounters.some((encounter) => encounter.id === confirmDeleteId)) {
+      setConfirmDeleteId(null);
+    }
+  }, [confirmDeleteId, encounters, expandedEncounterId]);
+
   if (isLoading) {
     return (
       <div className="mt-3 rounded-lg border border-moss/15 bg-parchment/45 p-3 text-sm text-moss/70 shadow-sm">
@@ -1789,7 +2030,7 @@ function SavedEncountersSection({
   }
 
   return (
-    <div className="mt-3 space-y-3">
+    <div className="mt-3 overflow-hidden rounded-lg border border-moss/15 bg-white shadow-sm">
       {encounters.map((encounter) => {
         const metadata = object(encounter.metadata);
         const difficulty = text(metadata.difficulty) || text(metadata.Difficulty);
@@ -1797,29 +2038,182 @@ function SavedEncountersSection({
         const monsters = metadata.monsters ?? metadata.Monsters;
         const rewards = metadata.rewards ?? metadata.Rewards;
         const hooks = metadata.campaignHooks ?? metadata.CampaignHooks;
-        return (
-          <article key={encounter.id} className="rounded-lg border border-moss/15 bg-white p-3 text-sm leading-6 shadow-sm">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h3 className="break-words font-semibold leading-6 text-ink">{encounter.title}</h3>
-                <p className="mt-0.5 text-xs font-semibold uppercase tracking-[0.1em] text-copper">
-                  {[difficulty, environment].filter(Boolean).join(" · ") || "Encounter"}
-                </p>
-              </div>
-              {encounter.createdAt && (
-                <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.12em] text-copper">
-                  {formatEventDate(encounter.createdAt)}
-                </span>
-              )}
-            </div>
+        const tactics = metadata.tactics ?? metadata.Tactics;
+        const tacticsText = formatEncounterValue(tactics);
+        const isExpanded = expandedEncounterId === encounter.id;
+        const detailsId = `encounter-details-${encounter.id}`;
+        const summary = compactEncounterPreview(environment || encounter.summary || tacticsText || "Saved encounter briefing");
+        const deleteIsConfirming = confirmDeleteId === encounter.id;
+        const deleteIsBusy = deletingEncounterId === encounter.id;
 
-            {encounter.summary && <p className="mt-3 rounded-md bg-parchment/70 px-3 py-2 text-moss/80">{encounter.summary}</p>}
-            <EncounterDetail label="Monsters" value={formatEncounterValue(monsters)} />
-            <EncounterDetail label="Rewards" value={formatEncounterValue(rewards)} />
-            <EncounterDetail label="Hooks" value={formatEncounterValue(hooks)} />
+        return (
+          <article key={encounter.id} className="border-b border-moss/10 last:border-b-0">
+            <button
+              type="button"
+              aria-expanded={isExpanded}
+              aria-controls={detailsId}
+              onClick={() => {
+                setExpandedEncounterId(isExpanded ? null : encounter.id);
+                setConfirmDeleteId(null);
+              }}
+              className={`block w-full px-3 py-3 text-left transition ${
+                isExpanded ? "bg-parchment/55" : "bg-white hover:bg-parchment/35"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="min-w-0 break-words text-sm font-semibold leading-5 text-ink">{encounter.title}</h3>
+                    <EncounterMetaPill value={difficulty || "Encounter"} />
+                  </div>
+                  <p className="line-clamp-2 text-xs leading-5 text-moss/75">{summary}</p>
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-2">
+                  {encounter.createdAt && (
+                    <span className="rounded-full bg-parchment px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-copper shadow-sm">
+                      {formatEventDate(encounter.createdAt)}
+                    </span>
+                  )}
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-moss/55">
+                    {isExpanded ? "Collapse" : "Expand"}
+                  </span>
+                </div>
+              </div>
+            </button>
+
+            {isExpanded && (
+              <div id={detailsId} className="space-y-3 border-t border-moss/10 bg-white p-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <EncounterMetaPill value={difficulty || "Encounter"} />
+                  {environment && <EncounterMetaPill value={isShortEncounterMeta(environment) ? environment : sentenceCase(compactEncounterPreview(environment, 36))} />}
+                  {encounter.createdAt && (
+                    <span className="rounded-full border border-moss/10 bg-parchment px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-moss/65">
+                      {formatEventDate(encounter.createdAt)}
+                    </span>
+                  )}
+                </div>
+
+                {(encounter.summary || tacticsText) && (
+                  <p className="border-l-2 border-copper/45 pl-3 leading-6 text-moss/85">
+                    {encounter.summary || tacticsText}
+                  </p>
+                )}
+
+                <EncounterMonsterGrid value={monsters} />
+
+                <div className="grid gap-3">
+                  {encounter.summary && <EncounterDetail label="Tactics" value={tacticsText} />}
+                  <EncounterListDetail label="Rewards" value={rewards} />
+                  <EncounterListDetail label="Hooks" value={hooks} />
+                </div>
+
+                <div className="flex justify-end border-t border-moss/10 pt-3">
+                  <button
+                    type="button"
+                    aria-label={`${deleteIsConfirming ? "Confirm delete" : "Delete"} ${encounter.title}`}
+                    aria-pressed={deleteIsConfirming}
+                    disabled={deleteIsBusy}
+                    onClick={async () => {
+                      if (!deleteIsConfirming) {
+                        setConfirmDeleteId(encounter.id);
+                        return;
+                      }
+                      try {
+                        await onDeleteEncounter(encounter.id);
+                        setConfirmDeleteId(null);
+                        setExpandedEncounterId(null);
+                      } catch {
+                        // The parent page owns the visible error message.
+                      }
+                    }}
+                    className={`rounded-md border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                      deleteIsConfirming
+                        ? "border-ember/40 bg-ember text-white hover:bg-ember/90"
+                        : "border-ember/25 bg-ember/10 text-ember hover:bg-ember/15"
+                    }`}
+                  >
+                    {deleteIsBusy ? "Deleting" : deleteIsConfirming ? "Delete?" : "Delete"}
+                  </button>
+                </div>
+              </div>
+            )}
           </article>
         );
       })}
+    </div>
+  );
+}
+
+function compactEncounterPreview(value: string, maxLength = 96) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1).trim()}...` : normalized;
+}
+
+function isShortEncounterMeta(value: string) {
+  return value.length > 0 && value.length <= 24 && !/[.,;:]/.test(value) && value.split(/\s+/).length <= 3;
+}
+
+function EncounterMetaPill({ value, className = "" }: { value: string; className?: string }) {
+  if (!value) {
+    return null;
+  }
+
+  return (
+    <span className={`rounded-full border border-copper/20 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-copper ${className}`}>
+      {value}
+    </span>
+  );
+}
+
+function EncounterMonsterGrid({ value }: { value: unknown }) {
+  if (!Array.isArray(value) || value.length === 0) {
+    return <EncounterDetail label="Monsters" value={formatEncounterValue(value)} />;
+  }
+
+  return (
+    <div>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-copper">Monsters</p>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        {value.map((monster, index) => {
+          const item = object(monster);
+          const name = text(item.name) || text(item.title) || text(item.creature) || text(monster) || "Creature";
+          const count = text(item.count);
+          const role = text(item.role);
+          const xp = text(item.xp);
+          const detail = [role, xp ? `${xp} XP` : ""].filter(Boolean).join(" · ");
+          return (
+            <div key={`${name}-${index}`} className="rounded-md border border-moss/10 bg-parchment/55 px-3 py-2">
+              <div className="flex items-start justify-between gap-2">
+                <p className="min-w-0 break-words font-semibold leading-6 text-ink">{name}</p>
+                {count && <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-moss">x{count}</span>}
+              </div>
+              {detail && <p className="mt-0.5 text-xs leading-5 text-moss/70">{detail}</p>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function EncounterListDetail({ label, value }: { label: string; value: unknown }) {
+  const items = formatEncounterListItems(value);
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-md border border-moss/10 bg-parchment/45 px-3 py-2">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-copper">{label}</p>
+      <ul className="mt-2 space-y-1.5">
+        {items.map((item, index) => (
+          <li key={`${item}-${index}`} className="flex gap-2 leading-6 text-moss/80">
+            <span className="mt-[0.6rem] h-1.5 w-1.5 shrink-0 rounded-full bg-copper/55" aria-hidden="true" />
+            <span className="min-w-0 break-words">{item}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -1830,11 +2224,32 @@ function EncounterDetail({ label, value }: { label: string; value: string }) {
   }
 
   return (
-    <div className="mt-3 rounded-md bg-parchment/60 px-3 py-2">
+    <div className="rounded-md border border-moss/10 bg-parchment/45 px-3 py-2">
       <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-copper">{label}</p>
-      <p className="mt-1 text-moss/75">{value}</p>
+      <p className="mt-1 leading-6 text-moss/80">{value}</p>
     </div>
   );
+}
+
+function formatEncounterListItems(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (item && typeof item === "object") {
+          return formatEncounterValue(item);
+        }
+        return text(item);
+      })
+      .filter(Boolean);
+  }
+
+  const rendered = formatEncounterValue(value);
+  return rendered ? [rendered] : [];
+}
+
+function sentenceCase(value: string) {
+  const normalized = value.toLowerCase();
+  return normalized.replace(/(^\s*\w|[.!?]\s+\w)/g, (match) => match.toUpperCase());
 }
 
 function StatusMetric({ label, value }: { label: string; value: string }) {
@@ -2148,30 +2563,135 @@ function mergeSavedEncounter(memory: CampaignMemory, encounter: CampaignMemory["
   };
 }
 
-function MemoryGroup({
+type MemoryAccordionItem = {
+  id: string;
+  deleteKey: string;
+  title: string;
+  summary: string;
+  pills: string[];
+  details: Array<{ label: string; value: string | null | undefined }>;
+};
+
+function MemoryAccordionGroup({
   title,
   badge,
-  items
+  items,
+  emptyLabel,
+  deleteLabel,
+  deletingItemKey,
+  onDelete
 }: {
   title: string;
   badge: string;
-  items: Array<{ id: string; title: string; detail: string }>;
+  items: MemoryAccordionItem[];
+  emptyLabel: string;
+  deleteLabel: string;
+  deletingItemKey: string | null;
+  onDelete: (itemId: string) => Promise<void>;
 }) {
+  const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (expandedItemId && !items.some((item) => item.id === expandedItemId)) {
+      setExpandedItemId(null);
+    }
+    if (confirmDeleteId && !items.some((item) => item.id === confirmDeleteId)) {
+      setConfirmDeleteId(null);
+    }
+  }, [confirmDeleteId, expandedItemId, items]);
+
   return (
-    <div className="rounded-xl border border-moss/15 bg-white p-3 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
+    <div className="overflow-hidden rounded-lg border border-moss/15 bg-white shadow-sm">
+      <div className="flex items-center justify-between gap-3 border-b border-moss/10 bg-parchment/35 px-3 py-2.5">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-copper">{title}</p>
         <span className="rounded-full bg-mist px-2.5 py-1 text-xs font-semibold text-moss">{badge}</span>
       </div>
-      <div className="mt-3 space-y-2.5">
-        {items.length === 0 && <p className="rounded-md bg-parchment/70 px-3 py-2 text-sm text-moss/60">No entries yet.</p>}
-        {items.map((item) => (
-          <div key={item.id} className="rounded-lg bg-parchment/70 px-3 py-2 text-sm leading-6 text-moss">
-            <p className="font-semibold text-ink">{item.title}</p>
-            {item.detail && <p className="mt-1 text-moss/70">{item.detail}</p>}
-          </div>
-        ))}
-      </div>
+      {items.length === 0 && <p className="px-3 py-3 text-sm leading-6 text-moss/60">{emptyLabel}</p>}
+      {items.map((item) => {
+        const isExpanded = expandedItemId === item.id;
+        const detailsId = `memory-details-${item.deleteKey}`;
+        const isConfirmingDelete = confirmDeleteId === item.id;
+        const isDeleting = deletingItemKey === item.deleteKey;
+
+        return (
+          <article key={item.id} className="border-b border-moss/10 last:border-b-0">
+            <button
+              type="button"
+              aria-expanded={isExpanded}
+              aria-controls={detailsId}
+              onClick={() => {
+                setExpandedItemId(isExpanded ? null : item.id);
+                setConfirmDeleteId(null);
+              }}
+              className={`block w-full px-3 py-3 text-left transition ${
+                isExpanded ? "bg-parchment/55" : "bg-white hover:bg-parchment/35"
+              }`}
+            >
+              <div className="grid gap-2">
+                <div className="flex min-w-0 items-start justify-between gap-3">
+                  <h3 className="min-w-0 break-words text-sm font-semibold leading-5 text-ink">{item.title}</h3>
+                  <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.12em] text-moss/55">
+                    {isExpanded ? "Collapse" : "Expand"}
+                  </span>
+                </div>
+                <div className="min-w-0">
+                  {item.pills.length > 0 && (
+                    <div className="flex min-w-0 flex-wrap gap-1.5">
+                      {item.pills.slice(0, 2).map((pill) => (
+                        <EncounterMetaPill
+                          key={pill}
+                          value={compactEncounterPreview(pill, 34)}
+                          className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap px-2 py-0.5 text-[10px] tracking-[0.08em]"
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {item.summary && <p className="mt-2 line-clamp-2 text-xs leading-5 text-moss/75">{item.summary}</p>}
+                </div>
+              </div>
+            </button>
+
+            {isExpanded && (
+              <div id={detailsId} className="space-y-3 border-t border-moss/10 bg-white p-3 text-sm">
+                <div className="grid gap-3">
+                  {item.details.map((detail) => (
+                    <EncounterDetail key={detail.label} label={detail.label} value={detail.value ?? ""} />
+                  ))}
+                </div>
+                <div className="flex justify-end border-t border-moss/10 pt-3">
+                  <button
+                    type="button"
+                    aria-label={`${isConfirmingDelete ? "Confirm " : ""}${deleteLabel} ${item.title}`}
+                    aria-pressed={isConfirmingDelete}
+                    disabled={isDeleting}
+                    onClick={async () => {
+                      if (!isConfirmingDelete) {
+                        setConfirmDeleteId(item.id);
+                        return;
+                      }
+                      try {
+                        await onDelete(item.id);
+                        setConfirmDeleteId(null);
+                        setExpandedItemId(null);
+                      } catch {
+                        // The parent page owns the visible error message.
+                      }
+                    }}
+                    className={`rounded-md border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                      isConfirmingDelete
+                        ? "border-ember/40 bg-ember text-white hover:bg-ember/90"
+                        : "border-ember/25 bg-ember/10 text-ember hover:bg-ember/15"
+                    }`}
+                  >
+                    {isDeleting ? "Deleting" : isConfirmingDelete ? "Delete?" : "Delete"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </article>
+        );
+      })}
     </div>
   );
 }
@@ -2214,6 +2734,7 @@ function PartyPanel({
   onCreateNote: (input: { title: string; description: string }) => void;
 }) {
   const activePanelRef = useRef<HTMLDivElement | null>(null);
+  const [expandedCharacterId, setExpandedCharacterId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!activePanel) {
@@ -2222,6 +2743,12 @@ function PartyPanel({
 
     activePanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [activePanel]);
+
+  useEffect(() => {
+    if (expandedCharacterId && !party.some((character) => character.id === expandedCharacterId)) {
+      setExpandedCharacterId(null);
+    }
+  }, [expandedCharacterId, party]);
 
   return (
     <div>
@@ -2255,9 +2782,12 @@ function PartyPanel({
             key={character.id}
             character={character}
             isSaving={isSaving}
+            isExpanded={expandedCharacterId === character.id}
+            onToggle={() => setExpandedCharacterId(expandedCharacterId === character.id ? null : character.id)}
             onEdit={onEdit}
             onHp={onHp}
             onHistory={onHistory}
+            onDelete={onDeleteCharacter}
             onLevelChange={onLevelChange}
           />
         ))}
@@ -2323,18 +2853,25 @@ function PartyPanel({
 function PartyCharacterCard({
   character,
   isSaving,
+  isExpanded,
+  onToggle,
   onEdit,
   onHp,
   onHistory,
+  onDelete,
   onLevelChange
 }: {
   character: PartyCharacter;
   isSaving: boolean;
+  isExpanded: boolean;
+  onToggle: () => void;
   onEdit: (character: PartyCharacter) => void;
   onHp: (character: PartyCharacter) => void;
   onHistory: (character: PartyCharacter) => void;
+  onDelete: (character: PartyCharacter) => void;
   onLevelChange: (character: PartyCharacter, nextLevel: number) => void;
 }) {
+  const [isConfirmingArchive, setIsConfirmingArchive] = useState(false);
   const hpLabel = character.hpCurrent === null && character.hpMax === null
     ? "HP not set"
     : `HP ${character.hpCurrent ?? "-"}/${character.hpMax ?? "-"}`;
@@ -2344,50 +2881,108 @@ function PartyCharacterCard({
     character.race,
     character.className
   ].filter(Boolean).join(" ");
+  const detailsId = `party-details-${character.id}`;
 
   return (
-    <div className="rounded-lg border border-moss/15 bg-white p-3 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="break-words font-semibold text-ink">{character.name}</p>
-          <p className="mt-1 text-sm text-moss/75">{detail}</p>
+    <article className="overflow-hidden rounded-lg border border-moss/15 bg-white shadow-sm">
+      <button
+        type="button"
+        aria-expanded={isExpanded}
+        aria-controls={detailsId}
+        onClick={() => {
+          onToggle();
+          setIsConfirmingArchive(false);
+        }}
+        className={`block w-full px-3 py-3 text-left transition ${
+          isExpanded ? "bg-parchment/55" : "bg-white hover:bg-parchment/35"
+        }`}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="break-words font-semibold text-ink">{character.name}</p>
+            <p className="mt-1 text-sm text-moss/75">{detail || "Player character"}</p>
+            <p className="mt-2 text-xs leading-5 text-moss/70">{hpLabel}{tempLabel}</p>
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            <span className="rounded-full bg-mist px-2.5 py-1 text-xs font-semibold text-moss">
+              AC {character.armorClass ?? "-"}
+            </span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-moss/55">
+              {isExpanded ? "Collapse" : "Expand"}
+            </span>
+          </div>
         </div>
-        <span className="shrink-0 rounded-full bg-mist px-2.5 py-1 text-xs font-semibold text-moss">
-          AC {character.armorClass ?? "-"}
-        </span>
-      </div>
+      </button>
 
-      <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-        <div className="rounded-md bg-parchment/80 px-3 py-2">
-          <p className="font-semibold text-ink">{hpLabel}{tempLabel}</p>
+      {isExpanded && (
+        <div id={detailsId} className="space-y-3 border-t border-moss/10 p-3">
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="rounded-md bg-parchment/80 px-3 py-2">
+              <p className="font-semibold text-ink">{hpLabel}{tempLabel}</p>
+            </div>
+            <div className="rounded-md bg-parchment/80 px-3 py-2">
+              <p className="font-semibold text-ink">Init {formatModifier(character.initiativeModifier ?? 0)}</p>
+            </div>
+            <div className="rounded-md bg-parchment/80 px-3 py-2">
+              <p className="font-semibold text-ink">Passive {character.passivePerception ?? "-"}</p>
+            </div>
+            <div className="rounded-md bg-parchment/80 px-3 py-2">
+              <p className="font-semibold text-ink">Level {character.level}</p>
+            </div>
+          </div>
+
+          {character.conditions.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {character.conditions.map((condition) => (
+                <EncounterMetaPill key={condition} value={condition} />
+              ))}
+            </div>
+          )}
+
+          {character.notes && <p className="text-xs leading-5 text-moss/70">{character.notes}</p>}
+
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => onEdit(character)} className="rounded-md border border-moss/15 px-2.5 py-1.5 text-xs font-semibold text-moss hover:border-copper">
+              Edit
+            </button>
+            <button type="button" onClick={() => onHp(character)} className="rounded-md border border-moss/15 px-2.5 py-1.5 text-xs font-semibold text-moss hover:border-copper">
+              HP
+            </button>
+            <button type="button" onClick={() => onHistory(character)} className="rounded-md border border-moss/15 px-2.5 py-1.5 text-xs font-semibold text-moss hover:border-copper">
+              History
+            </button>
+            <button
+              type="button"
+              onClick={() => onLevelChange(character, character.level + 1)}
+              disabled={isSaving}
+              className="rounded-md border border-moss/15 px-2.5 py-1.5 text-xs font-semibold text-moss hover:border-copper disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Level +1
+            </button>
+            <button
+              type="button"
+              aria-label={`${isConfirmingArchive ? "Confirm archive" : "Archive"} ${character.name}`}
+              aria-pressed={isConfirmingArchive}
+              onClick={() => {
+                if (!isConfirmingArchive) {
+                  setIsConfirmingArchive(true);
+                  return;
+                }
+                onDelete(character);
+              }}
+              disabled={isSaving}
+              className={`rounded-md border px-2.5 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                isConfirmingArchive
+                  ? "border-ember/40 bg-ember text-white hover:bg-ember/90"
+                  : "border-ember/25 bg-ember/10 text-ember hover:bg-ember/15"
+              }`}
+            >
+              {isSaving ? "Saving" : isConfirmingArchive ? "Archive?" : "Archive"}
+            </button>
+          </div>
         </div>
-        <div className="rounded-md bg-parchment/80 px-3 py-2">
-          <p className="font-semibold text-ink">Init {formatModifier(character.initiativeModifier ?? 0)}</p>
-        </div>
-      </div>
-
-      {character.notes && <p className="mt-3 text-xs leading-5 text-moss/70">{character.notes}</p>}
-
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button type="button" onClick={() => onEdit(character)} className="rounded-md border border-moss/15 px-2.5 py-1.5 text-xs font-semibold text-moss hover:border-copper">
-          Edit
-        </button>
-        <button type="button" onClick={() => onHp(character)} className="rounded-md border border-moss/15 px-2.5 py-1.5 text-xs font-semibold text-moss hover:border-copper">
-          HP
-        </button>
-        <button type="button" onClick={() => onHistory(character)} className="rounded-md border border-moss/15 px-2.5 py-1.5 text-xs font-semibold text-moss hover:border-copper">
-          History
-        </button>
-        <button
-          type="button"
-          onClick={() => onLevelChange(character, character.level + 1)}
-          disabled={isSaving}
-          className="rounded-md border border-moss/15 px-2.5 py-1.5 text-xs font-semibold text-moss hover:border-copper disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Level +1
-        </button>
-      </div>
-    </div>
+      )}
+    </article>
   );
 }
 
@@ -2404,6 +2999,7 @@ function PartyCharacterForm({
   onSubmit: (input: PartyCharacterInput) => void;
   onDelete?: () => void;
 }) {
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [form, setForm] = useState({
     name: character?.name ?? "",
     className: character?.className ?? "",
@@ -2465,8 +3061,24 @@ function PartyCharacterForm({
       </label>
       <div className="flex flex-wrap items-center justify-between gap-2">
         {onDelete && (
-          <button type="button" onClick={onDelete} disabled={isSaving} className="rounded-md border border-ember/30 px-3 py-2 text-sm font-semibold text-ember disabled:cursor-not-allowed disabled:opacity-50">
-            Archive
+          <button
+            type="button"
+            onClick={() => {
+              if (!isConfirmingDelete) {
+                setIsConfirmingDelete(true);
+                return;
+              }
+              onDelete();
+            }}
+            aria-pressed={isConfirmingDelete}
+            disabled={isSaving}
+            className={`rounded-md border px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${
+              isConfirmingDelete
+                ? "border-ember/40 bg-ember text-white"
+                : "border-ember/30 text-ember"
+            }`}
+          >
+            {isConfirmingDelete ? "Archive?" : "Archive"}
           </button>
         )}
         <button type="submit" disabled={isSaving || !form.name.trim()} className="ml-auto rounded-md bg-copper px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">

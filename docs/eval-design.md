@@ -23,6 +23,7 @@ Sample cases live in `db/seed/eval_cases.json`.
 - Campaign memory can answer continuity questions from summarized notes.
 - Saved encounters become campaign memory and can be reloaded in the memory payload.
 - Campaign response tone appears in mock/provider prompts as style-only guidance.
+- Provider routing accepts Gemini API-key mode and Vertex AI Gemini mode, builds the expected Vertex endpoint, and uses ADC bearer-token auth.
 - Party Info gating prevents saved party details from appearing in answers or tool arguments when disabled.
 - Dice and initiative prompts call deterministic tools.
 - Encounter prompts produce encounter difficulty/tool behavior and real-provider fallback cards when provider JSON is missing or partial.
@@ -43,6 +44,7 @@ Mock mode gives stable responses, stable tool results, and stable embeddings. Th
 - an unrelated prompt that reaches the provider means scope guarding changed
 - campaign tone changing scope, citations, tools, or structured-output behavior means style guarding changed
 - a saved encounter missing from memory means persistence or memory-document indexing changed
+- a Vertex request missing ADC auth or using the wrong endpoint means provider routing changed
 
 ## Limitations
 

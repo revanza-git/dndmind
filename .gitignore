@@ -63,6 +63,7 @@ logs/
 tmp/
 temp/
 .cache/
+.gcloud/
 
 # IDE / OS
 .DS_Store

@@ -14,7 +14,7 @@ DNDMind is an AI Dungeon Master co-pilot built as a small full-stack system:
 
 The default local path is mock-first. Keep `MOCK_LLM=true` and `MOCK_EMBEDDINGS=true` unless the user explicitly asks to wire or test a real provider.
 
-Real provider support is available behind explicit configuration. Chat currently supports Gemini via `LLM_PROVIDER=gemini`, and embeddings can use Gemini or OpenAI when `MOCK_EMBEDDINGS=false`. Keep pgvector dimensions and provider embedding dimensions aligned.
+Real provider support is available behind explicit configuration. Chat currently supports Gemini API-key mode via `LLM_PROVIDER=gemini` and Vertex AI Gemini via `LLM_PROVIDER=vertex`. Embeddings can use Gemini or OpenAI when `MOCK_EMBEDDINGS=false`. Keep pgvector dimensions and provider embedding dimensions aligned.
 
 ## Working Rules
 
@@ -25,7 +25,7 @@ Real provider support is available behind explicit configuration. Chat currently
   - `apps/web/node_modules`
   - `apps/api/bin`
   - `apps/api/obj`
-- Keep secrets out of the repo. Use `.env.example` for documented configuration only.
+- Keep secrets out of the repo. Use `.env.example` for documented configuration only. Local `.gcloud/` files and Application Default Credentials are credentials and must remain ignored/uncommitted.
 - When changing data contracts, update all affected layers together: API models, worker schemas, frontend types, database schema or seeds, and README/docs if needed.
 - Preserve browser-owned data scoping. The frontend sends `X-Dndmind-Client-Id`, the API maps it to `clientOwnerId`, and session/memory writes should remain scoped by both campaign and client owner where applicable.
 
@@ -36,6 +36,7 @@ Real provider support is available behind explicit configuration. Chat currently
 - `apps/web/app/page.tsx` contains the main command center and some demo-enhancement fallback logic. Do not treat frontend demo fallback data as persisted backend behavior.
 - `apps/web/components/structured` owns structured card rendering and suggested-action controls.
 - `apps/ai-worker/main.py`, `apps/ai-worker/app/orchestration`, `apps/ai-worker/app/tools`, and `apps/ai-worker/rag` own mock/provider AI behavior, RAG, tools, structured outputs, citations, and retrieval.
+- Vertex AI chat mode depends on `google-auth`, `VERTEX_PROJECT_ID`, `VERTEX_LOCATION`, `VERTEX_MODEL`, and optional in-container `GOOGLE_APPLICATION_CREDENTIALS`; keep `.env.example`, `docker-compose.yml`, README, and deployment docs aligned when changing provider setup.
 
 ## Contract Hotspots
 
@@ -49,7 +50,7 @@ When changing chat, tools, memory, documents, sessions, party data, or structure
 
 Keep these fields especially aligned across services: `citations`, `toolCalls`, `structuredOutput`, `suggestedActions`, `conversationId`, `campaignId`, `sessionId`, `clientOwnerId`, and the `X-Dndmind-Client-Id` header.
 
-Campaign `systemTone` is a guarded style hint only. Keep it aligned across campaign API models, frontend campaign forms/types, mock prompts, and Gemini prompts, and do not let it override scope, grounding, citation behavior, tool results, mode handling, or structured output requirements.
+Campaign `systemTone` is a guarded style hint only. Keep it aligned across campaign API models, frontend campaign forms/types, mock prompts, and provider prompts, and do not let it override scope, grounding, citation behavior, tool results, mode handling, or structured output requirements.
 
 Campaigns support soft archive via `archivedAt` / `archived_at`. Default campaign reads should exclude archived campaigns unless explicitly using archive or restore flows.
 

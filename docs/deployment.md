@@ -56,6 +56,18 @@ Provider variables for Gemini AI mode:
 - `GEMINI_TEMPERATURE`
 - `GEMINI_TIMEOUT_SECONDS`
 
+Provider variables for Vertex AI Gemini mode:
+
+- `LLM_PROVIDER=vertex`
+- `VERTEX_PROJECT_ID=project-de842900-cb0b-4155-b9c`
+- `VERTEX_LOCATION=global`
+- `VERTEX_MODEL=gemini-2.5-flash`
+- `VERTEX_TEMPERATURE=0.7`
+- `VERTEX_TIMEOUT_SECONDS=45`
+- `GOOGLE_APPLICATION_CREDENTIALS` if the runtime needs an explicit ADC JSON path
+
+For local Docker Compose with Vertex, Application Default Credentials must be available inside the `ai-worker` container. One common setup is to mount the local gcloud ADC file into the container and set `GOOGLE_APPLICATION_CREDENTIALS=/gcloud/application_default_credentials.json`. Keep `MOCK_EMBEDDINGS=true` for the first Vertex chat pass unless you are intentionally configuring a real embedding provider.
+
 Embedding provider variables if `MOCK_EMBEDDINGS=false`:
 
 - `EMBEDDING_PROVIDER=gemini` or `openai`

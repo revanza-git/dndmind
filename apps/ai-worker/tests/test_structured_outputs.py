@@ -14,8 +14,13 @@ def request(message: str, mode: str = "Auto"):
         mode=mode,
         campaignId=uuid4(),
         conversationId=uuid4(),
+        context=SimpleNamespace(usePartyInfo=True),
         party=[],
     )
+
+
+def party_member(name: str = "Aria", level: int = 3):
+    return SimpleNamespace(name=name, level=level)
 
 
 class StructuredOutputTests(unittest.TestCase):
@@ -132,6 +137,34 @@ The enemies use cover, focus isolated heroes, and retreat once their leader fall
         self.assertGreater(len(encounter.monsters), 0)
         self.assertEqual(response["suggestedActions"][0]["action"], "saveEncounter")
 
+    def test_real_provider_plain_encounter_uses_successful_difficulty_tool_call(self):
+        answer = """
+An ambush erupts in the flooded mill. Four goblins fire from rafters while an orc blocks the wheelhouse door.
+The enemies rotate through cover and try to shove heroes into the water channel.
+"""
+        tool_calls = [
+            {
+                "toolName": "calculateEncounterDifficulty",
+                "arguments": {},
+                "success": True,
+                "result": {"difficulty": "Deadly", "adjustedXp": 800},
+            }
+        ]
+
+        with (
+            patch("app.orchestration.gemini_provider._ensure_gemini_provider"),
+            patch("app.orchestration.gemini_provider._retrieve_context", return_value=("", [])),
+            patch("app.orchestration.gemini_provider.run_provider_tool_loop", return_value=(tool_calls, [])),
+            patch(
+                "app.orchestration.gemini_provider._call_gemini",
+                return_value={"answer": answer, "structuredOutput": None, "suggestedActions": []},
+            ),
+        ):
+            response = real_chat_response(request("Create new encounter", "Encounter"))
+
+        encounter = EncounterOutput(**response["structuredOutput"]["data"])
+        self.assertEqual(encounter.difficulty, "Deadly")
+
     def test_real_provider_partial_encounter_output_becomes_valid_fallback(self):
         answer = """
 This is a Hard encounter.
@@ -162,6 +195,56 @@ Campaign Hooks: The ledger names Captain Vey.
         self.assertEqual(encounter.monsters[0].count, 2)
         self.assertTrue(encounter.scalingOptions.easier)
         self.assertIn("Captain Vey", encounter.campaignHooks[0])
+
+    def test_invalid_model_difficulty_falls_back_to_tool_difficulty(self):
+        output = _fallback_structured_output(
+            request("Create new encounter", "Encounter"),
+            "At the old causeway, two cultists and a bandit try to split the party around broken cover.",
+            {
+                "type": "encounter",
+                "data": {
+                    "title": "Old Causeway Clash",
+                    "difficulty": "Brutal",
+                    "monsters": [{"name": "Cultist", "count": 2, "xp": 25}],
+                },
+            },
+            [
+                {
+                    "toolName": "calculateEncounterDifficulty",
+                    "success": True,
+                    "result": {"difficulty": "Medium"},
+                }
+            ],
+        )
+
+        encounter = EncounterOutput(**output["data"])
+        self.assertEqual(encounter.difficulty, "Medium")
+
+    def test_encounter_mode_calculates_from_inferred_monsters_and_party(self):
+        encounter_request = request("Create new encounter", "Encounter")
+        encounter_request.party = [party_member("Aria", 3), party_member("Borin", 3)]
+
+        output = _fallback_structured_output(
+            encounter_request,
+            "In the ruined granary, five goblins pepper the party from grain lofts.",
+            None,
+        )
+
+        encounter = EncounterOutput(**output["data"])
+        self.assertEqual(encounter.difficulty, "Hard")
+        self.assertEqual(encounter.monsters[0].name, "Goblin")
+        self.assertEqual(encounter.monsters[0].count, 5)
+        self.assertEqual(encounter.monsters[0].xp, 50)
+
+    def test_no_party_or_monster_xp_context_keeps_unknown_difficulty(self):
+        output = _fallback_structured_output(
+            request("Create new encounter", "Encounter"),
+            "A shimmering nameless horror waits in a silent corridor.",
+            None,
+        )
+
+        encounter = EncounterOutput(**output["data"])
+        self.assertEqual(encounter.difficulty, "Unknown")
 
     def test_real_provider_conflicting_prompt_does_not_force_encounter_mode(self):
         output = _fallback_structured_output(

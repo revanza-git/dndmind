@@ -518,6 +518,8 @@ def friendly_provider_error(message: str) -> str:
         return "The AI service is not connected correctly. Ask the app admin to check the setup."
     if "429" in lower or "quota" in lower or "rate limit" in lower:
         return "The AI is getting too many requests right now. Please wait a moment, then try again."
+    if "adc" in lower or "application default credentials" in lower or "google-auth" in lower:
+        return "Vertex AI is not connected correctly. Ask the app admin to check the ADC setup."
     if "embedding dimensions" in lower or "database expects" in lower or "pgvector schema" in lower:
         return (
             "Campaign knowledge is not set up correctly. Ask the app admin to check the knowledge setup."

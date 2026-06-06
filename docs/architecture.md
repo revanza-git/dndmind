@@ -11,14 +11,14 @@ flowchart LR
   API[ASP.NET Core API<br/>Validation, persistence, worker proxy]
   DB[(PostgreSQL + pgvector<br/>Campaigns, chat, memory, vectors)]
   Worker[FastAPI AI Worker<br/>RAG, tools, structured output]
-  Provider[Gemini or Mock LLM<br/>Chat and summaries]
+  Provider[Gemini API, Vertex AI Gemini, or Mock LLM<br/>Chat and summaries]
 
   DM --> Web
   Web -->|HTTP + X-Dndmind-Client-Id| API
   API -->|SQL| DB
   API -->|AI request context| Worker
   Worker -->|rules and memory search| DB
-  Worker -->|mock or real provider call| Provider
+  Worker -->|mock, Gemini API-key, or Vertex call| Provider
   Provider --> Worker
   Worker -->|answer, citations, tools, cards| API
   API -->|persist messages and traces| DB
@@ -45,7 +45,7 @@ ASP.NET Core API
   request assembly for the AI worker
 
 FastAPI AI Worker
-  mock-first LLM behavior with Gemini real-chat mode
+  mock-first LLM behavior with Gemini API-key and Vertex AI real-chat modes
   guarded campaign response tone as style-only prompt context
   tabletop RPG scope guard and redirect suggestions
   upload sanitization before document chunking and embedding
@@ -85,7 +85,8 @@ This split is useful for a portfolio project because it demonstrates a realistic
 
 - Two backend services add Docker and networking overhead, but make AI iteration cleaner.
 - Mock embeddings are not semantically equivalent to real embeddings, but they make local demos deterministic and free. Gemini embeddings can be enabled at 1536 dimensions to match the current pgvector schema.
-- The current worker has a mock-first provider path plus Gemini chat mode; deterministic mock mode remains the safest portfolio demo path.
+- The current worker has a mock-first provider path plus Gemini API-key and Vertex AI chat modes; deterministic mock mode remains the safest portfolio demo path.
+- Vertex AI mode uses Application Default Credentials through `google-auth`, so local Docker setups must mount ADC credentials into the worker container without committing them.
 - The scope guard is intentionally lightweight and deterministic. It keeps obvious unrelated prompts out of the product path, but it is not a full safety classifier.
 - Campaign response tone is a style hint only; the worker prompt explicitly keeps scope, grounding, citations, tool results, and structured-output requirements higher priority.
 - Campaign archive is soft state (`archived_at`), so normal campaign lists stay tidy without deleting data.

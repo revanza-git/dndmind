@@ -31,6 +31,12 @@ services:
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       GEMINI_TEMPERATURE: ${GEMINI_TEMPERATURE:-0.7}
       GEMINI_TIMEOUT_SECONDS: ${GEMINI_TIMEOUT_SECONDS:-45}
+      VERTEX_PROJECT_ID: ${VERTEX_PROJECT_ID:-project-de842900-cb0b-4155-b9c}
+      VERTEX_LOCATION: ${VERTEX_LOCATION:-global}
+      VERTEX_MODEL: ${VERTEX_MODEL:-gemini-2.5-flash}
+      VERTEX_TEMPERATURE: ${VERTEX_TEMPERATURE:-0.7}
+      VERTEX_TIMEOUT_SECONDS: ${VERTEX_TIMEOUT_SECONDS:-45}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-gemini}
       GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-gemini-embedding-001}
       GEMINI_EMBEDDING_DIMENSIONS: ${GEMINI_EMBEDDING_DIMENSIONS:-1536}
@@ -43,6 +49,8 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://dndmind:dndmind@postgres:5432/dndmind}
     ports:
       - "8001:8001"
+    volumes:
+      - ${ADC_HOST_DIR:-./.gcloud}:/gcloud:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health').read()"]
       interval: 10s

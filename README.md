@@ -20,7 +20,7 @@ flowchart LR
   API[ASP.NET Core API]
   Worker[FastAPI AI Worker]
   DB[(PostgreSQL + pgvector)]
-  Model[Gemini or Mock LLM]
+  Model[Gemini API, Vertex AI Gemini, or Mock LLM]
 
   Web -->|browser HTTP| API
   API -->|campaign, chat, memory| DB
@@ -31,7 +31,7 @@ flowchart LR
   API --> Web
 ```
 
-The frontend renders the DM command center, Campaign menu, Campaign Knowledge library, downloadable templates, and local browser profile header for browser-owned sessions. The API owns campaign lifecycle, party management, upload validation, chat persistence, memory writes, demo seed hydration, and worker proxying. The AI worker handles prompt orchestration, guarded campaign tone, scope guarding, upload sanitization, RAG, structured output, context-aware tool execution, and mock or Gemini provider calls. PostgreSQL stores campaign entities, archive state, messages, memory, knowledge chunks, party history, and pgvector embeddings.
+The frontend renders the DM command center, Campaign menu, Campaign Knowledge library, downloadable templates, and local browser profile header for browser-owned sessions. The API owns campaign lifecycle, party management, upload validation, chat persistence, memory writes, demo seed hydration, and worker proxying. The AI worker handles prompt orchestration, guarded campaign tone, scope guarding, upload sanitization, RAG, structured output, context-aware tool execution, and mock, Gemini API-key, or Vertex AI provider calls. PostgreSQL stores campaign entities, archive state, messages, memory, knowledge chunks, party history, and pgvector embeddings.
 
 ## Key Features
 
@@ -59,6 +59,7 @@ The frontend renders the DM command center, Campaign menu, Campaign Knowledge li
 - pgvector
 - Vector search
 - Prompt orchestration
+- Multi-provider chat routing
 - Guarded style hints
 - Upload validation and sanitization
 - Structured output
@@ -76,7 +77,7 @@ The frontend renders the DM command center, Campaign menu, Campaign Knowledge li
 | Backend API | ASP.NET Core 8 Web API, Npgsql |
 | AI Worker | Python, FastAPI, Pydantic |
 | Database | PostgreSQL 16, pgvector |
-| LLM | Mock LLM mode by default, Gemini provider support |
+| LLM | Mock LLM mode by default, Gemini API-key and Vertex AI Gemini provider support |
 | Deployment | Docker Compose |
 
 ## Screenshots
@@ -116,9 +117,13 @@ Open:
 | --- | --- |
 | `MOCK_LLM=true` | Enables deterministic local chat responses without paid API calls. |
 | `MOCK_EMBEDDINGS=true` | Enables deterministic local embeddings for demo RAG flows. |
-| `LLM_PROVIDER` | Real AI provider when `MOCK_LLM=false`; currently supports `gemini`. |
-| `GEMINI_API_KEY` | Gemini API key for real chat and session summary mode; keep empty for mock mode. |
+| `LLM_PROVIDER` | Real AI provider when `MOCK_LLM=false`; supports `gemini` or `vertex`. |
+| `GEMINI_API_KEY` | Gemini API key for `LLM_PROVIDER=gemini`; keep empty for mock or Vertex mode. |
 | `GEMINI_MODEL` | Gemini chat model, defaulting to `gemini-2.5-flash`. |
+| `VERTEX_PROJECT_ID` | Google Cloud project ID for `LLM_PROVIDER=vertex`. |
+| `VERTEX_LOCATION` | Vertex AI location, defaulting to `global`. |
+| `VERTEX_MODEL` | Vertex Gemini model, defaulting to `gemini-2.5-flash`. |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Optional in-container ADC credential path for local Docker Vertex mode. |
 | `CHAT_MODEL` | Backward-compatible chat model fallback when `GEMINI_MODEL` is not set. |
 | `EMBEDDING_PROVIDER` | Real embedding provider when `MOCK_EMBEDDINGS=false`; supports `gemini` or `openai`. |
 | `GEMINI_EMBEDDING_MODEL` | Gemini embedding model, defaulting to `gemini-embedding-001`. |
@@ -130,7 +135,11 @@ Open:
 | `NEXT_PUBLIC_API_URL` | Browser-visible API URL alias. |
 | `NEXT_PUBLIC_API_BASE_URL` | Browser-visible API base URL used by the current frontend. |
 
-To use Gemini instead of mock responses, copy `.env.example` to `.env`, set `MOCK_LLM=false`, set `LLM_PROVIDER=gemini`, and put your key in `GEMINI_API_KEY`. To make RAG use Gemini embeddings too, set `MOCK_EMBEDDINGS=false` and `EMBEDDING_PROVIDER=gemini`. Gemini embeddings are requested at 1536 dimensions to match the current `knowledge_chunks.embedding vector(1536)` schema.
+To use Gemini API-key mode instead of mock responses, copy `.env.example` to `.env`, set `MOCK_LLM=false`, set `LLM_PROVIDER=gemini`, and put your key in `GEMINI_API_KEY`.
+
+To use Vertex AI Gemini through Application Default Credentials, set `MOCK_LLM=false`, `LLM_PROVIDER=vertex`, `VERTEX_PROJECT_ID=project-de842900-cb0b-4155-b9c`, `VERTEX_LOCATION=global`, and `VERTEX_MODEL=gemini-2.5-flash`. For local Docker usage, make ADC available inside the `ai-worker` container by mounting your gcloud ADC JSON file and setting `GOOGLE_APPLICATION_CREDENTIALS` to the mounted path, such as `/gcloud/application_default_credentials.json`. Keep `MOCK_EMBEDDINGS=true` for the first Vertex chat pass unless you intentionally wire a real embedding provider.
+
+To make RAG use Gemini embeddings too, set `MOCK_EMBEDDINGS=false` and `EMBEDDING_PROVIDER=gemini`. Gemini embeddings are requested at 1536 dimensions to match the current `knowledge_chunks.embedding vector(1536)` schema.
 
 ## Demo Flow
 

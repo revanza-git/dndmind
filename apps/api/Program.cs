@@ -864,6 +864,110 @@ app.MapPost("/api/campaigns/{campaignId:guid}/locations", async (Guid campaignId
     return Results.Ok(new { id = location.Id, location });
 });
 
+app.MapDelete("/api/campaigns/{campaignId:guid}/npcs/{npcId:guid}", async (Guid campaignId, Guid npcId, NpgsqlDataSource db, ICurrentClientService currentClient) =>
+{
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+    if (await LoadCampaign(campaignId, db) is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
+
+    const string sql = """
+        DELETE FROM npcs
+        WHERE id = @npcId
+          AND campaign_id = @campaignId
+          AND client_owner_id = @clientOwnerId
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("npcId", npcId);
+    cmd.Parameters.AddWithValue("campaignId", campaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
+    var deleted = await cmd.ExecuteNonQueryAsync();
+    return deleted > 0 ? Results.NoContent() : Results.NotFound(new { error = "NPC not found." });
+});
+
+app.MapDelete("/api/campaigns/{campaignId:guid}/quests/{questId:guid}", async (Guid campaignId, Guid questId, NpgsqlDataSource db, ICurrentClientService currentClient) =>
+{
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+    if (await LoadCampaign(campaignId, db) is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
+
+    const string sql = """
+        DELETE FROM quests
+        WHERE id = @questId
+          AND campaign_id = @campaignId
+          AND client_owner_id = @clientOwnerId
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("questId", questId);
+    cmd.Parameters.AddWithValue("campaignId", campaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
+    var deleted = await cmd.ExecuteNonQueryAsync();
+    return deleted > 0 ? Results.NoContent() : Results.NotFound(new { error = "Quest not found." });
+});
+
+app.MapDelete("/api/campaigns/{campaignId:guid}/locations/{locationId:guid}", async (Guid campaignId, Guid locationId, NpgsqlDataSource db, ICurrentClientService currentClient) =>
+{
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+    if (await LoadCampaign(campaignId, db) is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
+
+    const string sql = """
+        DELETE FROM locations
+        WHERE id = @locationId
+          AND campaign_id = @campaignId
+          AND client_owner_id = @clientOwnerId
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("locationId", locationId);
+    cmd.Parameters.AddWithValue("campaignId", campaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
+    var deleted = await cmd.ExecuteNonQueryAsync();
+    return deleted > 0 ? Results.NoContent() : Results.NotFound(new { error = "Location not found." });
+});
+
+app.MapDelete("/api/campaigns/{campaignId:guid}/memory-events/{eventId:guid}", async (Guid campaignId, Guid eventId, NpgsqlDataSource db, ICurrentClientService currentClient) =>
+{
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+    if (await LoadCampaign(campaignId, db) is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
+
+    const string sql = """
+        DELETE FROM memory_events
+        WHERE id = @eventId
+          AND campaign_id = @campaignId
+          AND client_owner_id = @clientOwnerId
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("eventId", eventId);
+    cmd.Parameters.AddWithValue("campaignId", campaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
+    var deleted = await cmd.ExecuteNonQueryAsync();
+    return deleted > 0 ? Results.NoContent() : Results.NotFound(new { error = "Memory event not found." });
+});
+
 app.MapPost("/api/campaigns/{campaignId:guid}/encounters", async (Guid campaignId, SaveEncounterRequest request, NpgsqlDataSource db, ICurrentClientService currentClient, IHttpClientFactory httpClientFactory) =>
 {
     if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
@@ -944,6 +1048,80 @@ app.MapPost("/api/campaigns/{campaignId:guid}/encounters", async (Guid campaignI
     }
 
     return Results.Ok(new { id = encounter.Id, encounter, memoryDocumentId = document.Id });
+});
+
+app.MapDelete("/api/campaigns/{campaignId:guid}/encounters/{encounterId:guid}", async (Guid campaignId, Guid encounterId, NpgsqlDataSource db, ICurrentClientService currentClient) =>
+{
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
+    if (await LoadCampaign(campaignId, db) is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
+
+    await using var connection = await db.OpenConnectionAsync();
+    await using var transaction = await connection.BeginTransactionAsync();
+
+    const string deleteEncounterSql = """
+        DELETE FROM encounters
+        WHERE id = @encounterId
+          AND campaign_id = @campaignId
+          AND client_owner_id = @clientOwnerId
+        """;
+
+    await using (var deleteEncounterCmd = new NpgsqlCommand(deleteEncounterSql, connection, transaction))
+    {
+        deleteEncounterCmd.Parameters.AddWithValue("encounterId", encounterId);
+        deleteEncounterCmd.Parameters.AddWithValue("campaignId", campaignId);
+        deleteEncounterCmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
+        var deleted = await deleteEncounterCmd.ExecuteNonQueryAsync();
+        if (deleted == 0)
+        {
+            return Results.NotFound(new { error = "Encounter not found." });
+        }
+    }
+
+    const string matchingDocumentsSql = """
+        SELECT id
+        FROM knowledge_documents
+        WHERE campaign_id = @campaignId
+          AND source_type = 'campaign_memory'
+          AND metadata->>'clientOwnerId' = @clientOwnerId
+          AND metadata->>'memoryType' = 'encounter'
+          AND metadata->>'encounterId' = @encounterIdText
+        """;
+
+    const string deleteChunksSql = $"""
+        DELETE FROM knowledge_chunks
+        WHERE document_id IN ({matchingDocumentsSql})
+        """;
+
+    await using (var deleteChunksCmd = new NpgsqlCommand(deleteChunksSql, connection, transaction))
+    {
+        deleteChunksCmd.Parameters.AddWithValue("campaignId", campaignId);
+        deleteChunksCmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
+        deleteChunksCmd.Parameters.AddWithValue("encounterIdText", encounterId.ToString());
+        await deleteChunksCmd.ExecuteNonQueryAsync();
+    }
+
+    const string deleteDocumentsSql = $"""
+        DELETE FROM knowledge_documents
+        WHERE id IN ({matchingDocumentsSql})
+        """;
+
+    await using (var deleteDocumentsCmd = new NpgsqlCommand(deleteDocumentsSql, connection, transaction))
+    {
+        deleteDocumentsCmd.Parameters.AddWithValue("campaignId", campaignId);
+        deleteDocumentsCmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
+        deleteDocumentsCmd.Parameters.AddWithValue("encounterIdText", encounterId.ToString());
+        await deleteDocumentsCmd.ExecuteNonQueryAsync();
+    }
+
+    await transaction.CommitAsync();
+    return Results.NoContent();
 });
 
 app.MapPost("/api/campaigns/{campaignId:guid}/documents/upload", async (Guid campaignId, UploadDocumentRequest request, NpgsqlDataSource db) =>

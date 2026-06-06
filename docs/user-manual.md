@@ -54,7 +54,7 @@ Expected result: DNDMind shows an encounter briefing, any tool or memory context
 | Context Toggles | Decide which sources DNDMind may use for the next answer. |
 | Task Hints | Tell DNDMind what kind of work the next prompt needs. |
 | Right Panel | Roll dice, manage session notes, review party details, and check memory. |
-| Command Console | Type your request and send it. |
+| Command Console | Type your request, send it, or clear the current chat when you want a fresh conversation. |
 
 ## Campaign Menu
 
@@ -230,6 +230,19 @@ Expected result: DNDMind uses the selected campaign for memory, notes, sources, 
 
 Expected result: DNDMind gives a short answer and cites the rules text it used.
 
+### Start a fresh chat
+
+Use **Clear** when the current chat has become long, messy, or tied to an older scene and you want a clean place to ask the next question.
+
+1. Check that you have the right campaign selected.
+2. Click **Clear** near the context toggles.
+3. Confirm the message.
+4. Type your next prompt.
+
+Expected result: the visible chat clears, and DNDMind starts a new conversation for your next prompt.
+
+Clearing chat does not delete your campaign, party, Campaign Knowledge, session notes, saved NPCs, quests, locations, encounters, or summaries. It only clears the current chat view and conversation thread.
+
 ### Add homebrew rules
 
 1. Open **Campaign Knowledge**.
@@ -289,6 +302,20 @@ Expected result: important NPCs, quests, locations, hooks, and events become eas
 4. Click **Send**.
 
 Expected result: DNDMind returns matching campaign details or memory references.
+
+### Manage saved campaign memory
+
+Use Campaign Memory to review the people, quests, places, hooks, and encounters you have saved for the selected campaign.
+
+1. Find the Campaign Memory area on the right.
+2. Open the group you want, such as **NPCs**, **Open Quests**, **Recent Locations**, **Hooks**, or **Saved Encounters**.
+3. Click a saved item to see more detail.
+4. If the item is no longer useful, click **Delete**.
+5. Click **Delete?** to confirm.
+
+Expected result: the item leaves Campaign Memory for the current campaign.
+
+Delete saved memory only when you are sure you do not want DNDMind to use that detail later. Deleting a saved encounter also removes its searchable encounter memory. If you only want a cleaner chat screen, use **Clear** instead.
 
 ## Good Prompt Patterns
 
@@ -402,6 +429,18 @@ Fix:
 
 1. Return to the same browser profile you used before.
 2. Avoid clearing browser storage during a campaign.
+
+### I cleared chat by mistake
+
+Cause: **Clear** starts a fresh conversation and removes the visible chat from the command center.
+
+Fix:
+
+1. Keep using the same campaign.
+2. Check Campaign Memory, Session Notes, Party, and Campaign Knowledge if you need saved details.
+3. Ask DNDMind for a recap or search memory for the name, place, or hook you need.
+
+Your saved campaign material is still there. Only the current chat thread was cleared.
 
 ### I see "No active campaigns"
 

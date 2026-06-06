@@ -142,6 +142,9 @@ export type KnowledgeDocument = {
     chunkCount?: number;
     embeddingModel?: string;
     mockEmbeddings?: boolean;
+    memoryType?: string;
+    encounterId?: string;
+    clientOwnerId?: string;
   };
   createdAt: string;
   chunkCount: number;
@@ -687,4 +690,49 @@ export async function saveEncounter(campaignId: string, payload: Record<string, 
     throw new Error(await apiErrorMessage(response, "DNDMind could not save that encounter. Please try again."));
   }
   return response.json();
+}
+
+export async function deleteNpc(campaignId: string, npcId: string): Promise<void> {
+  const response = await apiFetch(`/api/campaigns/${campaignId}/npcs/${npcId}`, {
+    method: "DELETE"
+  });
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "DNDMind could not delete that NPC. Please try again."));
+  }
+}
+
+export async function deleteQuest(campaignId: string, questId: string): Promise<void> {
+  const response = await apiFetch(`/api/campaigns/${campaignId}/quests/${questId}`, {
+    method: "DELETE"
+  });
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "DNDMind could not delete that quest. Please try again."));
+  }
+}
+
+export async function deleteLocation(campaignId: string, locationId: string): Promise<void> {
+  const response = await apiFetch(`/api/campaigns/${campaignId}/locations/${locationId}`, {
+    method: "DELETE"
+  });
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "DNDMind could not delete that location. Please try again."));
+  }
+}
+
+export async function deleteMemoryEvent(campaignId: string, eventId: string): Promise<void> {
+  const response = await apiFetch(`/api/campaigns/${campaignId}/memory-events/${eventId}`, {
+    method: "DELETE"
+  });
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "DNDMind could not delete that hook. Please try again."));
+  }
+}
+
+export async function deleteEncounter(campaignId: string, encounterId: string): Promise<void> {
+  const response = await apiFetch(`/api/campaigns/${campaignId}/encounters/${encounterId}`, {
+    method: "DELETE"
+  });
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "DNDMind could not delete that encounter. Please try again."));
+  }
 }
