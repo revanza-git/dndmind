@@ -32,20 +32,20 @@ type TroubleshootingItem = {
 
 const quickStart = [
   {
-    title: "Create campaign",
-    detail: "Open the campaign selector and choose the workspace DNDMind should use.",
-    result: "The active campaign summary appears at the top.",
+    title: "Choose campaign",
+    detail: "Open the campaign selector and choose the campaign you want DNDMind to use. To follow this guide, choose Embers of Blackwater.",
+    result: "The active campaign appears at the top.",
     area: "Left Sidebar"
   },
   {
-    title: "Add party",
-    detail: "Add and update player characters with HP, level, AC, notes, and history.",
+    title: "Check party",
+    detail: "Review or update character level, HP, AC, class, and notes.",
     result: "Encounter prompts can account for party strength.",
     area: "Right Panel"
   },
   {
     title: "Add rules",
-    detail: "Upload or paste SRD-style rules text and ingest it into chunks.",
+    detail: "Upload or paste rules text, then click Upload + Ingest.",
     result: "Rules questions can return citations.",
     area: "Rules Library"
   },
@@ -58,7 +58,7 @@ const quickStart = [
   {
     title: "Ask AI",
     detail: "Pick a mode, set context toggles, and send a command.",
-    result: "DNDMind answers with sources, tools, or structured cards.",
+    result: "DNDMind answers with text, sources, tool results, or cards.",
     area: "Command Console"
   },
   {
@@ -68,10 +68,10 @@ const quickStart = [
     area: "Center Workspace"
   },
   {
-    title: "Run evals",
-    detail: "Use the evaluation snapshot and eval prompt to check expected behavior.",
-    result: "Rules, memory, tools, JSON, and hallucination checks stay visible.",
-    area: "Evaluations"
+    title: "Review results",
+    detail: "Check citations, tool results, and saved cards before using them at the table.",
+    result: "You can see what DNDMind used and decide what to keep.",
+    area: "Center Workspace"
   }
 ];
 
@@ -89,8 +89,8 @@ const firstRunSteps = [
 const layoutAreas = [
   ["Left Sidebar", "Choose campaigns, open rules documents, navigate app areas, and return to this manual."],
   ["Center Workspace", "Read the chat timeline, generated encounter briefings, citations, tool results, and structured cards."],
-  ["Right Panel", "Use dice, eval snapshots, session notes, party details, memory, citations, and tool traces."],
-  ["Command Console", "Send instructions with the selected mode and context toggles."]
+  ["Right Panel", "Use dice, session notes, party details, memory, citations, and tool traces."],
+  ["Command Console", "Type your request, choose a mode, set context toggles, and send."]
 ];
 
 const commandCenter = [
@@ -108,7 +108,7 @@ const steps: GuideStep[] = [
     where: "Left Sidebar -> Campaign",
     do: [
       "Open the campaign selector.",
-      "Select an existing campaign or create a new one.",
+      "Select an existing campaign or create a new one. To follow this guide, choose Embers of Blackwater.",
       "Add a short campaign description if the field is available."
     ],
     expected: "The campaign appears under Active Campaign at the top.",
@@ -134,7 +134,7 @@ const steps: GuideStep[] = [
     do: [
       "Open the rules document area.",
       "Upload or paste rules text.",
-      "Click the ingest action for the document.",
+      "Click Upload + Ingest.",
       "Ask a Rules mode question such as: How does advantage work?"
     ],
     expected: "Rules answers include citations from the ingested document.",
@@ -186,15 +186,15 @@ const steps: GuideStep[] = [
     why: "Saving is what turns a one-off AI answer into campaign material DNDMind can recall later."
   },
   {
-    title: "Run Evals",
-    where: "Right Panel -> Evaluations",
+    title: "Review Answers",
+    where: "Center Workspace",
     do: [
-      "Open the evaluation snapshot.",
-      "Review pass rate and categories.",
-      "Run or copy the eval prompt when checking a demo behavior."
+      "Read the answer before using it at the table.",
+      "Check citations when the answer is based on rules or memory.",
+      "Save useful cards and ignore results you do not want to keep."
     ],
-    expected: "Rules accuracy, citations, memory recall, JSON validity, tool use, and hallucination checks are visible.",
-    why: "Evals help you verify that the assistant still behaves correctly after content or code changes."
+    expected: "You keep only the content that fits your campaign.",
+    why: "DNDMind is a co-pilot. The DM still decides what becomes true at the table."
   }
 ];
 
@@ -291,8 +291,7 @@ const workflows: Workflow[] = [
       "Paste raw notes into Session Notes.",
       "Click Summarize or use Summarize mode.",
       "Review extracted NPCs, quests, locations, and hooks.",
-      "Save the summary if it accurately captures the session.",
-      "Run evals if you changed prompts, rules, or expected demo behavior."
+      "Save the summary if it accurately captures the session."
     ]
   }
 ];
@@ -305,8 +304,8 @@ const troubleshooting: TroubleshootingItem[] = [
   },
   {
     problem: "My session disappeared.",
-    cause: "You may be using a different browser, incognito window, or local device profile.",
-    fix: ["Check whether you opened another browser or incognito window.", "Return to the original browser profile.", "Avoid clearing local storage during a demo."]
+    cause: "You may be using a different browser, incognito window, or local browser profile.",
+    fix: ["Check whether you opened another browser or incognito window.", "Return to the original browser profile.", "Avoid clearing local storage during a campaign."]
   },
   {
     problem: "Memory answer seems empty.",
@@ -324,27 +323,22 @@ const troubleshooting: TroubleshootingItem[] = [
     fix: ["Open the campaign selector.", "Choose the correct campaign.", "Confirm the active campaign name at the top before sending the prompt."]
   },
   {
-    problem: "Local demo says an API key is missing.",
-    cause: "The app may be configured for a real provider instead of mock mode.",
+    problem: "The app says an API key is missing.",
+    cause: "The app may need an AI provider setting changed by the person running it.",
     fix: [
-      "Use MOCK_LLM=true for the local demo.",
-      "For Gemini AI mode, set MOCK_LLM=false, LLM_PROVIDER=gemini, and GEMINI_API_KEY.",
-      "For Gemini RAG embeddings, set MOCK_EMBEDDINGS=false, EMBEDDING_PROVIDER=gemini, and keep GEMINI_EMBEDDING_DIMENSIONS=1536.",
-      "Restart the affected service after changing environment variables."
+      "Ask the person who started the app to check the AI settings.",
+      "If your group is using a local-only setup, no paid AI key should be required.",
+      "Restart the app after the setting is changed."
     ]
   }
 ];
 
 const glossary = [
-  ["RAG", "Retrieval augmented generation. DNDMind searches rules or memory before answering."],
-  ["Embeddings", "Numeric representations of text used to compare meaning."],
-  ["Vector DB", "pgvector-backed storage for semantic search over rules and campaign memory."],
-  ["Tool calling", "AI-triggered app actions such as dice rolling, rules search, memory search, or difficulty calculation."],
-  ["Eval", "A repeatable test case that checks whether AI behavior stays accurate and structured."],
-  ["Structured output", "A typed card such as an NPC, quest, location, encounter, or session summary."],
+  ["Campaign Memory", "Saved notes, NPCs, quests, locations, encounters, and summaries DNDMind can use later."],
+  ["Structured Card", "A generated NPC, quest, location, encounter, or summary that you can save."],
+  ["Tool Result", "A visible result from an action such as a dice roll, rules search, or memory search."],
   ["Citation", "A source reference attached to an answer so the user can see where context came from."],
-  ["Mock LLM mode", "Deterministic local behavior for demos without paid API calls."],
-  ["Local device profile", "A browser-stored demo identity used to keep MVP sessions separated without login."]
+  ["Local Browser Profile", "The browser-based identity used to keep sessions separate."]
 ];
 
 const toc = [
@@ -358,7 +352,7 @@ const toc = [
   ["Local Profile", "local-profile"],
   ["Workflows", "workflows"],
   ["Troubleshooting", "troubleshooting"],
-  ["Glossary", "glossary"]
+  ["Helpful Terms", "glossary"]
 ];
 
 export default function ManualPage() {
@@ -427,7 +421,7 @@ export default function ManualPage() {
           <header className="mx-auto max-w-6xl border-b border-moss/15 pb-8 pt-2 md:pb-10">
             <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-copper">Quick operating guide</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-copper">Table guide</p>
                 <h2 className="mt-3 max-w-4xl text-4xl font-semibold leading-tight text-ink md:text-5xl">
                   Run DNDMind with confidence at the table.
                 </h2>
@@ -569,13 +563,13 @@ export default function ManualPage() {
                 </div>
               </ManualSection>
 
-              <ManualSection id="local-profile" eyebrow="MVP Sessions" title="Local Device Profile">
+              <ManualSection id="local-profile" eyebrow="Browser Sessions" title="Local Browser Profile">
                 <article className="rounded-lg border border-moss/15 bg-white p-5 shadow-sm">
                   <div className="grid gap-4 md:grid-cols-2">
-                    <InfoCard title="No login required" detail="DNDMind MVP does not require an account. The browser creates a local device profile for demo isolation." tone="definition" />
-                    <InfoCard title="Browser scoped" detail="Sessions are saved for that browser profile. Another browser or incognito window may show a different session list." tone="definition" />
-                    <InfoCard title="Storage matters" detail="Clearing browser storage may reset the local profile and hide sessions tied to the previous profile." tone="warning" />
-                    <InfoCard title="Not production auth" detail="This is demo and MVP isolation, not production authentication or account security." tone="warning" />
+                    <InfoCard title="No login required" detail="You do not need an account. The browser keeps a local profile for your sessions." tone="definition" />
+                    <InfoCard title="Browser scoped" detail="Another browser or incognito window may show a different session list." tone="definition" />
+                    <InfoCard title="Storage matters" detail="Clearing browser storage may hide sessions tied to the previous browser profile." tone="warning" />
+                    <InfoCard title="Same browser helps" detail="Use the same browser profile during a campaign so your saved sessions are easy to find." tone="definition" />
                   </div>
                 </article>
               </ManualSection>
@@ -608,7 +602,7 @@ export default function ManualPage() {
                 </div>
               </ManualSection>
 
-              <ManualSection id="glossary" eyebrow="Terms" title="Glossary">
+              <ManualSection id="glossary" eyebrow="Plain Language" title="Helpful Terms">
                 <div className="grid gap-4 md:grid-cols-2">
                   {glossary.map(([term, definition]) => (
                     <InfoCard key={term} title={term} detail={definition} tone="definition" />

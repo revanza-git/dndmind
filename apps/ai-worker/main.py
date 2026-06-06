@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 import psycopg
 
 from app.orchestration.gemini_provider import real_chat_response, real_session_summary
+from app.orchestration.scope_guard import is_in_scope_prompt, out_of_scope_answer, out_of_scope_suggested_actions
 from app.orchestration.tool_loop import execute_manual_tool, run_mock_tool_loop
 from app.orchestration.structured_output import build_mock_structured_output, build_suggested_actions
 from rag.chunker import chunk_text
@@ -183,6 +184,9 @@ def health() -> dict[str, str | bool]:
 
 @app.post("/ai/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
+    if not is_in_scope_prompt(request.message):
+        return out_of_scope_chat_response(request)
+
     if mock_llm_enabled():
         return mock_chat_response(request)
 
@@ -195,6 +199,18 @@ def chat(request: ChatRequest) -> ChatResponse:
         conversationId=request.conversationId,
         mode=request.mode,
         **provider_response,
+    )
+
+
+def out_of_scope_chat_response(request: ChatRequest) -> ChatResponse:
+    return ChatResponse(
+        conversationId=request.conversationId,
+        answer=out_of_scope_answer(),
+        mode=request.mode,
+        citations=[],
+        toolCalls=[],
+        structuredOutput=None,
+        suggestedActions=out_of_scope_suggested_actions(),
     )
 
 

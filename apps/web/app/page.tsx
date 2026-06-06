@@ -243,7 +243,7 @@ export default function Home() {
         context
       });
       setConversationId(response.conversationId);
-      const enhanced = enhanceChatResultForDemo(userMessage, response, mode);
+      const enhanced = enhanceChatResultForPreparedContent(userMessage, response, mode);
       setLastResponse({
         ...response,
         answer: enhanced.content,
@@ -279,10 +279,10 @@ export default function Home() {
     setInput(prompt.prompt);
   }
 
-  function handleLoadDemoScenario() {
+  function handleLoadPreparedScene() {
     const prompt = "Create a medium encounter for this party involving Captain Vey and the Ashen Knives.";
     const response: ChatResponse = {
-      conversationId: conversationId ?? "demo-encounter",
+      conversationId: conversationId ?? "prepared-encounter",
       answer: "",
       mode: "Encounter",
       citations: [],
@@ -290,7 +290,7 @@ export default function Home() {
       structuredOutput: null,
       suggestedActions: []
     };
-    const enhanced = enhanceChatResultForDemo(prompt, response, "Encounter");
+    const enhanced = enhanceChatResultForPreparedContent(prompt, response, "Encounter");
     setMode("Encounter");
     setInput("");
     setLastResponse({
@@ -804,7 +804,7 @@ export default function Home() {
             <div className="mt-4 space-y-2">
               {documents.length === 0 && (
                 <div className="rounded-md bg-white/10 px-3 py-2 text-xs leading-5 text-mist">
-                  No rules indexed yet. Paste `db/seed/srd_sample.md` to demo citations.
+                  No rules indexed yet. Add a rules document to enable cited answers.
                 </div>
               )}
               {documents.map((document) => (
@@ -833,8 +833,8 @@ export default function Home() {
           </section>
 
           <div className="mt-8 rounded-md border border-white/15 p-3 text-sm text-mist">
-            <p className="font-medium text-white">Mock-first demo</p>
-            <p className="mt-1 leading-5">The worker returns deterministic AI-shaped responses while `MOCK_LLM=true`.</p>
+            <p className="font-medium text-white">Local campaign workspace</p>
+            <p className="mt-1 leading-5">Campaigns, sessions, rules, and saved cards stay organized for this table.</p>
           </div>
         </aside>
 
@@ -903,7 +903,7 @@ export default function Home() {
 
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-[radial-gradient(circle_at_top,_rgba(216,226,220,0.55),_transparent_36rem)] px-5 pb-32 pt-6">
             {messages.length === 0 && (
-              <EmptyChatState onPrompt={handleQuickPrompt} onDemo={handleLoadDemoScenario} />
+              <EmptyChatState onPrompt={handleQuickPrompt} onPreparedScene={handleLoadPreparedScene} />
             )}
             {messages.map((message, index) => (
               <ChatTimelineCard
@@ -1323,10 +1323,10 @@ function CitationSection({ citations }: { citations: Citation[] }) {
 
 function EmptyChatState({
   onPrompt,
-  onDemo
+  onPreparedScene
 }: {
   onPrompt: (prompt: (typeof quickPrompts)[number]) => void;
-  onDemo: () => void;
+  onPreparedScene: () => void;
 }) {
   return (
     <section className="mx-auto flex min-h-[28rem] w-full max-w-5xl items-center">
@@ -1355,13 +1355,13 @@ function EmptyChatState({
           ))}
         </div>
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-moss/10 bg-parchment/60 px-4 py-3">
-          <p className="text-sm leading-6 text-moss/75">Need a consistent portfolio shot? Load a prepared Captain Vey encounter briefing.</p>
+          <p className="text-sm leading-6 text-moss/75">Want a quick starting point? Load a prepared Captain Vey encounter briefing.</p>
           <button
             type="button"
-            onClick={onDemo}
+            onClick={onPreparedScene}
             className="rounded-full border border-copper bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-copper shadow-sm transition hover:bg-copper hover:text-white"
           >
-            Load Demo Scenario
+            Load Prepared Scene
           </button>
         </div>
       </div>
@@ -2072,7 +2072,7 @@ function splitAssistantContent(content: string) {
   };
 }
 
-function enhanceChatResultForDemo(userMessage: string, response: ChatResponse, selectedMode: string): ResultEnhancements {
+function enhanceChatResultForPreparedContent(userMessage: string, response: ChatResponse, selectedMode: string): ResultEnhancements {
   const prompt = userMessage.toLowerCase();
   const isCaptainVeyNpcPrompt =
     prompt.includes("generate") &&
@@ -2128,7 +2128,7 @@ function enhanceChatResultForDemo(userMessage: string, response: ChatResponse, s
               source: "campaign-memory",
               title: "Campaign Memory",
               heading: "Captain Vey and Blackwater Mine",
-              chunkId: "demo-vey-encounter",
+              chunkId: "prepared-vey-encounter",
               snippet:
                 "Captain Vey sold the map to the Ashen Knives and escaped through the old smuggler tunnel after the party recovered the Dawn Shard."
             }
@@ -2219,7 +2219,7 @@ function enhanceChatResultForDemo(userMessage: string, response: ChatResponse, s
             source: "campaign-memory",
             title: "Campaign Memory",
             heading: "Blackwater Mine betrayal",
-            chunkId: "demo-blackwater-vey",
+            chunkId: "prepared-blackwater-vey",
             snippet:
               "Captain Vey betrayed the party at Blackwater Mine, sold the map to the Ashen Knives, and escaped through the old smuggler tunnel."
           }

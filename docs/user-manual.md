@@ -1,344 +1,224 @@
 # DNDMind User Manual
 
-Learn the full workflow in 5 minutes: choose a campaign, turn on the right context, send a focused prompt, review sources and tools, then save useful cards.
+DNDMind helps a Dungeon Master prepare sessions, answer rules questions, remember campaign details, create NPCs and encounters, summarize notes, and roll dice from one command center.
 
-## Quick Start Checklist
+Use this manual when you want to know what to click, what to type, and what result to expect.
 
-1. Create campaign
-   - Where: Left Sidebar.
-   - Do: open the campaign selector and choose the workspace DNDMind should use.
-   - Expected result: the active campaign summary appears at the top of the command center.
-2. Add party
-   - Where: Right Panel.
-   - Do: review player character name, class, race, level, HP, AC, and notes.
-   - Expected result: encounter prompts can account for party strength.
-3. Add rules
-   - Where: Rules Library.
-   - Do: upload or paste SRD-style rules text and ingest it into chunks.
-   - Expected result: rules questions can return citations.
-4. Add session notes
-   - Where: Session Notes.
-   - Do: paste raw notes, save them, then summarize.
-   - Expected result: NPCs, quests, locations, and hooks become campaign memory.
-5. Ask AI
-   - Where: Command Console.
-   - Do: pick a mode, set context toggles, and send a command.
-   - Expected result: DNDMind answers with sources, tools, or structured cards.
-6. Save output
-   - Where: Center Workspace.
-   - Do: use suggested actions on NPC, quest, location, encounter, or session summary cards.
-   - Expected result: useful generated content becomes reusable memory.
-7. Run evals
-   - Where: Evaluations.
-   - Do: use the evaluation snapshot and eval prompt to check expected behavior.
-   - Expected result: rules, memory, tools, JSON, and hallucination checks stay visible.
+## First 5 Minutes
 
-## Your First Successful Run
+1. Open DNDMind.
+   - Go to the app in your browser.
+   - You do not need to create an account.
+2. Choose a campaign.
+   - Use the campaign selector in the left sidebar.
+   - To follow this guide, choose `Embers of Blackwater`.
+3. Check the party.
+   - Look at the Party panel on the right.
+   - Add or update character level, HP, AC, class, and notes if needed.
+4. Add rules.
+   - Open Rules Documents in the left sidebar.
+   - Upload or paste rules text, then click **Upload + Ingest**.
+5. Add session notes.
+   - Paste notes into Session Notes on the right.
+   - Click **Save**, then **Summarize**.
+6. Ask DNDMind for help.
+   - Choose a mode, turn on the context toggles you want, type a prompt, and click **Send**.
+7. Save useful results.
+   - If DNDMind creates a useful NPC, encounter, quest, location, or summary card, click the matching save button.
 
-Goal: generate and save one useful encounter using campaign memory and party context.
+## Quick Tutorial
 
-1. Select the campaign `Embers of Blackwater`.
-2. Confirm `Embers of Blackwater` appears as the active campaign at the top.
-3. Make sure Party Info and Campaign Memory toggles are enabled.
-4. Choose Encounter mode.
-5. Type this prompt: `Create a medium encounter for this party involving Captain Vey and the Ashen Knives.`
-6. Click Send.
-7. Review the AI response, tool result, memory used, and encounter card.
-8. Click Save Encounter if the result is useful.
+Goal: create and save one encounter using campaign memory and party details.
 
-Expected result: the center workspace shows an Encounter Briefing, tool result, memory or citation context, and a structured encounter card.
+1. Select `Embers of Blackwater`.
+2. Confirm that `Embers of Blackwater` appears as the active campaign at the top.
+3. Turn on **Campaign Memory** and **Party Info**.
+4. Choose **Encounter** mode.
+5. Type: `Create a medium encounter for this party involving Captain Vey and the Ashen Knives.`
+6. Click **Send**.
+7. Review the answer and the encounter card.
+8. Click **Save Encounter** if you want to keep it.
 
-## Understanding the Command Center
+Expected result: DNDMind shows an encounter briefing, any tool or memory context it used, and a structured encounter card you can save.
 
-| Area | Purpose |
+## Command Center Map
+
+| Area | What you use it for |
 | --- | --- |
-| Left Sidebar | Choose campaigns, open rules documents, navigate app areas, and return to the manual. |
-| Center Workspace | Read the chat timeline, generated encounter briefings, citations, tool results, and structured cards. |
-| Right Panel | Use dice, eval snapshots, session notes, party details, memory, citations, and tool traces. |
-| Command Console | Send instructions with the selected mode and context toggles. |
+| Left Sidebar | Choose campaigns, open the manual, and add rules documents. |
+| Center Workspace | Read the chat, answers, citations, tool results, and generated cards. |
+| Right Panel | Roll dice, manage session notes, review party details, and check memory. |
+| Command Console | Type your request, choose a mode, set context toggles, and send. |
 
-Practical concepts:
+## Modes
 
-- Mode buttons decide the kind of AI task. Use Rules for sourced rules answers, Encounter for combat design, NPC for characters, Summarize for notes, and Auto when the task mixes categories.
-- Context toggles decide what information the AI can use. Turn on Campaign Memory for saved story context, Party Info for party-aware answers, and Rules for citations from ingested documents.
-- Command Console is where you type the instruction and click Send. Specific prompts produce better cards and fewer follow-up questions.
-- Structured cards are reusable campaign objects such as NPCs, quests, locations, encounters, and summaries. Save useful cards so they can become campaign memory.
-- Tool results show calculations or app actions performed by the system, such as dice rolls, rules search, memory search, and encounter checks.
-- Citations show which rules document or campaign memory DNDMind used for the answer.
-
-## Step-by-Step Guide
-
-### Step 1 -- Create Campaign
-
-Where: Left Sidebar -> Campaign
-
-Do:
-
-1. Open the campaign selector.
-2. Select an existing campaign or create a new one.
-3. Add a short campaign description if the field is available.
-
-Expected result: the campaign appears under Active Campaign at the top.
-
-Why it matters: DNDMind uses the active campaign to scope memory, sessions, and generated content.
-
-### Step 2 -- Add Party
-
-Where: Right Panel -> Party
-
-Do:
-
-1. Open the party area.
-2. Select **Add Character** and enter the character's name, class, race, level, HP, AC, initiative modifier, passive perception, and notes.
-3. Use **Edit** to update level, AC, notes, or other sheet details as the campaign changes.
-4. Use **HP** for fast damage or healing updates. Add a note such as `Took damage from goblin ambush` so the change appears in character history.
-5. Use **History** to review level ups, HP changes, and custom progress notes.
-6. Keep the Party Info toggle on when asking for combat or challenge design.
-
-Expected result: party members appear in the party list and encounter answers reference party strength.
-
-Why it matters: party context helps DNDMind tune difficulty and avoid encounters that are too weak or too punishing.
-
-### Managing the Party
-
-The Party panel is campaign-level for the MVP. Changes persist in PostgreSQL and are loaded fresh by the API when DNDMind answers chat or encounter prompts.
-
-- Add a character from the Party panel with name, class, race, level, HP, AC, initiative, passive perception, and notes.
-- Update HP from the quick HP control during play. Current HP, temp HP, and the note are saved as a progress event.
-- Edit level, AC, class, race, and notes from the Edit control. Level changes are tracked in history.
-- Open History to see recent character progress and add custom notes such as bonds, injuries, discoveries, or trust changes.
-- Encounter generation uses the latest saved party snapshot when Party Info is enabled, so updated levels, HP, AC, and notes can affect difficulty and tactics.
-
-### Step 3 -- Ingest Rules
-
-Where: Left Sidebar -> Rules Library
-
-Do:
-
-1. Open the rules document area.
-2. Upload or paste rules text.
-3. Click the ingest action for the document.
-4. Ask a Rules mode question such as `How does advantage work?`
-
-Expected result: rules answers include citations from the ingested document.
-
-Why it matters: rules ingestion gives DNDMind searchable source text instead of relying on unsupported memory.
-
-### Step 4 -- Add Session Notes
-
-Where: Right Panel -> Session Notes
-
-Do:
-
-1. Paste raw table notes into the notes field.
-2. Save the notes.
-3. Click Summarize or ask Summarize mode to extract NPCs, quests, locations, and hooks.
-
-Expected result: the summary appears with extracted campaign objects and useful memory entries.
-
-Why it matters: session notes turn table events into future context that DNDMind can retrieve.
-
-### Step 5 -- Ask AI
-
-Where: Bottom Command Console
-
-Do:
-
-1. Choose the mode that matches the task.
-2. Enable the context toggles DNDMind should use.
-3. Enter a specific prompt with names, goals, and constraints.
-4. Click Send.
-
-Expected result: the center workspace shows a response, and may include citations, tool results, or a structured card.
-
-Why it matters: mode plus context tells DNDMind what kind of answer to produce and which information is allowed.
-
-### Step 6 -- Use Tools
-
-Where: Command Console or Right Panel -> Dice
-
-Do:
-
-1. Ask for an action such as rolling dice, searching memory, searching rules, or checking encounter difficulty.
-2. Use prompts like `Roll 1d20+5 for perception.`
-3. Review the tool result inside the response.
-
-Expected result: the response includes a tool result with the calculation, search result, or action summary.
-
-Why it matters: tool results make operational work visible so you can trust what happened during play.
-
-### Step 7 -- Save Cards
-
-Where: Center Workspace -> Structured Card
-
-Do:
-
-1. Review a generated NPC, quest, location, encounter, or session summary card.
-2. Confirm it is useful for the campaign.
-3. Click the matching save action, such as Save NPC or Save Encounter.
-
-Expected result: the saved item becomes reusable campaign memory for future prompts.
-
-Why it matters: saving is what turns a one-off AI answer into campaign material DNDMind can recall later.
-
-### Step 8 -- Run Evals
-
-Where: Right Panel -> Evaluations
-
-Do:
-
-1. Open the evaluation snapshot.
-2. Review pass rate and categories.
-3. Run or copy the eval prompt when checking a demo behavior.
-
-Expected result: rules accuracy, citations, memory recall, JSON validity, tool use, and hallucination checks are visible.
-
-Why it matters: evals help you verify that the assistant still behaves correctly after content or code changes.
-
-## Try This Now
-
-### Ask a Rules Question
-
-- Mode: Rules.
-- Toggles: Rules ON, Campaign Memory optional, Party Info OFF.
-- Prompt: `How does advantage work?`
-- Expected result: DNDMind gives a concise rules answer with citations from ingested rules.
-
-### Generate an NPC
-
-- Mode: NPC.
-- Toggles: Campaign Memory ON, Party Info optional.
-- Prompt: `Generate a suspicious NPC connected to Captain Vey.`
-- Expected result: DNDMind returns an NPC card with role, personality, motivation, secret, and quest hook.
-
-### Create an Encounter
-
-- Mode: Encounter.
-- Toggles: Campaign Memory ON, Party Info ON.
-- Prompt: `Create a medium encounter for this party involving the Ashen Knives.`
-- Expected result: DNDMind returns an encounter briefing, tool result, and structured encounter card.
-
-### Summarize Session Notes
-
-- Mode: Summarize.
-- Toggles: Campaign Memory ON.
-- Prompt: `Summarize these session notes and extract NPCs, quests, locations, and hooks.`
-- Expected result: DNDMind returns a session summary card and extracted campaign objects to review.
-
-### Roll Dice
-
-- Mode: Combat.
-- Toggles: no context required.
-- Prompt: `Roll 1d20+5 for perception.`
-- Expected result: DNDMind shows the roll result and tool trace in the response.
-
-### Search Campaign Memory
-
-- Mode: Auto.
-- Toggles: Campaign Memory ON.
-- Prompt: `Search campaign memory for Captain Vey.`
-- Expected result: DNDMind returns matching memory with citations or context references.
-
-## AI Modes Guide
-
-| Mode | Best for | Example |
+| Mode | Use it when you want to... | Example |
 | --- | --- | --- |
-| Auto | Mixed tasks and session prep. | `Prepare tonight's opening scene based on last session.` |
-| Rules | Rules questions that need citations. | `How does advantage work?` |
-| Story | Narration, atmosphere, and scene framing. | `Describe the ruined temple entrance.` |
-| Encounter | Combat and challenge design. | `Create a hard ambush for my level 3 party.` |
-| NPC | Character creation and relationship hooks. | `Generate a suspicious tavern keeper.` |
-| Combat | Dice, initiative, tactics, and table actions. | `Roll initiative for the party and goblins.` |
-| Summarize | Session notes and extracted hooks. | `Summarize this session and extract unresolved hooks.` |
+| Auto | Let DNDMind choose the best approach. | `Prepare tonight's opening scene based on last session.` |
+| Rules | Ask a rules question with sources. | `How does advantage work?` |
+| Story | Create narration, atmosphere, or scene text. | `Describe the ruined temple entrance.` |
+| Encounter | Build or adjust combat and challenges. | `Create a hard ambush for my level 3 party.` |
+| NPC | Create characters and relationship hooks. | `Generate a suspicious tavern keeper.` |
+| Combat | Roll dice, plan tactics, or handle initiative. | `Roll initiative for the party and goblins.` |
+| Summarize | Turn session notes into useful memory. | `Summarize this session and extract unresolved hooks.` |
 
-## Recommended First Prompts
+## Context Toggles
+
+- **Rules**: use this when the answer should come from ingested rules text and include citations.
+- **Campaign Memory**: use this when the answer should remember saved NPCs, quests, locations, notes, or summaries.
+- **Party Info**: use this when the answer should consider character level, HP, AC, class, and notes.
+- **Homebrew**: reserved for custom campaign rules.
+
+If DNDMind gives an answer that feels too generic, check the toggles first.
+
+## Common Tasks
+
+### Ask a rules question
+
+1. Choose **Rules** mode.
+2. Turn **Rules** on.
+3. Type: `How does advantage work?`
+4. Click **Send**.
+
+Expected result: DNDMind gives a short answer and cites the rules text it used.
+
+### Create an NPC
+
+1. Choose **NPC** mode.
+2. Turn **Campaign Memory** on if the NPC should connect to your story.
+3. Type: `Generate a suspicious NPC connected to Captain Vey.`
+4. Click **Send**.
+5. Review the NPC card.
+6. Click **Save NPC** if you want to keep it.
+
+Expected result: DNDMind creates an NPC with role, personality, motivation, secret, and story hook.
+
+### Create an encounter
+
+1. Choose **Encounter** mode.
+2. Turn **Campaign Memory** and **Party Info** on.
+3. Type: `Create a medium encounter for this party involving the Ashen Knives.`
+4. Click **Send**.
+5. Review the encounter card.
+6. Click **Save Encounter** if it fits your session.
+
+Expected result: DNDMind creates a party-aware encounter with tactics and story context.
+
+### Roll dice
+
+1. Use the Dice Roller on the right, or choose **Combat** mode.
+2. Type a roll like `1d20+5`.
+3. Click **Roll**, or send a prompt like `Roll 1d20+5 for perception.`
+
+Expected result: DNDMind shows the roll result and keeps the tool result visible.
+
+### Summarize session notes
+
+1. Paste table notes into **Session Notes**.
+2. Click **Save**.
+3. Click **Summarize**.
+4. Review the summary and extracted details.
+5. Save useful cards or summaries.
+
+Expected result: important NPCs, quests, locations, hooks, and events become easier to find later.
+
+### Search campaign memory
+
+1. Choose **Auto** mode.
+2. Turn **Campaign Memory** on.
+3. Type: `Search campaign memory for Captain Vey.`
+4. Click **Send**.
+
+Expected result: DNDMind returns matching campaign details or memory references.
+
+## Good Prompt Patterns
+
+Use names, goals, and constraints. These prompts work well:
 
 - `How should I open tonight's session?`
 - `What happened at Blackwater Mine?`
 - `Generate a suspicious NPC connected to Captain Vey.`
 - `Create a medium encounter for this party involving the Ashen Knives.`
-- `Roll 1d20+5 for perception.`
-- `Summarize these session notes and extract NPCs, quests, and hooks.`
-- `Search campaign memory for Captain Vey.`
 - `Make this encounter harder but keep it fair.`
+- `Summarize these session notes and extract NPCs, quests, and hooks.`
+- `Roll 1d20+5 for perception.`
 
-## Local Device Profile
+## Table Workflows
 
-DNDMind MVP does not require login. The browser creates a local device profile for demo isolation, and sessions are saved for that browser profile.
+### Before a session
 
-Opening the app in another browser or incognito window may show a different session list. Clearing browser storage may reset the local profile and hide sessions tied to the previous profile.
+1. Review campaign memory for unresolved hooks, NPCs, and locations.
+2. Check that party details are current.
+3. Turn on **Campaign Memory**.
+4. Ask for an opening scene or recap.
+5. Generate NPCs or encounters you may need.
+6. Save useful cards.
 
-This is demo and MVP isolation, not production authentication or account security.
+### During a session
 
-## Common Workflows
+1. Use **Auto** mode for general help.
+2. Use **Rules** mode for rulings.
+3. Use **Combat** mode or the Dice Roller for rolls and initiative.
+4. Search memory when a name, location, or clue comes back.
+5. Save important new NPCs, hooks, or encounter results.
 
-### Prepare a Session
+### After a session
 
-1. Review the memory panel for unresolved hooks, NPCs, and locations.
-2. Check that Campaign Memory is enabled.
-3. Ask for an opening scene tied to the last session.
-4. Generate an NPC or encounter for the next likely scene.
-5. Save useful cards so they are ready during play.
+1. Paste your raw notes into **Session Notes**.
+2. Click **Save**.
+3. Click **Summarize**.
+4. Review the extracted NPCs, quests, locations, and hooks.
+5. Save the summary if it is accurate.
 
-### Live Play
+## Local Browser Profile
 
-1. Use Auto mode for mixed table help or Combat mode for tactical moments.
-2. Roll dice from the command console or dice roller.
-3. Ask quick rules questions in Rules mode when a ruling needs support.
-4. Search campaign memory for names, places, and unresolved hooks.
-5. Save important NPCs, hooks, or encounter results before moving on.
+DNDMind does not require login. Your browser creates a local profile so your sessions can stay separate from another browser or incognito window.
 
-### After Session
-
-1. Paste raw notes into Session Notes.
-2. Click Summarize or use Summarize mode.
-3. Review extracted NPCs, quests, locations, and hooks.
-4. Save the summary if it accurately captures the session.
-5. Run evals if you changed prompts, rules, or expected demo behavior.
+If you open DNDMind in a different browser, use incognito mode, or clear browser storage, you may not see the same saved sessions.
 
 ## Troubleshooting
 
-### AI answer has no citations
+### The answer has no citations
 
-Cause: Rules context is off or no rules are ingested.
+Cause: **Rules** is off, or no rules document has been ingested.
 
 Fix:
 
-1. Enable the Rules toggle.
-2. Ingest a rules document.
-3. Ask again in Rules mode.
+1. Turn **Rules** on.
+2. Add a rules document.
+3. Click **Upload + Ingest**.
+4. Ask again in **Rules** mode.
+
+### The answer forgot my story
+
+Cause: **Campaign Memory** is off, or the detail has not been saved yet.
+
+Fix:
+
+1. Turn **Campaign Memory** on.
+2. Save session notes, NPCs, quests, locations, or encounter cards.
+3. Ask again with the relevant name or event in the prompt.
+
+### The encounter ignores the party
+
+Cause: **Party Info** is off, or the party details are missing.
+
+Fix:
+
+1. Turn **Party Info** on.
+2. Add or update each character's level, HP, AC, class, and notes.
+3. Ask again in **Encounter** or **Combat** mode.
 
 ### My session disappeared
 
-Cause: you may be using a different browser, incognito window, or local device profile.
+Cause: you may be in a different browser profile, incognito window, or your browser storage was cleared.
 
 Fix:
 
-1. Check whether you opened another browser or incognito window.
-2. Return to the original browser profile.
-3. Avoid clearing local storage during a demo.
+1. Return to the same browser profile you used before.
+2. Avoid clearing browser storage during a campaign.
 
-### Memory answer seems empty
-
-Cause: the active campaign has little saved memory, or Campaign Memory is off.
-
-Fix:
-
-1. Enable Campaign Memory.
-2. Add session notes.
-3. Summarize and save useful cards before asking again.
-
-### Encounter does not use party info
-
-Cause: Party Info is off or party members are missing details.
-
-Fix:
-
-1. Enable Party Info.
-2. Add level, HP, AC, class, and notes for each character.
-3. Ask again in Encounter or Combat mode.
-
-### DNDMind answers from the wrong campaign
+### DNDMind is using the wrong campaign
 
 Cause: the active campaign is not the one you intended.
 
@@ -346,31 +226,12 @@ Fix:
 
 1. Open the campaign selector.
 2. Choose the correct campaign.
-3. Confirm the active campaign name at the top before sending the prompt.
+3. Confirm the active campaign name at the top before sending a prompt.
 
-### Local demo says an API key is missing
+## Helpful Terms
 
-Cause: the app may be configured for a real provider instead of mock mode.
-
-Fix:
-
-1. Use `MOCK_LLM=true` for the local demo.
-2. For Gemini AI mode, set `MOCK_LLM=false`, `LLM_PROVIDER=gemini`, and `GEMINI_API_KEY`.
-3. For Gemini RAG embeddings, set `MOCK_EMBEDDINGS=false`, `EMBEDDING_PROVIDER=gemini`, and keep `GEMINI_EMBEDDING_DIMENSIONS=1536`.
-4. Restart the affected service after changing environment variables.
-
-## Glossary
-
-- RAG: Retrieval augmented generation. DNDMind searches rules or memory before answering.
-- Embeddings: Numeric representations of text used to compare meaning.
-- Vector DB: pgvector-backed storage for semantic search over rules and campaign memory.
-- Tool calling: AI-triggered app actions such as dice rolling, rules search, memory search, or difficulty calculation.
-- Eval: A repeatable test case that checks whether AI behavior stays accurate and structured.
-- Structured output: a typed card such as an NPC, quest, location, encounter, or session summary.
-- Citation: a source reference attached to an answer so the user can see where context came from.
-- Mock LLM mode: deterministic local behavior for demos without paid API calls.
-- Local device profile: a browser-stored demo identity used to keep MVP sessions separated without login.
-
-## Why This Project Matters
-
-DNDMind demonstrates full-stack LLM app architecture, RAG, pgvector, tool calling, structured output, memory, evals, and Docker deployment. The manual page helps recruiters, clients, and technical reviewers understand the product workflow quickly.
+- **Citation**: the source DNDMind used for an answer.
+- **Campaign Memory**: saved notes, NPCs, quests, locations, encounters, and summaries.
+- **Structured Card**: a generated NPC, encounter, quest, location, or summary that can be saved.
+- **Tool Result**: a visible result from an action such as a dice roll, rules search, or memory search.
+- **Local Browser Profile**: the browser-based identity used to keep sessions separate.

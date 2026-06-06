@@ -6,7 +6,7 @@ Dungeon Masters need to manage rules, party context, NPC relationships, quests, 
 
 ## Solution
 
-DNDMind is an AI-powered campaign command center. It combines campaign-aware chat, rules retrieval, campaign memory, session summarization, tool calling, and structured output cards in one interface. The project is mock-first so it can be reviewed locally without paid API calls, while still demonstrating production-shaped AI engineering patterns.
+DNDMind is an AI-powered campaign command center. It combines campaign-aware chat, rules retrieval, campaign memory, session summarization, tabletop scope guarding, tool calling, and structured output cards in one interface. The project is mock-first so it can be reviewed locally without paid API calls, while still demonstrating production-shaped AI engineering patterns.
 
 ## Technical Architecture
 
@@ -25,6 +25,7 @@ This separation mirrors a realistic AI product architecture: the app backend own
 - Rules RAG with citations
 - Campaign memory RAG
 - Session-note summarization and extraction
+- Lightweight out-of-scope prompt refusal before provider generation
 - Structured cards for NPCs, quests, locations, encounters, initiative, and dice
 - Tool calls for dice, initiative, encounter difficulty, rules search, memory search, and campaign saves
 - Deterministic eval design for prompt, retrieval, tool, and structured-output regressions
@@ -38,6 +39,7 @@ DNDMind is a portfolio-ready MVP that shows how an LLM feature becomes a usable 
 - How to separate product APIs from AI workers without adding unnecessary platform complexity.
 - How to make LLM workflows reviewable through mock mode, citations, and tool traces.
 - How to turn AI output into persistent product data instead of leaving it as disposable chat text.
+- How to keep a product assistant focused on its domain with deterministic guardrails.
 - How to design deterministic evals before adding more expensive LLM-as-judge scoring.
 
 ## Skills Demonstrated

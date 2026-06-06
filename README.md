@@ -2,7 +2,7 @@
 
 An AI-powered Dungeon Master command center for tabletop RPG campaigns, built to demonstrate full-stack LLM application engineering.
 
-DNDMind is a mock-first full-stack AI product for running and reviewing long-lived tabletop campaigns. It combines campaign data, rules retrieval, session memory, structured AI outputs, deterministic tools, and evaluation workflows in one local Docker Compose demo.
+DNDMind is a mock-first full-stack AI product for running and reviewing long-lived tabletop campaigns. It combines campaign data, rules retrieval, session memory, structured AI outputs, deterministic tools, domain-scoped chat behavior, and evaluation workflows in one local Docker Compose demo.
 
 ## Problem
 
@@ -10,7 +10,7 @@ Dungeon Masters need to manage rules, campaign continuity, party context, sessio
 
 ## Solution
 
-DNDMind combines RAG, campaign memory, structured output, tool calling, and deterministic evals into one command-center interface. The default path uses `MOCK_LLM=true` and `MOCK_EMBEDDINGS=true`, so the project can be reviewed locally without paid API usage or external model calls.
+DNDMind combines RAG, campaign memory, structured output, tool calling, scope guarding, and deterministic evals into one command-center interface. The default path uses `MOCK_LLM=true` and `MOCK_EMBEDDINGS=true`, so the project can be reviewed locally without paid API usage or external model calls.
 
 ## Architecture
 
@@ -31,7 +31,7 @@ flowchart LR
   API --> Web
 ```
 
-The frontend renders the DM command center and sends a local device profile header for browser-owned sessions. The API owns campaign data, party management, chat persistence, memory writes, and worker proxying. The AI worker handles prompt orchestration, RAG, structured output, tool execution, and mock or Gemini provider calls. PostgreSQL stores campaign entities, messages, memory, knowledge chunks, party history, and pgvector embeddings.
+The frontend renders the DM command center and sends a local browser profile header for browser-owned sessions. The API owns campaign data, party management, chat persistence, memory writes, and worker proxying. The AI worker handles prompt orchestration, scope guarding, RAG, structured output, tool execution, and mock or Gemini provider calls. PostgreSQL stores campaign entities, messages, memory, knowledge chunks, party history, and pgvector embeddings.
 
 ## Key Features
 
@@ -41,6 +41,7 @@ The frontend renders the DM command center and sends a local device profile head
 - Rules RAG with citations
 - Campaign memory RAG
 - Session notes and summarization
+- Tabletop RPG scope guard with helpful redirect actions
 - NPC, quest, location, encounter, dice roll, and initiative structured cards
 - Tool calling with persisted traces
 - Dice roller
@@ -60,7 +61,7 @@ The frontend renders the DM command center and sends a local device profile head
 - Tool/function calling
 - Long-term memory
 - Deterministic evaluation
-- Hallucination resistance checks
+- Hallucination and out-of-scope resistance checks
 - Multi-service Docker architecture
 
 ## Tech Stack
@@ -144,7 +145,7 @@ To use Gemini instead of mock responses, copy `.env.example` to `.env`, set `MOC
 
 For a guided walkthrough, open the in-app manual at `http://localhost:3000/manual` or read `docs/user-manual.md`.
 
-## Local Device Profiles
+## Local Browser Profiles
 
 DNDMind does not require login for the MVP. The browser creates an anonymous local profile ID in `localStorage` and sends it as `X-Dndmind-Client-Id`. Campaigns and rules documents stay shared, but sessions and session-derived campaign memory are private to the current browser profile.
 
@@ -159,7 +160,7 @@ DNDMind is designed for deterministic evaluation in mock mode. The sample eval c
 - Campaign memory recall
 - JSON validity
 - Tool-calling correctness
-- Hallucination resistance
+- Hallucination and out-of-scope resistance
 - Encounter difficulty correctness
 
 This makes the project easier to review because AI behavior can be checked repeatedly without model drift or external API cost. See `docs/eval-design.md` for the evaluation plan.

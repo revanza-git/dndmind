@@ -23,6 +23,7 @@ Sample cases live in `db/seed/eval_cases.json`.
 - Dice and initiative prompts call deterministic tools.
 - Encounter prompts produce encounter difficulty/tool behavior.
 - NPC prompts produce structured output that can be saved.
+- Out-of-scope prompts short-circuit before mock or real provider generation.
 
 ## Why Deterministic First
 
@@ -32,6 +33,7 @@ Mock mode gives stable responses, stable tool results, and stable embeddings. Th
 - a missing tool call means orchestration changed
 - a missing structured card means output shaping changed
 - a missing expected fact means context assembly changed
+- an unrelated prompt that reaches the provider means scope guarding changed
 
 ## Limitations
 
@@ -50,5 +52,6 @@ The next evaluation layer should add LLM-as-judge scoring for:
 - memory continuity
 - structured output completeness
 - refusal to invent unsupported facts
+- refusal of clearly unrelated non-tabletop prompts
 
 Those judge scores should complement deterministic checks, not replace them. Deterministic checks remain the fastest way to catch contract regressions.

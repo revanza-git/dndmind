@@ -293,7 +293,7 @@ def _requested_structured_type(request: Any) -> str | None:
 def _npc_fallback_data(request: Any, answer: str, data: dict[str, Any]) -> dict[str, str]:
     name = _text_field(data, "name") or _extract_npc_name(answer) or "Generated NPC"
     role = _text_field(data, "role") or _extract_role(answer) or "Campaign NPC"
-    description = _text_field(data, "description") or _extract_labeled(answer, "Appearance") or _first_sentence(answer)
+    description = _text_field(data, "description") or _extract_labeled(answer, "Appearance") or _fallback_npc_description(answer)
     personality = _text_field(data, "personality") or _extract_labeled(answer, "Personality") or "Practical, watchful, and shaped by recent trouble."
     motivation = _text_field(data, "motivation") or _extract_labeled(answer, "Motivation") or "Protect their own interests while responding to the campaign's current pressure."
     relationship = (
@@ -375,6 +375,27 @@ def _first_sentence(answer: str) -> str:
     cleaned = _clean_markdown_text(answer)
     sentences = re.split(r"(?<=[.!?])\s+", cleaned)
     return sentences[0].strip() if sentences and sentences[0].strip() else "A table-ready NPC generated from the current request."
+
+
+def _fallback_npc_description(answer: str) -> str:
+    first = _first_sentence(answer)
+    context = _campaign_context_sentence(answer, first)
+    if context:
+        return f"{first} {context}"
+    return first
+
+
+def _campaign_context_sentence(answer: str, first_sentence: str) -> str:
+    sentences = re.split(r"(?<=[.!?])\s+", _clean_markdown_text(answer))
+    for sentence in sentences[1:]:
+        cleaned = sentence.strip()
+        if cleaned and cleaned != first_sentence and re.search(
+            r"\b(?:captain|quest|party|betrayal|campaign|session|hook|clue|secret|faction)\b",
+            cleaned,
+            flags=re.IGNORECASE,
+        ):
+            return cleaned
+    return ""
 
 
 def _extract_mission_sentence(text: str) -> str:

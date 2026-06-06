@@ -25,6 +25,7 @@ Point out:
 - context toggles
 - party and memory panels
 - rules document ingestion
+- tabletop-focused assistant behavior
 
 ## 0:30 - 1:20 Rules RAG
 
@@ -138,3 +139,14 @@ Narration:
 ## 4:20 - 5:00 Close
 
 "This project demonstrates practical AI engineering: RAG, embeddings, vector storage, prompt orchestration, tool calling, structured output, long-term memory, and Dockerized service boundaries. The mock-first path makes it easy to review locally without secrets."
+
+Optional scope check:
+
+```text
+Write a Python function to parse CSV files.
+```
+
+Expected result:
+
+- DNDMind refuses the unrelated request
+- suggested actions point back to NPCs, encounters, or session summaries
