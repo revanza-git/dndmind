@@ -28,25 +28,26 @@ flowchart LR
 ```text
 Next.js Frontend
   command center UI
-  rules ingestion form
+  Campaign Knowledge upload and template UI
   session notes workflow
   structured cards
   tool-call display
-  evaluation snapshot
+  session prep summary
 
 ASP.NET Core API
   public HTTP boundary for the browser
   campaign, party, session, memory, and document endpoints
+  document upload validation and filename normalization
   conversation/message/tool-call persistence
   request assembly for the AI worker
 
 FastAPI AI Worker
   mock-first LLM behavior with Gemini real-chat mode
   tabletop RPG scope guard and redirect suggestions
-  rules document chunking and mock, Gemini, or OpenAI embedding
-  rules and campaign memory retrieval
+  upload sanitization before document chunking and embedding
+  rules, homebrew, and campaign memory retrieval
   session summary extraction
-  deterministic tool execution
+  context-toggle-aware deterministic tool execution
   structured output shaping
 
 PostgreSQL + pgvector
@@ -63,7 +64,7 @@ PostgreSQL + pgvector
 3. The API loads campaign, party, and session context from PostgreSQL.
 4. The API creates or reuses an AI conversation and stores the user message.
 5. The API calls the FastAPI worker with the full request context.
-6. The worker rejects clearly out-of-scope prompts before model generation, or retrieves rules and campaign memory when the prompt requires it.
+6. The worker rejects clearly out-of-scope prompts before model generation, then plans tools based on the prompt intent, selected mode, and enabled context toggles.
 7. The worker returns an answer, citations, tool calls, structured output, and suggested actions.
 8. The API stores the assistant message and tool-call traces.
 9. The frontend renders normal text, citations, tool cards, and structured cards.
@@ -82,12 +83,14 @@ This split is useful for a portfolio project because it demonstrates a realistic
 - Mock embeddings are not semantically equivalent to real embeddings, but they make local demos deterministic and free. Gemini embeddings can be enabled at 1536 dimensions to match the current pgvector schema.
 - The current worker has a mock-first provider path plus Gemini chat mode; deterministic mock mode remains the safest portfolio demo path.
 - The scope guard is intentionally lightweight and deterministic. It keeps obvious unrelated prompts out of the product path, but it is not a full safety classifier.
+- Uploaded Campaign Knowledge is capped and sanitized as plain text before chunking so indexing remains bounded and safe for local demos.
+- Rules and Homebrew retrieval are intentionally separate, so custom table mechanics only affect answers when Homebrew context is enabled.
 - PostgreSQL + pgvector keeps the stack simple compared with a separate vector database, but large-scale retrieval would eventually need more tuning.
-- The eval dashboard is currently a demo-ready design backed by sample cases; a full automated eval runner is a clear next step.
+- The sample eval cases and unit tests cover the deterministic quality layer; a full automated eval runner is a clear next step.
 
 ## Data Model Highlights
 
 - `campaigns`, `sessions`, and `party_characters` hold campaign setup.
-- `knowledge_documents` and `knowledge_chunks` store rules and memory RAG content.
+- `knowledge_documents` and `knowledge_chunks` store rules, homebrew, and memory RAG content.
 - `ai_conversations`, `ai_messages`, and `ai_tool_calls` preserve AI interactions.
 - `npcs`, `quests`, `locations`, `encounters`, and `memory_events` turn session notes and structured outputs into reusable campaign memory.

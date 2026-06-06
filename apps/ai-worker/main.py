@@ -21,10 +21,12 @@ from rag.embeddings import (
     mock_llm_enabled,
     vector_literal,
 )
+from rag.sanitizer import MAX_UPLOAD_CHUNKS, sanitize_uploaded_text
 from rag.retriever import (
     database_url,
     format_memory_context,
     format_rules_context,
+    search_homebrew as retrieve_homebrew,
     search_memory as retrieve_memory,
     search_rules as retrieve_rules,
 )
@@ -227,7 +229,11 @@ def execute_tool_endpoint(request: ToolExecuteRequest) -> ToolExecuteResponse:
 
 @app.post("/ai/ingest-document", response_model=IngestDocumentResponse)
 def ingest_document(request: IngestDocumentRequest) -> IngestDocumentResponse:
-    chunks = chunk_text(request.content)
+    sanitized_content = sanitize_uploaded_text(request.content)
+    if not sanitized_content:
+        raise HTTPException(status_code=400, detail="That document is empty after safety cleanup. Add plain-text notes and try again.")
+
+    chunks = chunk_text(sanitized_content)[:MAX_UPLOAD_CHUNKS]
     try:
         embeddings = embed_texts([chunk.content for chunk in chunks]) if chunks else []
     except RuntimeError as exc:
@@ -314,6 +320,28 @@ def search_rules(request: SearchRequest) -> dict[str, Any]:
                 "chunkId": str(row["chunk_id"]),
                 "documentId": str(row["document_id"]),
                 "title": row["title"],
+                "sourceType": row.get("source_type"),
+                "heading": row.get("heading"),
+                "content": row["content"],
+                "score": row.get("score"),
+                "citation": row["citation"],
+            }
+            for row in rows
+        ],
+    }
+
+
+@app.post("/ai/search-homebrew")
+def search_homebrew(request: SearchRequest) -> dict[str, Any]:
+    rows = retrieve_homebrew(request.campaignId, request.query, request.limit)
+    return {
+        "query": request.query,
+        "results": [
+            {
+                "chunkId": str(row["chunk_id"]),
+                "documentId": str(row["document_id"]),
+                "title": row["title"],
+                "sourceType": row.get("source_type"),
                 "heading": row.get("heading"),
                 "content": row["content"],
                 "score": row.get("score"),
@@ -338,6 +366,7 @@ def search_memory(request: SearchRequest) -> dict[str, Any]:
                 "chunkId": str(row["chunk_id"]),
                 "documentId": str(row["document_id"]),
                 "title": row["title"],
+                "sourceType": row.get("source_type"),
                 "heading": row.get("heading"),
                 "content": row["content"],
                 "score": row.get("score"),
@@ -359,8 +388,10 @@ def mock_chat_response(request: ChatRequest) -> ChatResponse:
     if request.context.useHomebrew:
         enabled_context.append("homebrew")
 
-    party_line = "No party members are registered yet."
-    if request.party:
+    party_line = None
+    if request.context.usePartyInfo:
+        party_line = "No party members are registered yet."
+    if request.context.usePartyInfo and request.party:
         party_line = ", ".join(
             _format_party_member(pc)
             for pc in request.party
@@ -371,12 +402,13 @@ def mock_chat_response(request: ChatRequest) -> ChatResponse:
     suggested_actions = build_suggested_actions(structured_output)
     tool_section = _format_tool_section(tool_calls)
     structured_section = _format_structured_section(structured_output)
+    party_section = f"Party snapshot: {party_line}.\n\n" if party_line is not None else ""
 
     answer = (
         f"Mode: {request.mode}. For {request.campaign.name}, I would handle this as a DM co-pilot request: "
         f"'{request.message}'.\n\n"
         f"Available context: {', '.join(enabled_context) if enabled_context else 'none'}.\n"
-        f"Party snapshot: {party_line}.\n\n"
+        f"{party_section}"
         "Confirmed memory and rules results are treated as established context. Creative suggestions should build on them without replacing them."
         f"{tool_section}"
         f"{structured_section}"
@@ -431,8 +463,13 @@ def _format_tool_section(tool_calls: list[dict[str, Any]]) -> str:
                 f"- Encounter difficulty: {result.get('difficulty')} "
                 f"({result.get('adjustedXp')} adjusted XP). {result.get('explanation')}"
             )
-        elif name in {"searchRules", "searchCampaignMemory"}:
-            label = "rules" if name == "searchRules" else "campaign memory"
+        elif name in {"searchRules", "searchHomebrew", "searchCampaignMemory"}:
+            labels = {
+                "searchRules": "rules",
+                "searchHomebrew": "homebrew",
+                "searchCampaignMemory": "campaign memory",
+            }
+            label = labels[name]
             rows = result.get("results") or []
             if rows:
                 context = "\n\n".join(

@@ -22,9 +22,9 @@ export function StructuredOutputRenderer({ output, suggestedActions, onAction, s
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-copper">{labelFor(output.type)}</p>
-              <p className="mt-1 text-sm text-moss/70">Structured result ready to save or reuse at the table.</p>
+              <p className="mt-1 text-sm text-moss/70">Ready to save, adjust, or bring straight to the table.</p>
             </div>
-            <span className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-moss">save-ready</span>
+            <span className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-moss">table-ready</span>
           </div>
         </div>
         <div className="p-5 md:p-6">

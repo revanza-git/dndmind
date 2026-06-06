@@ -18,19 +18,24 @@ Sample cases live in `db/seed/eval_cases.json`.
 
 ## What Current Evals Test
 
-- Rules RAG can retrieve an ingested rules document and cite it.
+- Rules RAG can retrieve a ready Campaign Knowledge rules document and cite it.
+- Homebrew RAG stays separate from rules retrieval and only plans the homebrew search tool when enabled.
 - Campaign memory can answer continuity questions from summarized notes.
+- Party Info gating prevents saved party details from appearing in answers or tool arguments when disabled.
 - Dice and initiative prompts call deterministic tools.
 - Encounter prompts produce encounter difficulty/tool behavior.
 - NPC prompts produce structured output that can be saved.
 - Out-of-scope prompts short-circuit before mock or real provider generation.
+- Upload sanitization strips unsafe markup/control characters and caps indexed text.
 
 ## Why Deterministic First
 
 Mock mode gives stable responses, stable tool results, and stable embeddings. That makes it useful for CI and portfolio review because failures are easier to interpret:
 
 - a missing citation means retrieval or rendering changed
+- a homebrew result in a standard rules lookup means source-type isolation changed
 - a missing tool call means orchestration changed
+- a disabled context appearing in an answer means context gating changed
 - a missing structured card means output shaping changed
 - a missing expected fact means context assembly changed
 - an unrelated prompt that reaches the provider means scope guarding changed

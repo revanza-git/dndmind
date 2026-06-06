@@ -44,10 +44,10 @@ const quickStart = [
     area: "Right Panel"
   },
   {
-    title: "Add rules",
-    detail: "Upload or paste rules text, then click Upload + Ingest.",
+    title: "Add campaign knowledge",
+    detail: "Upload or paste rules, lore, or notes, then click Add to Campaign.",
     result: "Rules questions can return citations.",
-    area: "Rules Library"
+    area: "Campaign Knowledge"
   },
   {
     title: "Add session notes",
@@ -87,7 +87,7 @@ const firstRunSteps = [
 ];
 
 const layoutAreas = [
-  ["Left Sidebar", "Choose campaigns, open rules documents, navigate app areas, and return to this manual."],
+  ["Left Sidebar", "Choose campaigns, open Campaign Knowledge, navigate app areas, and return to this manual."],
   ["Center Workspace", "Read the chat timeline, generated encounter briefings, citations, tool results, and structured cards."],
   ["Right Panel", "Use dice, session notes, party details, memory, citations, and tool traces."],
   ["Command Console", "Type your request, choose a mode, set context toggles, and send."]
@@ -95,11 +95,45 @@ const layoutAreas = [
 
 const commandCenter = [
   ["Mode buttons", "Decide the kind of AI task. Use Rules for sourced rules answers, Encounter for combat design, NPC for characters, Summarize for notes, and Auto when the task mixes categories."],
-  ["Context toggles", "Decide what information the AI can use. Turn on Campaign Memory for saved story context, Party Info for party-aware answers, and Rules for citations from ingested documents."],
+  ["Context toggles", "Decide what information the AI can use. Turn on Campaign Memory for saved story context, Party Info for party-aware answers, and Rules for citations from ready-to-use documents."],
   ["Command Console", "Type the instruction you want DNDMind to perform, then click Send. Specific prompts produce better cards and fewer follow-up questions."],
   ["Structured cards", "Reusable campaign objects such as NPCs, quests, locations, encounters, and summaries. Save useful cards so they can become campaign memory."],
   ["Tool results", "Calculations or app actions performed by the system, such as dice rolls, rules search, memory search, and encounter checks."],
-  ["Citations", "Source references showing which rules document or campaign memory DNDMind used for the answer."]
+  ["Citations", "Source references showing which knowledge entry or campaign memory DNDMind used for the answer."]
+];
+
+const knowledgeGuide = [
+  ["Rules", "Rules references for cited rulings, such as advantage, conditions, actions, spells, or table procedures."],
+  ["Homebrew", "Custom table rules, house mechanics, custom monsters, custom items, or setting-specific mechanics."],
+  ["NPC notes", "Names, motives, secrets, relationships, recurring behavior, and hooks tied to campaign characters."],
+  ["Location notes", "Places, factions, dangers, clues, rumors, and details the party may return to later."],
+  ["Quest notes", "Objectives, status, complications, rewards, unresolved hooks, and what changed during play."],
+  ["Campaign lore", "Factions, history, gods, politics, prophecies, and world truths that should stay consistent."]
+];
+
+const knowledgeSteps = [
+  "Open Campaign Knowledge in the left sidebar.",
+  "Give the entry a clear title, such as Blackwater Mine Lore or House Rules - Resting.",
+  "Choose Rules for rules references, or Homebrew for custom table mechanics.",
+  "Download a template if you want a friendly starting shape.",
+  "Choose a .txt or .md file, or paste text into the notes box.",
+  "Click Add to Campaign and wait until the entry is ready to use."
+];
+
+const templateGuide = [
+  ["Rules", "Rules references you want cited in answers."],
+  ["Session Notes", "Raw notes from play that should become searchable context."],
+  ["NPC", "Character details, secrets, relationships, and hooks."],
+  ["Location", "Places, points of interest, hazards, and clues."],
+  ["Quest", "Objectives, status, complications, and rewards."],
+  ["Campaign Lore", "Factions, history, world facts, rumors, and long-running truths."]
+];
+
+const contextToggleGuide = [
+  ["Rules", "Turn on for cited rules answers from ready-to-use rules entries.", "Turn off for freeform story, brainstorming, or answers that do not need rules lookup."],
+  ["Campaign Memory", "Turn on when saved NPCs, quests, locations, summaries, or notes should matter.", "Turn off when you want a fresh idea that does not depend on this campaign."],
+  ["Party Info", "Turn on for encounter balance, tactics, difficulty, or character-aware advice.", "Turn off when the party is not relevant to the answer."],
+  ["Homebrew", "Turn on when custom rules or house mechanics should affect the answer.", "Turn off when you want standard rules or story context only."]
 ];
 
 const steps: GuideStep[] = [
@@ -129,16 +163,16 @@ const steps: GuideStep[] = [
     why: "Party context helps DNDMind tune difficulty and avoid encounters that are too weak or too punishing."
   },
   {
-    title: "Ingest Rules",
-    where: "Left Sidebar -> Rules Library",
+    title: "Add Campaign Knowledge",
+    where: "Left Sidebar -> Campaign Knowledge",
     do: [
-      "Open the rules document area.",
-      "Upload or paste rules text.",
-      "Click Upload + Ingest.",
+      "Open the Campaign Knowledge area.",
+      "Upload or paste rules, lore, notes, or NPC details.",
+      "Click Add to Campaign.",
       "Ask a Rules mode question such as: How does advantage work?"
     ],
-    expected: "Rules answers include citations from the ingested document.",
-    why: "Rules ingestion gives DNDMind searchable source text instead of relying on unsupported memory."
+    expected: "Rules answers include citations from the ready-to-use document.",
+    why: "Campaign Knowledge gives DNDMind source text instead of relying on unsupported memory."
   },
   {
     title: "Add Session Notes",
@@ -214,7 +248,7 @@ const tryCards: TryCard[] = [
     mode: "Rules",
     toggles: "Rules ON, Campaign Memory optional, Party Info OFF",
     prompt: "How does advantage work?",
-    expected: "DNDMind gives a concise rules answer with citations from ingested rules."
+    expected: "DNDMind gives a concise rules answer with citations from ready-to-use rules."
   },
   {
     title: "Generate an NPC",
@@ -299,8 +333,18 @@ const workflows: Workflow[] = [
 const troubleshooting: TroubleshootingItem[] = [
   {
     problem: "AI answer has no citations.",
-    cause: "Rules context is off or no rules are ingested.",
-    fix: ["Enable the Rules toggle.", "Ingest a rules document.", "Ask again in Rules mode."]
+    cause: "Rules context is off, no rules documents are ready to use, or the prompt did not ask for a sourced ruling.",
+    fix: ["Enable the Rules toggle.", "Add a rules document to Campaign Knowledge.", "Confirm the entry is ready to use.", "Ask again in Rules mode."]
+  },
+  {
+    problem: "Homebrew was ignored.",
+    cause: "Homebrew is off, or the custom rule was added as the wrong document type.",
+    fix: ["Enable the Homebrew toggle.", "Check that the entry was added as Homebrew.", "Mention the rule name in your prompt.", "Ask again in Auto or Rules mode."]
+  },
+  {
+    problem: "Campaign Knowledge will not add my file.",
+    cause: "The file may be the wrong type, too large, empty, or missing a clear title.",
+    fix: ["Use a .txt or .md file.", "Keep the file under 2 MB.", "Add a document title.", "Paste the text into the notes box if upload is inconvenient."]
   },
   {
     problem: "My session disappeared.",
@@ -334,9 +378,12 @@ const troubleshooting: TroubleshootingItem[] = [
 ];
 
 const glossary = [
+  ["Campaign Knowledge", "Source text added to a campaign so DNDMind can search and cite it."],
   ["Campaign Memory", "Saved notes, NPCs, quests, locations, encounters, and summaries DNDMind can use later."],
+  ["Context Toggle", "A switch that controls which saved information DNDMind may use for the next prompt."],
+  ["Task Hint", "A mode button that tells DNDMind what kind of answer to produce."],
   ["Structured Card", "A generated NPC, quest, location, encounter, or summary that you can save."],
-  ["Tool Result", "A visible result from an action such as a dice roll, rules search, or memory search."],
+  ["Tool Result", "A visible result from an action such as a dice roll, rules search, homebrew search, or memory search."],
   ["Citation", "A source reference attached to an answer so the user can see where context came from."],
   ["Local Browser Profile", "The browser-based identity used to keep sessions separate."]
 ];
@@ -345,6 +392,8 @@ const toc = [
   ["Quick Start", "quick-start"],
   ["First Run", "first-run"],
   ["Command Center", "command-center"],
+  ["Knowledge", "campaign-knowledge"],
+  ["Context", "context-toggles"],
   ["Guide", "guide"],
   ["Try Now", "try-now"],
   ["Modes", "modes"],
@@ -512,6 +561,69 @@ export default function ManualPage() {
                 </div>
               </ManualSection>
 
+              <ManualSection id="campaign-knowledge" eyebrow="Sources" title="Campaign Knowledge">
+                <p className="max-w-4xl text-sm leading-6 text-moss/75">
+                  Campaign Knowledge is where you add source text for the active campaign: rules, lore, NPCs, locations, quests, homebrew, or session notes. DNDMind can search these entries and cite them when the matching context toggle is enabled.
+                </p>
+                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                  {knowledgeGuide.map(([title, detail]) => (
+                    <InfoCard key={title} title={title} detail={detail} tone="definition" />
+                  ))}
+                </div>
+                <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                  <article className="rounded-lg border border-moss/15 bg-white p-4 shadow-sm">
+                    <h4 className="text-base font-semibold text-ink">Add an entry</h4>
+                    <ol className="mt-4 space-y-3 text-sm leading-6 text-moss/75">
+                      {knowledgeSteps.map((step, index) => (
+                        <li key={step} className="flex gap-2">
+                          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-copper/10 text-xs font-semibold text-copper">
+                            {index + 1}
+                          </span>
+                          <span>{step}</span>
+                        </li>
+                      ))}
+                    </ol>
+                    <p className="mt-4 rounded-md bg-parchment px-3 py-2 text-sm leading-6 text-moss">
+                      Supported uploads are .txt and .md files up to 2 MB. Pasted notes work too.
+                    </p>
+                  </article>
+                  <article className="rounded-lg border border-moss/15 bg-white p-4 shadow-sm">
+                    <h4 className="text-base font-semibold text-ink">Template guide</h4>
+                    <div className="mt-4 divide-y divide-moss/10 rounded-md border border-moss/10">
+                      {templateGuide.map(([title, detail]) => (
+                        <div key={title} className="px-3 py-3">
+                          <p className="text-sm font-semibold text-ink">{title}</p>
+                          <p className="mt-1 text-sm leading-6 text-moss/75">{detail}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+                </div>
+              </ManualSection>
+
+              <ManualSection id="context-toggles" eyebrow="Sources" title="Context Toggles">
+                <p className="max-w-4xl text-sm leading-6 text-moss/75">
+                  Context toggles control what information DNDMind may use for the next answer. They do not erase or change saved data; they only shape the prompt you are about to send.
+                </p>
+                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                  {contextToggleGuide.map(([title, useWhen, skipWhen]) => (
+                    <article key={title} className="rounded-lg border border-moss/15 border-l-4 border-l-copper bg-white p-4 shadow-sm">
+                      <h4 className="text-base font-semibold text-ink">{title}</h4>
+                      <p className="mt-3 text-sm font-semibold text-moss">Use when</p>
+                      <p className="mt-1 text-sm leading-6 text-moss/75">{useWhen}</p>
+                      <p className="mt-4 text-sm font-semibold text-moss">Skip when</p>
+                      <p className="mt-1 text-sm leading-6 text-moss/75">{skipWhen}</p>
+                    </article>
+                  ))}
+                </div>
+                <div className="mt-5 grid gap-3 md:grid-cols-2">
+                  <InfoCard title="Rules questions" detail="Use Rules mode with Rules on. Add Homebrew only when custom rules should affect the ruling." tone="definition" />
+                  <InfoCard title="Encounter design" detail="Use Encounter mode with Campaign Memory and Party Info on." tone="definition" />
+                  <InfoCard title="NPC or story work" detail="Use NPC, Story, or Auto mode with Campaign Memory on when the answer should fit your campaign." tone="definition" />
+                  <InfoCard title="Pure brainstorming" detail="Use Auto with only the context you need so the answer stays flexible." tone="definition" />
+                </div>
+              </ManualSection>
+
               <ManualSection id="guide" eyebrow="Beginner Workflow" title="Step-by-Step Guide">
                 <div className="grid gap-4">
                   {steps.map((step, index) => (
@@ -615,7 +727,7 @@ export default function ManualPage() {
               <div className="rounded-lg border border-moss/15 bg-white p-4 shadow-sm">
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-copper">Context Toggles</p>
                 <div className="mt-3 space-y-3 text-sm leading-6 text-moss/75">
-                  <p><strong className="text-ink">Rules:</strong> uses ingested rules and citations.</p>
+                  <p><strong className="text-ink">Rules:</strong> uses ready-to-use rules and citations.</p>
                   <p><strong className="text-ink">Campaign Memory:</strong> uses summaries, NPCs, quests, and locations.</p>
                   <p><strong className="text-ink">Party Info:</strong> uses level, HP, AC, class, race, and notes.</p>
                   <p><strong className="text-ink">Homebrew:</strong> reserved for custom campaign rules.</p>

@@ -4,7 +4,7 @@ from typing import Any, Callable
 from .dice import roll_dice
 from .encounters import calculate_encounter_difficulty
 from .initiative import generate_initiative_order
-from .rag_tools import search_campaign_memory_tool, search_rules_tool
+from .rag_tools import search_campaign_memory_tool, search_homebrew_tool, search_rules_tool
 from .save_tools import save_npc, save_quest, save_session_summary
 
 
@@ -65,6 +65,12 @@ TOOLS: dict[str, ToolDefinition] = {
         parameters={"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
         handler=search_rules_tool,
     ),
+    "searchHomebrew": ToolDefinition(
+        name="searchHomebrew",
+        description="Search ingested homebrew chunks for the active campaign.",
+        parameters={"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+        handler=search_homebrew_tool,
+    ),
     "searchCampaignMemory": ToolDefinition(
         name="searchCampaignMemory",
         description="Search campaign memory chunks for the active campaign.",
@@ -112,4 +118,3 @@ def tool_schemas() -> list[dict[str, Any]]:
 def execute_tool(name: str, arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
     tool = get_tool(name)
     return tool.handler(arguments, context or {})
-

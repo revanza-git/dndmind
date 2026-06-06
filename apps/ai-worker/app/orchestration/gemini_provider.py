@@ -7,7 +7,7 @@ import httpx
 from pydantic import ValidationError
 
 from app.orchestration.structured_output import build_suggested_actions
-from app.orchestration.tool_loop import run_provider_tool_loop
+from app.orchestration.tool_loop import detect_prompt_intent, prompt_conflicts_with_mode, run_provider_tool_loop, selected_mode_intent
 from app.schemas.structured_outputs import (
     DiceRollOutput,
     EncounterOutput,
@@ -19,7 +19,7 @@ from app.schemas.structured_outputs import (
     StructuredOutput,
     SuggestedAction,
 )
-from rag.retriever import search_memory, search_rules
+from rag.retriever import search_homebrew, search_memory, search_rules
 
 
 STRUCTURED_MODELS = {
@@ -142,8 +142,16 @@ def _generate_json(system_instruction: str, user_prompt: str) -> dict[str, Any] 
 def _retrieve_context(request: Any) -> tuple[str, list[dict[str, Any]]]:
     sections: list[str] = []
     citations: list[dict[str, Any]] = []
+    lower = str(request.message or "").lower()
+    intent = detect_prompt_intent(request.message)
+    rules_like = "rules" in intent.detected or (
+        selected_mode_intent(request.mode) == "rules" and not prompt_conflicts_with_mode(intent, request.mode)
+    )
+    memory_like = any(item in intent.detected for item in ("memory", "npc", "quest")) or any(
+        term in lower for term in ["last session", "previous", "betray", "betrayed"]
+    )
 
-    if request.context.useRules:
+    if request.context.useRules and rules_like:
         try:
             rows = search_rules(request.campaignId, request.message, 4)
             if rows:
@@ -152,7 +160,16 @@ def _retrieve_context(request: Any) -> tuple[str, list[dict[str, Any]]]:
         except Exception as exc:
             sections.append(f"Rules context unavailable: {exc}")
 
-    if request.context.useCampaignMemory:
+    if request.context.useHomebrew and (rules_like or "homebrew" in lower):
+        try:
+            rows = search_homebrew(request.campaignId, request.message, 4)
+            if rows:
+                sections.append(_format_rows("Homebrew context", rows))
+                citations.extend(row["citation"] for row in rows if row.get("citation"))
+        except Exception as exc:
+            sections.append(f"Homebrew context unavailable: {exc}")
+
+    if request.context.useCampaignMemory and memory_like:
         try:
             rows = search_memory(request.campaignId, request.message, 4, request.clientOwnerId)
             if rows:
@@ -171,6 +188,8 @@ def _system_instruction() -> str:
         "Use retrieved rules and memory as established context. If context is missing, say what assumption you are making. "
         "Write the answer for a busy DM: start with the useful result, use short paragraphs or bullets, "
         "and keep debug details out of the answer. "
+        "The selectedMode field is a UI hint, not a command; when selectedMode conflicts with detected intent or the message, "
+        "follow the message and detected intent. "
         "Return only one JSON object with keys: answer, structuredOutput, suggestedActions. "
         "structuredOutput must be null or an object with type and data. Valid types are "
         "npc, quest, location, encounter, session_summary, initiative_order, dice_roll. "
@@ -192,7 +211,8 @@ def _summary_system_instruction() -> str:
 
 
 def _user_prompt(request: Any, retrieved_context: str, tool_calls: list[dict[str, Any]]) -> str:
-    party = [_party_member(member) for member in request.party]
+    party = [_party_member(member) for member in request.party] if request.context.usePartyInfo else []
+    intent = detect_prompt_intent(request.message)
     context_flags = {
         "useRules": request.context.useRules,
         "useCampaignMemory": request.context.useCampaignMemory,
@@ -201,6 +221,8 @@ def _user_prompt(request: Any, retrieved_context: str, tool_calls: list[dict[str
     }
     payload = {
         "campaign": request.campaign.model_dump(mode="json"),
+        "selectedMode": request.mode,
+        "intent": intent.as_payload(),
         "mode": request.mode,
         "contextFlags": context_flags,
         "party": party,
@@ -210,6 +232,7 @@ def _user_prompt(request: Any, retrieved_context: str, tool_calls: list[dict[str
     }
     return (
         "Create the response for this D&D assistant request. "
+        "Treat selectedMode as a quick focus hint only; detected intent and the user's message take precedence when they conflict. "
         "Use the tool call results as facts when present. "
         "When you return a structuredOutput, make its data complete enough for the UI save action.\n\n"
         f"{json.dumps(payload, default=str)}"
@@ -284,8 +307,11 @@ def _fallback_structured_output(request: Any, answer: str, raw_output: Any) -> d
 
 def _requested_structured_type(request: Any) -> str | None:
     mode = str(getattr(request, "mode", "") or "").strip().lower()
-    message = str(getattr(request, "message", "") or "").strip().lower()
-    if mode == "npc" or re.search(r"\bnpcs?\b", message):
+    message = str(getattr(request, "message", "") or "").strip()
+    intent = detect_prompt_intent(message)
+    if "npc" in intent.detected:
+        return "npc"
+    if mode == "npc" and not prompt_conflicts_with_mode(intent, mode):
         return "npc"
     return None
 

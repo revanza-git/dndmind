@@ -14,7 +14,11 @@ def database_url() -> str:
 
 
 def search_rules(campaign_id: UUID | None, query: str, limit: int = 5) -> list[dict[str, Any]]:
-    return _search_chunks(campaign_id, query, limit, ["rules", "srd", "homebrew"], include_global=True)
+    return _search_chunks(campaign_id, query, limit, ["rules", "srd"], include_global=True)
+
+
+def search_homebrew(campaign_id: UUID | None, query: str, limit: int = 5) -> list[dict[str, Any]]:
+    return _search_chunks(campaign_id, query, limit, ["homebrew"], include_global=True)
 
 
 def search_memory(campaign_id: UUID, query: str, limit: int = 5, client_owner_id: str | None = None) -> list[dict[str, Any]]:

@@ -24,16 +24,17 @@ Point out:
 - mode buttons
 - context toggles
 - party and memory panels
-- rules document ingestion
+- Campaign Knowledge upload and templates
 - tabletop-focused assistant behavior
 
-## 0:30 - 1:20 Rules RAG
+## 0:30 - 1:20 Campaign Knowledge RAG
 
-In the Rules Documents panel:
+In Campaign Knowledge:
 
 1. Open `db/seed/srd_sample.md`.
-2. Paste the contents into the document textarea.
-3. Click `Upload + Ingest`.
+2. Paste the contents into the notes box.
+3. Choose `Rules`.
+4. Click `Add to Campaign`.
 
 Prompt:
 
@@ -49,7 +50,17 @@ Expected result:
 
 Narration:
 
-"This demonstrates RAG: the worker chunks the document, creates deterministic embeddings in mock mode, stores them in pgvector, then returns citations with the answer."
+"This demonstrates Campaign Knowledge RAG: the API validates the upload, the worker sanitizes and chunks the text, deterministic embeddings are stored in pgvector, and the answer returns citations."
+
+Optional homebrew contrast:
+
+1. Add a small house rule as `Homebrew`.
+2. Ask about it with Homebrew off, then with Homebrew on.
+
+Expected result:
+
+- standard rules search stays separate from homebrew search
+- Homebrew context appears only when that toggle is enabled
 
 ## 1:20 - 2:10 Campaign Memory
 
@@ -128,13 +139,13 @@ Narration:
 
 "Tool calls are explicit and inspectable. This is important for AI products because the system can show what happened instead of hiding tool behavior inside prose."
 
-## 3:40 - 4:20 Evaluation Snapshot
+## 3:40 - 4:20 Session Prep
 
-Point to the evaluation snapshot in the UI and `db/seed/eval_cases.json`.
+Point to the Session Prep section in the UI.
 
 Narration:
 
-"The evaluation strategy is deterministic: fixed prompts, expected facts, required citations or tool calls, and stable mock responses. The next step is wiring these cases into an automated runner and dashboard history."
+"Session Prep turns saved state into a fast DM dashboard: open hooks, active quests, ready knowledge, and current session notes. The deterministic eval cases still live in `db/seed/eval_cases.json` and are covered by worker tests."
 
 ## 4:20 - 5:00 Close
 

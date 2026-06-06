@@ -1,5 +1,6 @@
 from typing import Any
 
+from app.orchestration.tool_loop import detect_prompt_intent, prompt_conflicts_with_mode, selected_mode_intent
 from app.schemas.structured_outputs import (
     DiceRollOutput,
     EncounterMonsterOutput,
@@ -21,21 +22,42 @@ def build_mock_structured_output(request: Any, tool_calls: list[dict[str, Any]])
     if tool_output:
         return tool_output
 
-    lower = request.message.lower()
-    mode = request.mode.lower()
-
-    if mode == "npc" or "npc" in lower:
+    requested_type = _requested_output_type(request)
+    if requested_type == "npc":
         return _as_output("npc", _mock_npc(request))
-    if mode == "encounter" or "encounter" in lower or "ambush" in lower:
+    if requested_type == "encounter":
         return _as_output("encounter", _mock_encounter(request, tool_calls))
-    if mode == "summarize" or "summarize" in lower:
+    if requested_type == "session_summary":
         return _as_output("session_summary", _mock_session_summary_card(request))
-    if "quest" in lower:
+    if requested_type == "quest":
         return _as_output("quest", _mock_quest(request))
-    if any(term in lower for term in ["location", "town", "city", "dungeon", "temple"]):
+    if requested_type == "location":
         return _as_output("location", _mock_location(request))
 
     return None
+
+
+def _requested_output_type(request: Any) -> str | None:
+    intent = detect_prompt_intent(getattr(request, "message", ""))
+    for detected in intent.detected:
+        output_type = _intent_to_output_type(detected)
+        if output_type:
+            return output_type
+
+    if prompt_conflicts_with_mode(intent, getattr(request, "mode", "")):
+        return None
+
+    return _intent_to_output_type(selected_mode_intent(getattr(request, "mode", "")))
+
+
+def _intent_to_output_type(intent: str | None) -> str | None:
+    return {
+        "npc": "npc",
+        "encounter": "encounter",
+        "summarize": "session_summary",
+        "quest": "quest",
+        "location": "location",
+    }.get(intent or "")
 
 
 def build_suggested_actions(structured_output: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -182,4 +204,3 @@ def _mock_session_summary_card(request: Any) -> SessionSummaryOutput:
 
 def _as_output(output_type: str, model: Any) -> dict[str, Any]:
     return StructuredOutput(type=output_type, data=model.model_dump()).model_dump()
-

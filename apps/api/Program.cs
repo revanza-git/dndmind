@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Text;
 using System.Net.Http.Json;
 using Npgsql;
 using NpgsqlTypes;
@@ -826,9 +827,9 @@ app.MapPost("/api/campaigns/{campaignId:guid}/encounters", async (Guid campaignI
 
 app.MapPost("/api/campaigns/{campaignId:guid}/documents/upload", async (Guid campaignId, UploadDocumentRequest request, NpgsqlDataSource db) =>
 {
-    if (string.IsNullOrWhiteSpace(request.Title) || string.IsNullOrWhiteSpace(request.Content))
+    if (!TryPrepareUploadDocument(request, out var upload, out var validationError))
     {
-        return Results.BadRequest(new { error = "Document title and content are required." });
+        return Results.BadRequest(new { error = validationError });
     }
 
     var campaign = await LoadCampaign(campaignId, db);
@@ -846,10 +847,10 @@ app.MapPost("/api/campaigns/{campaignId:guid}/documents/upload", async (Guid cam
 
     await using var cmd = db.CreateCommand(sql);
     cmd.Parameters.AddWithValue("campaignId", campaignId);
-    cmd.Parameters.AddWithValue("sourceType", string.IsNullOrWhiteSpace(request.SourceType) ? "rules" : request.SourceType.Trim());
-    cmd.Parameters.AddWithValue("title", request.Title.Trim());
-    cmd.Parameters.AddWithValue("originalFilename", (object?)request.OriginalFilename ?? DBNull.Value);
-    cmd.Parameters.AddWithValue("content", request.Content);
+    cmd.Parameters.AddWithValue("sourceType", upload.SourceType);
+    cmd.Parameters.AddWithValue("title", upload.Title);
+    cmd.Parameters.AddWithValue("originalFilename", (object?)upload.OriginalFilename ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("content", upload.Content);
     cmd.Parameters.Add(new NpgsqlParameter("metadata", NpgsqlDbType.Jsonb)
     {
         Value = request.Metadata.HasValue ? request.Metadata.Value.GetRawText() : "{}"
@@ -921,7 +922,8 @@ app.MapPost("/api/documents/{documentId:guid}/ingest", async (Guid documentId, N
     if (!workerResponse.IsSuccessStatusCode)
     {
         var error = await workerResponse.Content.ReadAsStringAsync();
-        return Results.Problem(FriendlyWorkerError("AI document ingestion failed", error), statusCode: 502);
+        var statusCode = workerResponse.StatusCode == System.Net.HttpStatusCode.BadRequest ? 400 : 502;
+        return Results.Problem(FriendlyWorkerError("Campaign knowledge setup failed", error), statusCode: statusCode);
     }
 
     var result = await workerResponse.Content.ReadFromJsonAsync<IngestDocumentResponse>();
@@ -943,7 +945,7 @@ app.MapDelete("/api/documents/{documentId:guid}", async (Guid documentId, Npgsql
 
     if (document.SourceType == "campaign_memory")
     {
-        return Results.BadRequest(new { error = "Session memory documents cannot be deleted from the rules library." });
+        return Results.BadRequest(new { error = "Session memory documents cannot be deleted from Campaign Knowledge." });
     }
 
     const string sql = """
@@ -976,7 +978,9 @@ app.MapPost("/api/chat", async (ChatRequest request, NpgsqlDataSource db, IHttpC
         return Results.NotFound(new { error = "Campaign not found." });
     }
 
-    var party = await LoadParty(request.CampaignId, db);
+    IReadOnlyList<PartyCharacterDto> party = request.Context.UsePartyInfo
+        ? await LoadParty(request.CampaignId, db)
+        : Array.Empty<PartyCharacterDto>();
     var conversationId = request.ConversationId ?? await CreateConversation(request.CampaignId, request.Message, db);
     await StoreMessage(conversationId, "user", request.Mode, request.Message, new { request.Context }, db);
 
@@ -1416,6 +1420,89 @@ static void AddPartyCharacterParameters(NpgsqlCommand cmd, PartyCharacterWriteRe
 
 static object BlankToDbNull(string? value) =>
     string.IsNullOrWhiteSpace(value) ? DBNull.Value : value.Trim();
+
+static bool TryPrepareUploadDocument(UploadDocumentRequest request, out PreparedUploadDocument upload, out string validationError)
+{
+    upload = new PreparedUploadDocument("", "", "rules", null);
+    validationError = "";
+
+    if (string.IsNullOrWhiteSpace(request.Title))
+    {
+        validationError = "Give this Campaign Knowledge entry a title.";
+        return false;
+    }
+
+    if (string.IsNullOrWhiteSpace(request.Content))
+    {
+        validationError = "Add a .txt or .md file, or paste some campaign knowledge first.";
+        return false;
+    }
+
+    var contentBytes = Encoding.UTF8.GetByteCount(request.Content);
+    if (contentBytes > DocumentUploadRules.MaxUploadBytes)
+    {
+        validationError = "That file is too large. Campaign Knowledge supports files up to 2 MB.";
+        return false;
+    }
+
+    var sourceType = string.IsNullOrWhiteSpace(request.SourceType) ? "rules" : request.SourceType.Trim().ToLowerInvariant();
+    if (!DocumentUploadRules.AllowedSourceTypes.Contains(sourceType))
+    {
+        validationError = "Choose Rules or Homebrew as the document type.";
+        return false;
+    }
+
+    var originalFilename = NormalizeUploadFilename(request.OriginalFilename);
+    if (!string.IsNullOrWhiteSpace(request.OriginalFilename) && originalFilename is null)
+    {
+        validationError = "Choose a .txt or .md file with a readable file name.";
+        return false;
+    }
+
+    if (originalFilename is not null)
+    {
+        var extension = Path.GetExtension(originalFilename).ToLowerInvariant();
+        if (!DocumentUploadRules.AllowedExtensions.Contains(extension))
+        {
+            validationError = "Choose a .txt or .md file for Campaign Knowledge.";
+            return false;
+        }
+    }
+
+    upload = new PreparedUploadDocument(
+        request.Title.Trim(),
+        request.Content.Trim(),
+        sourceType,
+        originalFilename);
+    return true;
+}
+
+static string? NormalizeUploadFilename(string? filename)
+{
+    if (string.IsNullOrWhiteSpace(filename))
+    {
+        return null;
+    }
+
+    var safeName = Path.GetFileName(filename.Trim());
+    safeName = Regex.Replace(safeName, @"[\p{C}]", "");
+    safeName = Regex.Replace(safeName, @"[^A-Za-z0-9._ -]+", "-");
+    safeName = Regex.Replace(safeName, @"\s+", " ").Trim();
+    if (string.IsNullOrWhiteSpace(safeName))
+    {
+        return null;
+    }
+
+    if (safeName.Length <= DocumentUploadRules.MaxFilenameLength)
+    {
+        return safeName;
+    }
+
+    var extension = Path.GetExtension(safeName);
+    var basename = Path.GetFileNameWithoutExtension(safeName);
+    var maxBasenameLength = Math.Max(1, DocumentUploadRules.MaxFilenameLength - extension.Length);
+    return basename[..Math.Min(basename.Length, maxBasenameLength)] + extension;
+}
 
 static string? ValidatePartyCharacterInput(int level, int? hpCurrent, int? hpMax, int? tempHp)
 {
@@ -2048,6 +2135,12 @@ public record UploadDocumentRequest(
     string? OriginalFilename,
     JsonElement? Metadata);
 
+public record PreparedUploadDocument(
+    string Title,
+    string Content,
+    string SourceType,
+    string? OriginalFilename);
+
 public record CampaignMemoryDto(
     IReadOnlyList<NpcDto> Npcs,
     IReadOnlyList<QuestDto> Quests,
@@ -2229,6 +2322,14 @@ public record ChatResponse(
     JsonElement[] ToolCalls,
     JsonElement? StructuredOutput,
     JsonElement[] SuggestedActions);
+
+public static class DocumentUploadRules
+{
+    public const int MaxUploadBytes = 2 * 1024 * 1024;
+    public const int MaxFilenameLength = 180;
+    public static readonly string[] AllowedExtensions = [".txt", ".md"];
+    public static readonly string[] AllowedSourceTypes = ["rules", "homebrew"];
+}
 
 public interface ICurrentClientService
 {

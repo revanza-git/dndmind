@@ -8,11 +8,13 @@ DNDMind is an AI Dungeon Master co-pilot built as a small full-stack system:
 
 - `apps/web`: Next.js, React, Tailwind CSS command center UI.
 - `apps/api`: ASP.NET Core 8 Web API that owns campaign data, chat persistence, and worker proxying.
-- `apps/ai-worker`: Python FastAPI worker for mock LLM responses, RAG ingestion/search, campaign memory, structured outputs, and tool orchestration.
+- `apps/ai-worker`: Python FastAPI worker for mock or provider-backed LLM responses, RAG ingestion/search, campaign memory, structured outputs, and tool orchestration.
 - `db`: PostgreSQL schema, seed material, and pgvector-backed knowledge storage.
 - `docs`: Architecture and phase notes.
 
 The default local path is mock-first. Keep `MOCK_LLM=true` and `MOCK_EMBEDDINGS=true` unless the user explicitly asks to wire or test a real provider.
+
+Real provider support is available behind explicit configuration. Chat currently supports Gemini via `LLM_PROVIDER=gemini`, and embeddings can use Gemini or OpenAI when `MOCK_EMBEDDINGS=false`. Keep pgvector dimensions and provider embedding dimensions aligned.
 
 ## Working Rules
 
@@ -25,6 +27,7 @@ The default local path is mock-first. Keep `MOCK_LLM=true` and `MOCK_EMBEDDINGS=
   - `apps/api/obj`
 - Keep secrets out of the repo. Use `.env.example` for documented configuration only.
 - When changing data contracts, update all affected layers together: API models, worker schemas, frontend types, database schema or seeds, and README/docs if needed.
+- Preserve browser-owned data scoping. The frontend sends `X-Dndmind-Client-Id`, the API maps it to `clientOwnerId`, and session/memory writes should remain scoped by both campaign and client owner where applicable.
 
 ## Repo-Specific Notes
 
@@ -32,11 +35,11 @@ The default local path is mock-first. Keep `MOCK_LLM=true` and `MOCK_EMBEDDINGS=
 - `apps/web/lib/api.ts` is the frontend contract hub. Update it whenever API request or response shapes change.
 - `apps/web/app/page.tsx` contains the main command center and some demo-enhancement fallback logic. Do not treat frontend demo fallback data as persisted backend behavior.
 - `apps/web/components/structured` owns structured card rendering and suggested-action controls.
-- `apps/ai-worker/main.py`, `apps/ai-worker/app/orchestration`, `apps/ai-worker/app/tools`, and `apps/ai-worker/rag` own mock AI behavior, RAG, tools, structured outputs, citations, and retrieval.
+- `apps/ai-worker/main.py`, `apps/ai-worker/app/orchestration`, `apps/ai-worker/app/tools`, and `apps/ai-worker/rag` own mock/provider AI behavior, RAG, tools, structured outputs, citations, and retrieval.
 
 ## Contract Hotspots
 
-When changing chat, tools, memory, documents, or structured cards, check all relevant layers:
+When changing chat, tools, memory, documents, sessions, party data, or structured cards, check all relevant layers:
 
 - C# request/response records in `apps/api/Program.cs`
 - Python Pydantic models in `apps/ai-worker/main.py`
@@ -44,7 +47,7 @@ When changing chat, tools, memory, documents, or structured cards, check all rel
 - Renderers in `apps/web/components/structured`
 - Database schema and seed data in `db/init.sql`
 
-Keep these fields especially aligned across services: `citations`, `toolCalls`, `structuredOutput`, `suggestedActions`, `conversationId`, `campaignId`, and `sessionId`.
+Keep these fields especially aligned across services: `citations`, `toolCalls`, `structuredOutput`, `suggestedActions`, `conversationId`, `campaignId`, `sessionId`, `clientOwnerId`, and the `X-Dndmind-Client-Id` header.
 
 Suggested action names are consumed by the frontend and are case-sensitive. Current examples include `saveNPC`, `saveQuest`, `saveLocation`, `saveEncounter`, `saveSessionSummary`, and `prompt`.
 
@@ -53,7 +56,9 @@ Suggested action names are consumed by the frontend and are case-sensitive. Curr
 - Main schema and seed data live in `db/init.sql`.
 - The API also calls startup RAG schema compatibility code. If changing RAG tables or document/chunk behavior, update both `db/init.sql` and the API startup compatibility path when needed.
 - Keep pgvector dimensions aligned with the embedding model. The current schema uses `vector(1536)` for `text-embedding-3-small`.
+- Uploaded document text is sanitized and capped in `apps/ai-worker/rag/sanitizer.py` before chunking and embedding. If changing ingestion behavior, keep sanitizer tests updated and avoid storing unsafe or unbounded upload content.
 - Preserve campaign scoping on memory, documents, chunks, conversations, messages, and tool calls.
+- Preserve client-owner scoping on sessions and campaign memory entities such as NPCs, quests, locations, encounters, and memory events.
 - Keep mock embeddings deterministic unless the user explicitly asks to wire or test a real provider.
 
 ## Useful Commands

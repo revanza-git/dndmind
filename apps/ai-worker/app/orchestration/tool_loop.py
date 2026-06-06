@@ -1,7 +1,130 @@
+import re
+from dataclasses import dataclass
 from typing import Any
 
 from app.tools.dice import extract_dice_expression
 from app.tools.registry import execute_tool, tool_schemas
+
+
+@dataclass(frozen=True)
+class PromptIntent:
+    primary: str | None
+    detected: tuple[str, ...]
+    is_strong: bool
+
+    def as_payload(self) -> dict[str, Any]:
+        return {
+            "primary": self.primary,
+            "detected": list(self.detected),
+            "isStrong": self.is_strong,
+        }
+
+
+_MODE_TO_INTENT = {
+    "rules": "rules",
+    "story": "story",
+    "encounter": "encounter",
+    "npc": "npc",
+    "combat": "combat",
+    "summarize": "summarize",
+}
+
+_INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
+    "rules": (
+        r"\brules?\b",
+        r"\bruling\b",
+        r"\bmechanic(?:s|al)?\b",
+        r"\badvantage\b",
+        r"\bdisadvantage\b",
+        r"\bability checks?\b",
+        r"\bsaving throws?\b",
+        r"\battack rolls?\b",
+        r"\bspell slots?\b",
+        r"\bconcentration\b",
+        r"\bbonus action\b",
+        r"\breactions?\b",
+        r"\bconditions?\b",
+        r"\bgrappl(?:e|ing)\b",
+        r"\bcover\b",
+        r"\bdifficult terrain\b",
+        r"\bproficiency\b",
+        r"\bhow (?:do|does|would|should)\b.+\bwork\b",
+    ),
+    "story": (
+        r"\bdescribe\b",
+        r"\bnarrat(?:e|ion)\b",
+        r"\bscene\b",
+        r"\bread[- ]aloud\b",
+        r"\bboxed text\b",
+        r"\batmosphere\b",
+        r"\bflavor\b",
+        r"\bopening\b",
+        r"\bentrance\b",
+    ),
+    "encounter": (
+        r"\bencounters?\b",
+        r"\bambush(?:es)?\b",
+        r"\bboss fight\b",
+        r"\bmonster(?:s)?\b",
+        r"\bcombat encounter\b",
+        r"\bdeadly\b",
+        r"\bhard ambush\b",
+        r"\bbalanc(?:e|ed|ing)\b",
+    ),
+    "npc": (
+        r"\bnpcs?\b",
+        r"\bnon[- ]player character\b",
+        r"\btavern keeper\b",
+        r"\binnkeeper\b",
+        r"\binformant\b",
+        r"\bmerchant\b",
+        r"\bvillain\b",
+        r"\bguard captain\b",
+        r"\bquest giver\b",
+    ),
+    "combat": (
+        r"\bcombat\b",
+        r"\binitiative\b",
+        r"\bturn order\b",
+        r"\brounds?\b",
+        r"\baction economy\b",
+    ),
+    "summarize": (
+        r"\bsummar(?:y|ize|ise|izing)\b",
+        r"\brecap\b",
+        r"\bsession notes?\b",
+        r"\bextract unresolved hooks?\b",
+        r"\bimportant events?\b",
+    ),
+    "memory": (
+        r"\bcampaign memory\b",
+        r"\bremember\b",
+        r"\blast session\b",
+        r"\bprevious(?:ly)?\b",
+        r"\bwhat happened\b",
+        r"\bbetray(?:al|ed|s)?\b",
+    ),
+    "quest": (
+        r"\bquests?\b",
+        r"\bhooks?\b",
+        r"\bobjectives?\b",
+        r"\bmissions?\b",
+        r"\bunresolved hooks?\b",
+    ),
+    "location": (
+        r"\blocations?\b",
+        r"\btowns?\b",
+        r"\bcit(?:y|ies)\b",
+        r"\bvillages?\b",
+        r"\bdungeons?\b",
+        r"\btemples?\b",
+        r"\bruins?\b",
+        r"\bshrines?\b",
+        r"\bcastles?\b",
+    ),
+}
+
+_INTENT_PRIORITY = ("rules", "summarize", "encounter", "combat", "npc", "quest", "location", "memory", "story")
 
 
 def execute_manual_tool(tool_name: str, arguments: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -21,11 +144,12 @@ def run_mock_tool_loop(request: Any) -> tuple[list[dict[str, Any]], list[dict[st
 
 
 def run_provider_tool_loop(request: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    party = [member.model_dump() for member in request.party] if request.context.usePartyInfo else []
     context = {
         "campaignId": request.campaignId,
         "conversationId": request.conversationId,
         "clientOwnerId": request.clientOwnerId,
-        "party": [member.model_dump() for member in request.party],
+        "party": party,
     }
     planned = _plan_mock_tools(request)
     tool_calls = [_tool_call_response(name, args, context) for name, args in planned]
@@ -46,40 +170,103 @@ def provider_tooling_note() -> dict[str, Any]:
     }
 
 
+def detect_prompt_intent(message: str) -> PromptIntent:
+    lower = str(message or "").lower()
+    scores: dict[str, int] = {}
+    for intent, patterns in _INTENT_PATTERNS.items():
+        score = sum(1 for pattern in patterns if re.search(pattern, lower))
+        if score:
+            scores[intent] = score
+
+    if not scores:
+        return PromptIntent(primary=None, detected=(), is_strong=False)
+
+    ordered = sorted(scores, key=lambda item: (-scores[item], _INTENT_PRIORITY.index(item)))
+    primary = ordered[0]
+    is_strong = scores[primary] >= 2 or primary in {"rules", "encounter", "combat", "summarize", "npc"}
+    return PromptIntent(primary=primary, detected=tuple(ordered), is_strong=is_strong)
+
+
+def selected_mode_intent(mode: str) -> str | None:
+    return _MODE_TO_INTENT.get(str(mode or "").strip().lower())
+
+
+def prompt_conflicts_with_mode(intent: PromptIntent, mode: str) -> bool:
+    mode_intent = selected_mode_intent(mode)
+    if not mode_intent or not intent.is_strong or not intent.primary:
+        return False
+    return intent.primary != mode_intent
+
+
 def _plan_mock_tools(request: Any) -> list[tuple[str, dict[str, Any]]]:
     message = request.message
     lower = message.lower()
     mode = request.mode.lower()
+    intent = detect_prompt_intent(message)
     tools: list[tuple[str, dict[str, Any]]] = []
 
     expression = extract_dice_expression(message)
     if expression or ("roll" in lower and "initiative" not in lower):
         tools.append(("rollDice", {"expression": expression or "1d20"}))
 
+    party_members = request.party if request.context.usePartyInfo else []
+
     if "initiative" in lower:
         characters = [
             {"name": member.name, "initiativeModifier": _initiative_modifier(member)}
-            for member in request.party
+            for member in party_members
         ]
         if not characters:
             characters = [{"name": "Goblin Scout", "initiativeModifier": 2}, {"name": "Bandit", "initiativeModifier": 1}]
         tools.append(("generateInitiativeOrder", {"characters": characters}))
 
-    if mode == "encounter" or "encounter" in lower:
-        party = [{"name": member.name, "level": member.level} for member in request.party]
+    if _should_calculate_encounter(request, intent) and party_members:
+        party = [{"name": member.name, "level": member.level} for member in party_members]
         monsters = _infer_monsters(message)
         tools.append(("calculateEncounterDifficulty", {"party": party, "monsters": monsters}))
 
-    if mode == "rules":
+    if _should_search_rules(request, intent):
         tools.append(("searchRules", {"query": message, "limit": 4}))
 
-    if request.context.useRules and "rule" in lower and mode != "rules":
-        tools.append(("searchRules", {"query": message, "limit": 4}))
+    if request.context.useHomebrew and (_should_search_rules(request, intent) or "homebrew" in lower):
+        tools.append(("searchHomebrew", {"query": message, "limit": 4}))
 
-    if request.context.useCampaignMemory and any(term in lower for term in ["previous", "last session", "memory", "npc", "quest", "betray", "betrayed"]):
+    if request.context.useCampaignMemory and _should_search_campaign_memory(intent, lower):
         tools.append(("searchCampaignMemory", {"query": message, "limit": 4}))
 
     return tools
+
+
+def _should_search_rules(request: Any, intent: PromptIntent) -> bool:
+    if not getattr(request.context, "useRules", False):
+        return False
+    if "rules" in intent.detected:
+        return True
+    return selected_mode_intent(request.mode) == "rules" and not _strong_non_rules_task(intent)
+
+
+def _should_calculate_encounter(request: Any, intent: PromptIntent) -> bool:
+    if "encounter" in intent.detected:
+        return True
+    return selected_mode_intent(request.mode) == "encounter" and not _strong_unrelated_to_encounter(intent)
+
+
+def _should_search_campaign_memory(intent: PromptIntent, lower: str) -> bool:
+    if any(item in intent.detected for item in ("memory", "npc", "quest")):
+        return True
+    return any(term in lower for term in ["last session", "previous", "betray", "betrayed"])
+
+
+def _strong_non_rules_task(intent: PromptIntent) -> bool:
+    if "rules" in intent.detected:
+        return False
+    return bool(intent.is_strong and intent.primary in {"story", "encounter", "npc", "combat", "summarize", "memory", "quest", "location"})
+
+
+def _strong_unrelated_to_encounter(intent: PromptIntent) -> bool:
+    if not intent.is_strong or "encounter" in intent.detected:
+        return False
+    return bool(intent.primary in {"rules", "story", "npc", "combat", "summarize", "memory", "quest", "location"})
 
 
 def _tool_call_response(tool_name: str, arguments: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:

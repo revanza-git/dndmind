@@ -33,6 +33,9 @@ class ScopeGuardTests(unittest.TestCase):
     def test_dnd_rules_prompt_is_allowed(self):
         self.assertTrue(is_in_scope_prompt("How does grappling work in D&D 5e?"))
 
+    def test_frontend_rules_template_prompt_is_allowed(self):
+        self.assertTrue(is_in_scope_prompt("How does advantage work, and when should I ask for a check?"))
+
     def test_dice_or_initiative_prompt_is_allowed(self):
         self.assertTrue(is_in_scope_prompt("Roll initiative for the party."))
 

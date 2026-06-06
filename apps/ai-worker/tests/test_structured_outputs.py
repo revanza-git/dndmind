@@ -32,6 +32,16 @@ class StructuredOutputTests(unittest.TestCase):
         self.assertEqual(encounter.difficulty, "Hard")
         self.assertGreater(len(encounter.monsters), 0)
 
+    def test_rules_mode_npc_prompt_produces_npc_card(self):
+        output = build_mock_structured_output(request("Generate a suspicious tavern keeper NPC", "Rules"), [])
+
+        self.assertEqual(output["type"], "npc")
+
+    def test_npc_mode_summarize_prompt_produces_summary_card(self):
+        output = build_mock_structured_output(request("Summarize these session notes and extract unresolved hooks.", "NPC"), [])
+
+        self.assertEqual(output["type"], "session_summary")
+
     def test_dice_tool_becomes_structured_output(self):
         output = build_mock_structured_output(
             request("Roll 1d20+5"),

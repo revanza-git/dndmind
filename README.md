@@ -2,7 +2,7 @@
 
 An AI-powered Dungeon Master command center for tabletop RPG campaigns, built to demonstrate full-stack LLM application engineering.
 
-DNDMind is a mock-first full-stack AI product for running and reviewing long-lived tabletop campaigns. It combines campaign data, rules retrieval, session memory, structured AI outputs, deterministic tools, domain-scoped chat behavior, and evaluation workflows in one local Docker Compose demo.
+DNDMind is a mock-first full-stack AI product for running and reviewing long-lived tabletop campaigns. It combines campaign data, campaign knowledge retrieval, session memory, structured AI outputs, deterministic tools, domain-scoped chat behavior, and evaluation workflows in one local Docker Compose demo.
 
 ## Problem
 
@@ -10,7 +10,7 @@ Dungeon Masters need to manage rules, campaign continuity, party context, sessio
 
 ## Solution
 
-DNDMind combines RAG, campaign memory, structured output, tool calling, scope guarding, and deterministic evals into one command-center interface. The default path uses `MOCK_LLM=true` and `MOCK_EMBEDDINGS=true`, so the project can be reviewed locally without paid API usage or external model calls.
+DNDMind combines Campaign Knowledge RAG, campaign memory, structured output, context-aware tool calling, scope guarding, and deterministic evals into one command-center interface. The default path uses `MOCK_LLM=true` and `MOCK_EMBEDDINGS=true`, so the project can be reviewed locally without paid API usage or external model calls.
 
 ## Architecture
 
@@ -31,22 +31,23 @@ flowchart LR
   API --> Web
 ```
 
-The frontend renders the DM command center and sends a local browser profile header for browser-owned sessions. The API owns campaign data, party management, chat persistence, memory writes, and worker proxying. The AI worker handles prompt orchestration, scope guarding, RAG, structured output, tool execution, and mock or Gemini provider calls. PostgreSQL stores campaign entities, messages, memory, knowledge chunks, party history, and pgvector embeddings.
+The frontend renders the DM command center, Campaign Knowledge library, downloadable templates, and local browser profile header for browser-owned sessions. The API owns campaign data, party management, upload validation, chat persistence, memory writes, and worker proxying. The AI worker handles prompt orchestration, scope guarding, upload sanitization, RAG, structured output, context-aware tool execution, and mock or Gemini provider calls. PostgreSQL stores campaign entities, messages, memory, knowledge chunks, party history, and pgvector embeddings.
 
 ## Key Features
 
 - Campaign management
 - Party management
 - AI command center chat
-- Rules RAG with citations
+- Campaign Knowledge library with `.txt` and `.md` templates
+- Rules and Homebrew RAG with citations
 - Campaign memory RAG
 - Session notes and summarization
 - Tabletop RPG scope guard with helpful redirect actions
 - NPC, quest, location, encounter, dice roll, and initiative structured cards
-- Tool calling with persisted traces
+- Context-aware tool calling with persisted traces
 - Dice roller
 - Encounter difficulty calculator
-- Evaluation dashboard
+- Session Prep summary
 - Docker Compose local deployment
 - Mock LLM mode for demo without API usage
 
@@ -57,6 +58,7 @@ The frontend renders the DM command center and sends a local browser profile hea
 - pgvector
 - Vector search
 - Prompt orchestration
+- Upload validation and sanitization
 - Structured output
 - Tool/function calling
 - Long-term memory
@@ -82,7 +84,7 @@ Screenshot placeholders are reserved for a local demo capture:
 - `docs/screenshots/01-command-center.png` - command center overview
 - `docs/screenshots/02-encounter-card.png` - structured encounter output
 - `docs/screenshots/03-rules-rag-citations.png` - rules answer with citations
-- `docs/screenshots/04-eval-dashboard.png` - evaluation dashboard
+- `docs/screenshots/04-session-prep.png` - session prep summary
 
 The files are not committed yet. Add them after running the app locally and capturing the current UI.
 
@@ -133,7 +135,7 @@ To use Gemini instead of mock responses, copy `.env.example` to `.env`, set `MOC
 1. Open `http://localhost:3000`.
 2. Create or select a campaign.
 3. Add or review party members.
-4. Ingest sample rules from `db/seed/srd_sample.md`.
+4. Add sample rules from `db/seed/srd_sample.md` to Campaign Knowledge.
 5. Ask a rules question such as `How does advantage work?`
 6. Review the answer and its citations.
 7. Paste session notes from `db/seed/session_notes.md`.
@@ -141,7 +143,7 @@ To use Gemini instead of mock responses, copy `.env.example` to `.env`, set `MOC
 9. Generate an NPC.
 10. Create an encounter.
 11. Roll dice from the command center.
-12. Run or review the eval suite cases in `db/seed/eval_cases.json`.
+12. Review Session Prep for open hooks, quests, and usable knowledge.
 
 For a guided walkthrough, open the in-app manual at `http://localhost:3000/manual` or read `docs/user-manual.md`.
 
@@ -156,10 +158,11 @@ Clearing browser storage or resetting the local profile creates a new identity, 
 DNDMind is designed for deterministic evaluation in mock mode. The sample eval cases check:
 
 - Rules accuracy
+- Homebrew isolation from rules retrieval
 - Citation correctness
 - Campaign memory recall
 - JSON validity
-- Tool-calling correctness
+- Context-toggle and tool-calling correctness
 - Hallucination and out-of-scope resistance
 - Encounter difficulty correctness
 

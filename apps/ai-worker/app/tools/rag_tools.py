@@ -1,6 +1,6 @@
 from typing import Any
 
-from rag.retriever import search_memory, search_rules
+from rag.retriever import search_homebrew, search_memory, search_rules
 
 
 def search_rules_tool(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -9,6 +9,15 @@ def search_rules_tool(arguments: dict[str, Any], context: dict[str, Any] | None 
         raise ValueError("query is required.")
     campaign_id = (context or {}).get("campaignId")
     rows = search_rules(campaign_id, query, int(arguments.get("limit", 5)))
+    return {"query": query, "results": _serialize_rows(rows), "citations": [row["citation"] for row in rows]}
+
+
+def search_homebrew_tool(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+    query = str(arguments.get("query") or "").strip()
+    if not query:
+        raise ValueError("query is required.")
+    campaign_id = (context or {}).get("campaignId")
+    rows = search_homebrew(campaign_id, query, int(arguments.get("limit", 5)))
     return {"query": query, "results": _serialize_rows(rows), "citations": [row["citation"] for row in rows]}
 
 
@@ -32,6 +41,7 @@ def _serialize_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "chunkId": str(row["chunk_id"]),
             "documentId": str(row["document_id"]),
             "title": row["title"],
+            "sourceType": row.get("source_type"),
             "heading": row.get("heading"),
             "content": row["content"],
             "score": row.get("score"),

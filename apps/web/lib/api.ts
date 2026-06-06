@@ -481,8 +481,7 @@ export async function uploadDocument(input: {
   });
 
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || "Document upload failed");
+    throw new Error(await apiErrorMessage(response, "Document upload failed"));
   }
 
   return response.json();
@@ -494,7 +493,7 @@ export async function ingestDocument(documentId: string): Promise<IngestDocument
   });
 
   if (!response.ok) {
-    throw new Error(await apiErrorMessage(response, "Document ingestion failed"));
+    throw new Error(await apiErrorMessage(response, "Campaign knowledge setup failed"));
   }
 
   return response.json();

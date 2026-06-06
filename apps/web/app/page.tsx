@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Campaign,
@@ -56,17 +56,24 @@ const quickPrompts = [
 const navigationItems = [
   { label: "Command", targetId: "command-center" },
   { label: "Campaign Memory", targetId: "campaign-memory" },
-  { label: "Rules Library", targetId: "rules-library" },
+  { label: "Campaign Knowledge", targetId: "rules-library" },
   { label: "Encounters", targetId: "encounters" },
-  { label: "Evaluations", targetId: "evaluations" }
+  { label: "Session Prep", targetId: "session-prep" }
 ];
-const evaluationCases = [
-  ["Rules RAG", "citation required"],
-  ["Memory Recall", "Captain Vey fact"],
-  ["Tool Calling", "dice + encounter"],
-  ["Structured Output", "NPC card"],
-  ["Faithfulness", "expected facts"]
+const documentSourceTypes = [
+  { value: "rules", label: "Rules" },
+  { value: "homebrew", label: "Homebrew" }
 ];
+const documentTemplates = [
+  { label: "Rules", href: "/templates/rules-template.md" },
+  { label: "Session Notes", href: "/templates/session-notes-template.md" },
+  { label: "NPC", href: "/templates/npc-template.md" },
+  { label: "Location", href: "/templates/location-template.md" },
+  { label: "Quest", href: "/templates/quest-template.md" },
+  { label: "Campaign Lore", href: "/templates/campaign-lore-template.md" }
+];
+const acceptedDocumentExtensions = [".txt", ".md"];
+const maxDocumentUploadBytes = 2 * 1024 * 1024;
 
 function sessionDraftKey(clientId: string, campaignId: string, sessionId: string | null) {
   return `dndmind_draft_${clientId}_${campaignId}_${sessionId ?? "new"}`;
@@ -125,8 +132,10 @@ export default function Home() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [lastResponse, setLastResponse] = useState<ChatResponse | null>(null);
   const [input, setInput] = useState("How should I open tonight's session?");
-  const [documentTitle, setDocumentTitle] = useState("SRD Sample Rules");
+  const [documentTitle, setDocumentTitle] = useState("Campaign Notes");
   const [documentContent, setDocumentContent] = useState("");
+  const [documentSourceType, setDocumentSourceType] = useState("rules");
+  const [documentFileName, setDocumentFileName] = useState<string | null>(null);
   const [diceExpression, setDiceExpression] = useState("1d20+5");
   const [manualToolCall, setManualToolCall] = useState<ToolCall | null>(null);
   const [isIngesting, setIsIngesting] = useState(false);
@@ -149,6 +158,27 @@ export default function Home() {
     () => campaigns.find((campaign) => campaign.id === campaignId) ?? null,
     [campaignId, campaigns]
   );
+  const activeSession = useMemo(
+    () => sessions.find((session) => session.id === activeSessionId) ?? null,
+    [activeSessionId, sessions]
+  );
+  const prepSummary = useMemo(() => {
+    const openHooks = memory.events.filter((event) => event.eventType === "unresolved_hook");
+    const openQuests = memory.quests.filter((quest) => quest.status !== "closed");
+    const ruleNotes = documents.reduce((sum, item) => sum + item.chunkCount, 0);
+    const latestHook = openHooks[0];
+    const latestHookDisplay = latestHook ? formatMemoryHook(latestHook) : null;
+
+    return {
+      openHooks,
+      openQuests,
+      ruleNotes,
+      latestHook,
+      latestHookDisplay,
+      sessionLabel: activeSession ? `Session ${activeSession.sessionNumber}` : "New session",
+      sessionDetail: activeSession?.summary ? "Summary saved" : sessionNotes.trim() ? "Notes in progress" : "No notes yet"
+    };
+  }, [activeSession, documents, memory.events, memory.quests, sessionNotes]);
 
   useEffect(() => {
     const localClientId = getClientId();
@@ -324,7 +354,12 @@ export default function Home() {
 
   async function handleDocumentSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!campaignId || !documentTitle.trim() || !documentContent.trim()) {
+    const content = documentContent.trim();
+    if (!content) {
+      setError("Add a .txt or .md file, or paste some campaign knowledge first.");
+      return;
+    }
+    if (!campaignId || !documentTitle.trim()) {
       return;
     }
 
@@ -334,16 +369,18 @@ export default function Home() {
       const uploaded = await uploadDocument({
         campaignId,
         title: documentTitle.trim(),
-        content: documentContent,
-        sourceType: "rules"
+        content,
+        sourceType: documentSourceType,
+        originalFilename: documentFileName
       });
       await ingestDocument(uploaded.id);
       setDocuments(await getDocuments(campaignId));
       setDocumentContent("");
-      setInput("How does advantage work?");
-      setMode("Rules");
+      setDocumentFileName(null);
+      setInput(documentSourceType === "homebrew" ? "Use my homebrew context for tonight's scene." : "How does advantage work?");
+      setMode(documentSourceType === "homebrew" ? "Auto" : "Rules");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Document ingestion failed.");
+      setError(err instanceof Error ? err.message : "DNDMind could not add that campaign knowledge. Please try again.");
     } finally {
       setIsIngesting(false);
     }
@@ -354,7 +391,7 @@ export default function Home() {
       return;
     }
 
-    const confirmed = window.confirm(`Delete "${document.title}" and remove its indexed chunks from rules search?`);
+    const confirmed = window.confirm(`Delete "${document.title}" and remove its notes from Campaign Knowledge?`);
     if (!confirmed) {
       return;
     }
@@ -371,12 +408,46 @@ export default function Home() {
     }
   }
 
+  async function handleFileInputChange(event: ChangeEvent<HTMLInputElement>) {
+    const accepted = await handleFileUpload(event.target.files?.[0] ?? null);
+    if (!accepted) {
+      event.target.value = "";
+    }
+  }
+
   async function handleFileUpload(file: File | null) {
     if (!file) {
-      return;
+      setDocumentFileName(null);
+      return false;
     }
+
+    const extension = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
+    if (!acceptedDocumentExtensions.includes(extension)) {
+      setError("Choose a .txt or .md file for Campaign Knowledge.");
+      setDocumentFileName(null);
+      setDocumentContent("");
+      return false;
+    }
+    if (file.size > maxDocumentUploadBytes) {
+      setError("That file is too large. Campaign Knowledge supports files up to 2 MB.");
+      setDocumentFileName(null);
+      setDocumentContent("");
+      return false;
+    }
+
+    const text = await file.text();
+    if (!text.trim()) {
+      setError("That file looks empty. Add notes or choose another .txt or .md file.");
+      setDocumentFileName(null);
+      setDocumentContent("");
+      return false;
+    }
+
+    setError(null);
+    setDocumentFileName(file.name);
     setDocumentTitle(file.name.replace(/\.[^.]+$/, "") || file.name);
-    setDocumentContent(await file.text());
+    setDocumentContent(text);
+    return true;
   }
 
   async function saveSessionChanges() {
@@ -771,7 +842,8 @@ export default function Home() {
           </nav>
 
           <section id="rules-library" className="scroll-mt-4 mt-8 rounded-md border border-white/15 p-3">
-            <h2 className="text-sm font-semibold text-white">Rules Documents</h2>
+            <h2 className="text-sm font-semibold text-white">Campaign Knowledge</h2>
+            <p className="mt-1 text-xs leading-5 text-mist">Add rules, lore, NPCs, locations, quests, or session notes so DNDMind can cite entries from this campaign.</p>
             <form onSubmit={handleDocumentSubmit} className="mt-3 space-y-3">
               <input
                 value={documentTitle}
@@ -779,32 +851,65 @@ export default function Home() {
                 className="w-full rounded-md border border-white/15 bg-white/10 px-3 py-2 text-sm text-white placeholder:text-mist/70"
                 placeholder="Document title"
               />
+              <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-mist">
+                Document type
+                <select
+                  value={documentSourceType}
+                  onChange={(event) => setDocumentSourceType(event.target.value)}
+                  className="mt-2 w-full rounded-md border border-white/15 bg-moss px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
+                >
+                  {documentSourceTypes.map((source) => (
+                    <option key={source.value} value={source.value}>
+                      {source.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="rounded-md bg-white/10 p-2">
+                <p className="text-xs font-semibold text-white">Download a template</p>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  {documentTemplates.map((template) => (
+                    <a
+                      key={template.href}
+                      href={template.href}
+                      download
+                      className="rounded-md border border-white/15 px-2 py-1.5 text-xs font-semibold text-mist transition hover:border-white/40 hover:bg-white/10 hover:text-white"
+                    >
+                      {template.label}
+                    </a>
+                  ))}
+                </div>
+              </div>
               <input
                 type="file"
                 accept=".md,.txt,text/markdown,text/plain"
-                onChange={(event) => handleFileUpload(event.target.files?.[0] ?? null)}
+                onChange={handleFileInputChange}
                 className="w-full text-xs text-mist file:mr-3 file:rounded-md file:border-0 file:bg-white file:px-3 file:py-2 file:text-xs file:font-semibold file:text-moss"
               />
+              <p className="text-xs leading-5 text-mist">Supports .txt and .md files up to 2 MB. Pasted notes work too.</p>
               <textarea
                 value={documentContent}
-                onChange={(event) => setDocumentContent(event.target.value)}
+                onChange={(event) => {
+                  setDocumentContent(event.target.value);
+                  setDocumentFileName(null);
+                }}
                 rows={6}
                 className="min-h-32 w-full resize-none rounded-md border border-white/15 bg-white/10 px-3 py-2 text-sm text-white placeholder:text-mist/70"
-                placeholder="Paste SRD-style rules text..."
+                placeholder="Paste rules, lore, session notes, NPC details, or world info..."
               />
               <button
                 type="submit"
-                disabled={isIngesting || !campaignId}
+                disabled={isIngesting || !campaignId || !documentTitle.trim() || !documentContent.trim()}
                 className="w-full rounded-md bg-white px-3 py-2 text-sm font-semibold text-moss disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {isIngesting ? "Ingesting" : "Upload + Ingest"}
+                {isIngesting ? "Adding" : "Add to Campaign"}
               </button>
             </form>
 
             <div className="mt-4 space-y-2">
               {documents.length === 0 && (
                 <div className="rounded-md bg-white/10 px-3 py-2 text-xs leading-5 text-mist">
-                  No rules indexed yet. Add a rules document to enable cited answers.
+                  No campaign knowledge yet. Add a document to enable cited answers.
                 </div>
               )}
               {documents.map((document) => (
@@ -813,7 +918,7 @@ export default function Home() {
                     <div className="min-w-0">
                       <p className="break-words font-semibold text-white">{document.title}</p>
                       <p>
-                        {document.metadata?.status ?? "uploaded"} · {document.chunkCount} chunks
+                        {formatSourceType(document.sourceType)} · {formatDocumentStatus(document.metadata?.status)} · {document.chunkCount} notes
                       </p>
                     </div>
                     {document.sourceType !== "campaign_memory" && (
@@ -834,7 +939,7 @@ export default function Home() {
 
           <div className="mt-8 rounded-md border border-white/15 p-3 text-sm text-mist">
             <p className="font-medium text-white">Local campaign workspace</p>
-            <p className="mt-1 leading-5">Campaigns, sessions, rules, and saved cards stay organized for this table.</p>
+            <p className="mt-1 leading-5">Campaigns, sessions, knowledge entries, and saved cards stay organized for this table.</p>
           </div>
         </aside>
 
@@ -849,26 +954,35 @@ export default function Home() {
                 </p>
                 <div className="mt-4 grid max-w-3xl grid-cols-2 gap-2 md:grid-cols-4">
                   <StatusMetric label="Party" value={`${party.length} PCs`} />
-                  <StatusMetric label="Rules" value={`${documents.reduce((sum, item) => sum + item.chunkCount, 0)} chunks`} />
+                  <StatusMetric label="Knowledge" value={`${documents.reduce((sum, item) => sum + item.chunkCount, 0)} notes`} />
                   <StatusMetric label="Memory" value={`${memory.npcs.length + memory.quests.length + memory.locations.length} items`} />
-                  <StatusMetric label="Evals" value="5 cases" />
+                  <StatusMetric label="Open Hooks" value={`${prepSummary.openHooks.length} story threads`} />
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                {modes.map((item) => (
-                  <button
-                    key={item}
-                    onClick={() => setMode(item)}
-                    className={`rounded-md border px-3.5 py-2 text-sm font-semibold shadow-sm transition ${
-                      mode === item
-                        ? "border-copper bg-copper text-white shadow-copper/20 ring-2 ring-copper/20"
-                        : "border-moss/20 bg-white text-moss hover:border-copper/60 hover:bg-parchment/60"
-                    }`}
-                  >
-                    {item}
-                  </button>
-                ))}
+              <div className="flex flex-col gap-2 xl:items-end">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-moss/60">Task hints</p>
+                <div className="flex flex-wrap gap-2">
+                  {modes.map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      aria-pressed={mode === item}
+                      onClick={() => setMode(item)}
+                      className={`rounded-md border px-3.5 py-2 text-sm font-semibold shadow-sm transition ${
+                        mode === item
+                          ? item === "Auto"
+                            ? "border-ink bg-ink text-white shadow-ink/20 ring-2 ring-ink/15"
+                            : "border-copper bg-copper text-white shadow-copper/20 ring-2 ring-copper/20"
+                          : item === "Auto"
+                            ? "border-copper/40 bg-copper/10 text-ink hover:border-copper/70 hover:bg-copper/15"
+                            : "border-moss/20 bg-white text-moss hover:border-copper/60 hover:bg-parchment/60"
+                      }`}
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </header>
@@ -933,7 +1047,7 @@ export default function Home() {
             <div className="rounded-xl border border-moss/15 bg-ink p-2 shadow-inner">
               <div className="mb-2 flex items-center justify-between px-2 pt-1">
                 <span className="text-xs font-semibold uppercase tracking-[0.18em] text-mist/70">Command Console</span>
-                <span className="rounded-full bg-copper/20 px-2 py-1 text-xs font-semibold text-mist">{mode}</span>
+                <span className="rounded-full bg-copper/20 px-2 py-1 text-xs font-semibold text-mist">{mode} hint</span>
               </div>
               <div className="flex flex-col gap-3 md:flex-row">
               <textarea
@@ -979,24 +1093,32 @@ export default function Home() {
             </div>
           </section>
 
-          <section id="evaluations" className="scroll-mt-4 mt-7">
-            <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-copper">Evaluation Snapshot</h2>
+          <section id="session-prep" className="scroll-mt-4 mt-7">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-copper">Tonight's Prep</h2>
             <div className="mt-3 rounded-lg border border-moss/15 bg-white p-3 shadow-sm">
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <MetricPill label="Cases" value="5" />
-                <MetricPill label="Mock" value="on" />
-                <MetricPill label="Risk" value="low" />
+              <div className="grid grid-cols-2 gap-2">
+                <PrepMetric label="Party" value={`${party.length} PC${party.length === 1 ? "" : "s"}`} detail="at the table" />
+                <PrepMetric label="Knowledge Notes" value={`${prepSummary.ruleNotes}`} detail="ready to use" />
+                <PrepMetric label="Open Hooks" value={`${prepSummary.openHooks.length}`} detail="to bring back" />
+                <PrepMetric label="Active Quests" value={`${prepSummary.openQuests.length}`} detail="not closed" />
               </div>
-              <div className="mt-3 space-y-2">
-                {evaluationCases.map(([name, detail]) => (
-                  <div key={name} className="flex items-center justify-between gap-3 rounded-md bg-parchment px-3 py-2 text-xs">
-                    <div>
-                      <p className="font-semibold text-ink">{name}</p>
-                      <p className="text-moss/70">{detail}</p>
-                    </div>
-                    <span className="rounded-full bg-mist px-2 py-1 font-semibold text-moss">ready</span>
-                  </div>
-                ))}
+              <div className="mt-3 space-y-2 text-sm">
+                <div className="rounded-md bg-parchment px-3 py-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-copper">Current Session</p>
+                  <p className="mt-1 font-semibold text-ink">{prepSummary.sessionLabel}</p>
+                  <p className="text-moss/70">{prepSummary.sessionDetail}</p>
+                </div>
+                <div className="rounded-md bg-parchment px-3 py-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-copper">Next Story Thread</p>
+                  {prepSummary.latestHookDisplay ? (
+                    <>
+                      <p className="mt-1 font-semibold text-ink">{prepSummary.latestHookDisplay.title}</p>
+                      {prepSummary.latestHookDisplay.detail && <p className="line-clamp-2 text-moss/70">{prepSummary.latestHookDisplay.detail}</p>}
+                    </>
+                  ) : (
+                    <p className="mt-1 text-moss/70">No unresolved hooks saved yet.</p>
+                  )}
+                </div>
               </div>
             </div>
           </section>
@@ -1124,11 +1246,14 @@ export default function Home() {
               <MemoryGroup title="Hooks" badge={`${memory.events.filter((event) => event.eventType === "unresolved_hook").length}`} items={memory.events
                 .filter((event) => event.eventType === "unresolved_hook")
                 .slice(0, 6)
-                .map((event) => ({
-                  id: event.id,
-                  title: event.title,
-                  detail: event.description ?? ""
-                }))} />
+                .map((event) => {
+                  const display = formatMemoryHook(event);
+                  return {
+                    id: event.id,
+                    title: display.title,
+                    detail: display.detail
+                  };
+                })} />
             </div>
           </section>
 
@@ -1160,11 +1285,12 @@ function StatusMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function MetricPill({ label, value }: { label: string; value: string }) {
+function PrepMetric({ label, value, detail }: { label: string; value: string; detail: string }) {
   return (
-    <div className="rounded-md bg-parchment px-2 py-2">
+    <div className="rounded-md bg-parchment px-3 py-2">
       <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-copper">{label}</p>
-      <p className="mt-1 text-sm font-semibold text-ink">{value}</p>
+      <p className="mt-1 text-lg font-semibold leading-6 text-ink">{value}</p>
+      <p className="text-xs leading-5 text-moss/70">{detail}</p>
     </div>
   );
 }
@@ -1197,38 +1323,25 @@ function ChatTimelineCard({
       <div className="border-b border-moss/10 bg-white px-5 py-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-copper">DNDMind response</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-copper">DM Briefing</p>
             <h3 className="mt-1 text-xl font-semibold text-ink">{briefingTitle(message.structuredOutput)}</h3>
           </div>
           <div className="flex flex-wrap gap-2">
-            {message.structuredOutput && <ContextBadge label="Structured output" />}
-            {!!message.toolCalls?.length && <ContextBadge label={`${message.toolCalls.length} tool call${message.toolCalls.length === 1 ? "" : "s"}`} />}
-            {!!message.citations?.length && <ContextBadge label={`${message.citations.length} source${message.citations.length === 1 ? "" : "s"}`} />}
+            {message.structuredOutput && <ContextBadge label="Table-ready card" />}
+            {!!message.citations?.length && <ContextBadge label="Context checked" />}
+            {!!message.toolCalls?.length && <ContextBadge label="Behind-the-screen details" />}
           </div>
         </div>
         <AssistantResponseText content={displayContent.main} />
         {displayContent.debug && (
           <details className="mt-4 rounded-xl border border-moss/10 bg-parchment/70 px-4 py-3 text-sm text-moss">
-            <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.14em] text-copper">Debug Details</summary>
+            <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.14em] text-copper">Advanced Details</summary>
             <p className="mt-3 whitespace-pre-wrap leading-6 text-moss/75">{displayContent.debug}</p>
           </details>
         )}
       </div>
 
       <div className="space-y-4 p-5">
-        {!!message.citations?.length && <CitationSection citations={message.citations} />}
-
-        {!!message.toolCalls?.length && (
-          <section>
-            <SectionHeader eyebrow="Tool Results" title="Actions DNDMind used" />
-            <div className="mt-3 grid gap-3 xl:grid-cols-2">
-              {message.toolCalls.map((toolCall, toolIndex) => (
-                <ToolCallCard key={`${toolCall.toolName}-${toolIndex}`} toolCall={toolCall} />
-              ))}
-            </div>
-          </section>
-        )}
-
         {message.structuredOutput && (
           <StructuredOutputRenderer
             output={message.structuredOutput}
@@ -1236,6 +1349,19 @@ function ChatTimelineCard({
             onAction={onAction}
             status={actionStatus}
           />
+        )}
+
+        {!!message.citations?.length && <CitationSection citations={message.citations} />}
+
+        {!!message.toolCalls?.length && (
+          <section>
+            <SectionHeader eyebrow="Behind the Screen" title="Checks DNDMind ran for this answer" />
+            <div className="mt-3 grid gap-3 xl:grid-cols-2">
+              {message.toolCalls.map((toolCall, toolIndex) => (
+                <ToolCallCard key={`${toolCall.toolName}-${toolIndex}`} toolCall={toolCall} />
+              ))}
+            </div>
+          </section>
         )}
       </div>
     </article>
@@ -1301,7 +1427,7 @@ function ContextBadge({ label }: { label: string }) {
 function CitationSection({ citations }: { citations: Citation[] }) {
   return (
     <section>
-      <SectionHeader eyebrow="Memory Used" title="Rules, memory, and campaign sources" />
+      <SectionHeader eyebrow="Campaign Context Used" title="What DNDMind considered" />
       <div className="mt-3 flex flex-wrap gap-2">
         {citations.map((citation, index) => {
           const sourceLabel = citationLabel(citation);
@@ -1350,7 +1476,7 @@ function EmptyChatState({
               className="min-h-28 rounded-xl border border-moss/15 bg-parchment/70 px-4 py-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-copper/50 hover:bg-white hover:shadow-md"
             >
               <span className="block text-sm font-semibold text-ink">{prompt.label}</span>
-              <span className="mt-2 block text-xs leading-5 text-moss/70">{prompt.mode} mode</span>
+              <span className="mt-2 block text-xs leading-5 text-moss/70">{prompt.mode} hint</span>
             </button>
           ))}
         </div>
@@ -1367,6 +1493,62 @@ function EmptyChatState({
       </div>
     </section>
   );
+}
+
+function formatMemoryHook(event: CampaignMemory["events"][number]) {
+  const rawTitle = event.title ?? "";
+  const rawDescription = event.description ?? "";
+  const title = extractStoredField(rawTitle, "hook") || extractStoredField(rawDescription, "hook") || cleanStoredMemoryText(rawTitle);
+  const detail = extractStoredField(rawTitle, "details") || extractStoredField(rawDescription, "details") || cleanStoredMemoryText(rawDescription);
+  const cleanTitle = title || "Unresolved story thread";
+  const cleanDetail = detail && detail !== cleanTitle ? detail : "";
+
+  return {
+    title: cleanTitle,
+    detail: cleanDetail
+  };
+}
+
+function extractStoredField(value: string, field: string) {
+  const markerMatch = value.match(new RegExp(`["']${field}["']\\s*:`));
+  if (!markerMatch || markerMatch.index === undefined) {
+    return "";
+  }
+
+  let cursor = markerMatch.index + markerMatch[0].length;
+  while (cursor < value.length && /\s/.test(value[cursor])) {
+    cursor += 1;
+  }
+
+  const quote = value[cursor];
+  if (quote !== "'" && quote !== "\"") {
+    return "";
+  }
+
+  cursor += 1;
+  let output = "";
+  while (cursor < value.length) {
+    const char = value[cursor];
+    const next = value.slice(cursor + 1);
+    if (
+      char === quote &&
+      (/^\s*[,}]/.test(next) || /^\s*$/.test(next))
+    ) {
+      break;
+    }
+    output += char;
+    cursor += 1;
+  }
+
+  return cleanStoredMemoryText(output);
+}
+
+function cleanStoredMemoryText(value: string) {
+  return value
+    .replace(/^[{[\s]+|[}\]\s]+$/g, "")
+    .replace(/\\n/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function MemoryGroup({
@@ -1857,25 +2039,27 @@ function FormField({
 }
 
 function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
+  const presentation = toolPresentation(toolCall);
   return (
     <div className="rounded-xl border border-moss/15 bg-parchment p-4 text-sm text-moss shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-copper">Tool call</p>
-          <p className="mt-1 text-base font-semibold text-ink">{toolCall.toolName}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-copper">{presentation.eyebrow}</p>
+          <p className="mt-1 text-base font-semibold text-ink">{presentation.title}</p>
+          <p className="mt-1 text-xs leading-5 text-moss/70">{presentation.description}</p>
         </div>
         <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${toolCall.success ? "bg-mist text-moss" : "bg-ember/10 text-ember"}`}>
-          {toolCall.success ? "Success" : "Failed"}
+          {toolCall.success ? "Ready" : "Needs review"}
         </span>
       </div>
       <div className="mt-3">
         {toolCall.error ? <p className="text-ember">{toolCall.error}</p> : <ToolResult toolCall={toolCall} />}
       </div>
       <details className="mt-3 overflow-hidden rounded-lg border border-moss/10 bg-white/70 px-3 py-2">
-        <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.14em] text-copper">Debug Details</summary>
+        <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.14em] text-copper">Technical Details</summary>
         <div className="mt-2 grid gap-3 md:grid-cols-2">
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-copper">Arguments</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-copper">Input</p>
             <KeyValue value={toolCall.arguments} />
           </div>
           <div className="min-w-0">
@@ -1904,10 +2088,11 @@ function ToolResult({ toolCall }: { toolCall: ToolCall }) {
   if (toolCall.toolName === "generateInitiativeOrder") {
     const order = Array.isArray(result.order) ? result.order : [];
     return (
-      <ol className="mt-1 list-decimal space-y-1 pl-4">
+      <ol className="mt-1 space-y-2">
         {order.map((entry, index) => (
-          <li key={index}>
-            {String(entry.name)}: {String(entry.total)} ({String(entry.roll)} + {String(entry.initiativeModifier)})
+          <li key={index} className="flex items-center justify-between gap-3 rounded-lg bg-white/70 px-3 py-2">
+            <span className="font-semibold text-ink">{index + 1}. {String(entry.name)}</span>
+            <span>{String(entry.total)} total</span>
           </li>
         ))}
       </ol>
@@ -1915,31 +2100,33 @@ function ToolResult({ toolCall }: { toolCall: ToolCall }) {
   }
   if (toolCall.toolName === "calculateEncounterDifficulty") {
     const explanation = String(result.explanation ?? "");
+    const difficulty = String(result.difficulty ?? "");
     return (
       <div>
         <div className="grid gap-2 sm:grid-cols-3">
-          <ToolMetric label="Difficulty" value={String(result.difficulty ?? "")} emphasis />
+          <ToolMetric label="Table Pressure" value={difficulty} emphasis />
           <ToolMetric label="Total XP" value={String(result.totalMonsterXp ?? "")} />
           <ToolMetric label="Adjusted XP" value={String(result.adjustedXp ?? "")} />
         </div>
+        {difficulty && <p className="mt-3 rounded-lg bg-white/70 px-3 py-2 leading-6 text-moss/80">{encounterDifficultyAdvice(difficulty)}</p>}
         {explanation && <p className="mt-3 rounded-lg bg-white/70 px-3 py-2 leading-6 text-moss/80">{explanation}</p>}
       </div>
     );
   }
-  if (toolCall.toolName === "searchRules" || toolCall.toolName === "searchCampaignMemory") {
+  if (toolCall.toolName === "searchRules" || toolCall.toolName === "searchHomebrew" || toolCall.toolName === "searchCampaignMemory") {
     const results = Array.isArray(result.results) ? result.results : [];
     const query = String(toolCall.arguments.query ?? result.query ?? "");
     const top = object(results[0]);
     const topContent = text(top.content);
-    const sourceType = toolCall.toolName === "searchRules" ? "Rules" : "Memory";
+    const sourceType = toolCall.toolName === "searchRules" ? "Rules" : toolCall.toolName === "searchHomebrew" ? "Homebrew" : "Memory";
     return (
       <div>
         <div className="grid gap-2 sm:grid-cols-3">
-          <ToolMetric label="Query" value={query} />
-          <ToolMetric label={`${sourceType} Results`} value={String(results.length)} emphasis />
-          <ToolMetric label={`Top ${sourceType} Source`} value={text(top.title) || text(top.source) || "-"} />
+          <ToolMetric label="Checked For" value={query} />
+          <ToolMetric label={`${sourceType} Matches`} value={String(results.length)} emphasis />
+          <ToolMetric label="Best Match" value={text(top.title) || text(top.source) || "-"} />
         </div>
-        {results.length === 0 && <p className="mt-3 rounded-lg bg-white/70 px-3 py-2">No matching chunks found.</p>}
+        {results.length === 0 && <p className="mt-3 rounded-lg bg-white/70 px-3 py-2">No matching notes found.</p>}
         {results.length > 0 && (
           <div className="mt-3 rounded-lg bg-white/70 px-3 py-2">
             <p className="font-semibold text-ink">
@@ -1962,6 +2149,73 @@ function ToolMetric({ label, value, emphasis = false }: { label: string; value: 
       <p className={`mt-1 break-words ${emphasis ? "text-lg font-semibold text-ink" : "text-sm text-moss"}`}>{value || "-"}</p>
     </div>
   );
+}
+
+function toolPresentation(toolCall: ToolCall) {
+  if (toolCall.toolName === "calculateEncounterDifficulty") {
+    return {
+      eyebrow: "Encounter Balance",
+      title: "Difficulty Check",
+      description: "Estimated how much pressure this fight puts on the party."
+    };
+  }
+  if (toolCall.toolName === "searchRules") {
+    return {
+      eyebrow: "Rules Checked",
+      title: "Rules Reference",
+      description: "Looked up rule text so the answer stays grounded."
+    };
+  }
+  if (toolCall.toolName === "searchHomebrew") {
+    return {
+      eyebrow: "Homebrew Checked",
+      title: "Homebrew Reference",
+      description: "Looked up enabled homebrew context separately from official rules."
+    };
+  }
+  if (toolCall.toolName === "searchCampaignMemory") {
+    return {
+      eyebrow: "Campaign Memory",
+      title: "Story Context",
+      description: "Checked saved campaign notes for names, hooks, and unresolved threads."
+    };
+  }
+  if (toolCall.toolName === "rollDice") {
+    return {
+      eyebrow: "Dice",
+      title: "Roll Result",
+      description: "Resolved a dice expression for immediate table use."
+    };
+  }
+  if (toolCall.toolName === "generateInitiativeOrder") {
+    return {
+      eyebrow: "Initiative",
+      title: "Turn Order",
+      description: "Sorted combatants into a ready-to-run order."
+    };
+  }
+  return {
+    eyebrow: "Assistant Check",
+    title: splitCamelCase(toolCall.toolName),
+    description: "Extra work DNDMind used to prepare this answer."
+  };
+}
+
+function encounterDifficultyAdvice(difficulty: string) {
+  const normalized = difficulty.toLowerCase();
+  if (normalized.includes("easy")) {
+    return "Good as a warm-up, clue delivery scene, or resource-light obstacle before the real pressure lands.";
+  }
+  if (normalized.includes("medium")) {
+    return "Solid session pacing encounter: meaningful risk without likely overwhelming the party.";
+  }
+  if (normalized.includes("hard")) {
+    return "Use as a spotlight fight. Give the party clear stakes, terrain choices, or an escape route.";
+  }
+  if (normalized.includes("deadly")) {
+    return "High-risk scene. Telegraph danger clearly and consider an objective other than defeating every enemy.";
+  }
+  return "Use this as a pacing signal, then tune for your table's actual resources and player choices.";
 }
 
 function KeyValue({ value }: { value: unknown }) {
@@ -2010,13 +2264,42 @@ function fieldChange(label: string, before: unknown, after: unknown) {
 
 function citationLabel(citation: Citation) {
   const haystack = `${citation.source ?? ""} ${citation.title ?? ""} ${citation.heading ?? ""}`.toLowerCase();
+  if (haystack.includes("homebrew")) {
+    return "Homebrew Reference";
+  }
   if (haystack.includes("rule") || haystack.includes("srd")) {
-    return "Rules Used";
+    return "Rule Reference";
   }
   if (haystack.includes("memory") || haystack.includes("session") || haystack.includes("blackwater") || haystack.includes("captain")) {
-    return "Memory Used";
+    return "Session Memory";
   }
-  return "Source Used";
+  return "Campaign Source";
+}
+
+function formatSourceType(sourceType: string) {
+  if (sourceType === "srd") {
+    return "SRD";
+  }
+  return splitCamelCase(sourceType || "rules");
+}
+
+function formatDocumentStatus(status: unknown) {
+  if (status === "ingested") {
+    return "ready to use";
+  }
+  if (status === "uploaded") {
+    return "adding";
+  }
+  return "ready";
+}
+
+function splitCamelCase(value: string) {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^./, (letter) => letter.toUpperCase());
 }
 
 function object(value: unknown): Record<string, unknown> {
