@@ -127,6 +127,7 @@ Open:
 | `IMAGE_GENERATION_ENABLED=false` | Keeps NPC and encounter image generation disabled by default. Disabled mode returns deterministic mock placeholder metadata. |
 | `IMAGE_PROVIDER` | Image provider for structured card visuals; use `mock`, `gemini`, or `vertex`. |
 | `IMAGE_MODEL` | Gemini image generation model, defaulting to `gemini-2.5-flash-image`. |
+| `IMAGE_ASPECT_RATIO` | Image generation aspect ratio, defaulting to `4:3` for mobile-friendly structured cards. Supported values are `1:1`, `3:4`, `4:3`, `9:16`, and `16:9`. |
 | `VERTEX_PROJECT_ID` | Google Cloud project ID for `LLM_PROVIDER=vertex`. |
 | `VERTEX_LOCATION` | Vertex AI location, defaulting to `global`. |
 | `VERTEX_MODEL` | Vertex Gemini model, defaulting to `gemini-2.5-flash`. |
@@ -144,7 +145,7 @@ Open:
 
 To use Gemini API-key mode instead of mock responses, copy `.env.example` to `.env`, set `MOCK_LLM=false`, set `LLM_PROVIDER=gemini`, and put your key in `GEMINI_API_KEY`.
 
-To enable real Gemini image generation for NPC, character, and encounter structured cards, set `IMAGE_GENERATION_ENABLED=true` and choose either `IMAGE_PROVIDER=gemini` with `GEMINI_API_KEY`, or `IMAGE_PROVIDER=vertex` with `VERTEX_PROJECT_ID`, `VERTEX_LOCATION`, and ADC via `GOOGLE_APPLICATION_CREDENTIALS`. This does not change the main text/chat provider flow. Keep `IMAGE_PROVIDER=mock` or `IMAGE_GENERATION_ENABLED=false` for deterministic local placeholders.
+To enable real Gemini image generation for NPC, character, and encounter structured cards, set `IMAGE_GENERATION_ENABLED=true` and choose either `IMAGE_PROVIDER=gemini` with `GEMINI_API_KEY`, or `IMAGE_PROVIDER=vertex` with `VERTEX_PROJECT_ID`, `VERTEX_LOCATION`, and ADC via `GOOGLE_APPLICATION_CREDENTIALS`. This does not change the main text/chat provider flow. Keep `IMAGE_PROVIDER=mock` or `IMAGE_GENERATION_ENABLED=false` for deterministic local placeholders. `IMAGE_ASPECT_RATIO` falls back to `4:3` if an unsupported value is provided.
 
 To use Vertex AI Gemini through Application Default Credentials, set `MOCK_LLM=false`, `LLM_PROVIDER=vertex`, `VERTEX_PROJECT_ID=project-de842900-cb0b-4155-b9c`, `VERTEX_LOCATION=global`, and `VERTEX_MODEL=gemini-2.5-flash`. For local Docker usage, make ADC available inside the `ai-worker` container by mounting your gcloud ADC JSON file and setting `GOOGLE_APPLICATION_CREDENTIALS` to the mounted path, such as `/gcloud/application_default_credentials.json`. Keep `MOCK_EMBEDDINGS=true` for the first Vertex chat pass unless you intentionally wire a real embedding provider.
 

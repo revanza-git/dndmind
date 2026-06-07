@@ -87,6 +87,13 @@ const navigationItems = [
   { label: "Encounters", targetId: "encounters" },
   { label: "Session Prep", targetId: "session-prep" }
 ];
+type MobileWorkspaceTab = "command" | "campaign" | "notes";
+
+const mobileWorkspaceTabs: { id: MobileWorkspaceTab; label: string }[] = [
+  { id: "command", label: "Chat" },
+  { id: "campaign", label: "Campaign" },
+  { id: "notes", label: "Notes" }
+];
 const documentSourceTypes = [
   { value: "rules", label: "Rules" },
   { value: "homebrew", label: "Homebrew" }
@@ -156,6 +163,16 @@ function promptSuggestionModeFromHint(hintMode: string): PromptSuggestionMode {
     return normalized;
   }
   return "auto";
+}
+
+function mobileWorkspaceTabForNavigationItem(item: (typeof navigationItems)[number]): MobileWorkspaceTab {
+  if (item.targetId === "command-center") {
+    return "command";
+  }
+  if (item.targetId === "rules-library") {
+    return "campaign";
+  }
+  return "notes";
 }
 
 type ChatMessage = {
@@ -275,6 +292,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [lastFailedChatRequest, setLastFailedChatRequest] = useState<FailedChatRequest | null>(null);
   const [activeNavigationItem, setActiveNavigationItem] = useState("Command");
+  const [activeMobileWorkspaceTab, setActiveMobileWorkspaceTab] = useState<MobileWorkspaceTab>("command");
   const timelineEndRef = useRef<HTMLDivElement | null>(null);
 
   const activeCampaign = useMemo(
@@ -329,6 +347,7 @@ export default function Home() {
   useEffect(() => {
     if (!campaignId) {
       if (hasLoadedCampaigns) {
+        resetCampaignChatState();
         setParty([]);
         setPartyEvents([]);
         setDocuments([]);
@@ -411,12 +430,19 @@ export default function Home() {
     };
   }
 
+  function resetCampaignChatState() {
+    setMessages([]);
+    setConversationId(null);
+    setLastResponse(null);
+    setLastFailedChatRequest(null);
+    setActionStatus(null);
+  }
+
   function handleCampaignSelect(nextCampaignId: string) {
     setCampaignId(nextCampaignId);
     setCampaignFormMode(null);
     setCampaignForm(campaignFormFrom(campaigns.find((campaign) => campaign.id === nextCampaignId) ?? null));
-    setConversationId(null);
-    setLastResponse(null);
+    resetCampaignChatState();
   }
 
   function handleNewCampaign() {
@@ -490,8 +516,7 @@ export default function Home() {
       setCampaignFormMode(null);
       setCampaignForm(campaignFormFrom(saved));
       if (campaignFormMode === "new") {
-        setConversationId(null);
-        setLastResponse(null);
+        resetCampaignChatState();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "DNDMind could not save that campaign. Please try again.");
@@ -522,8 +547,7 @@ export default function Home() {
       setCampaignId(nextCampaign?.id ?? "");
       setCampaignFormMode(null);
       setCampaignForm(campaignFormFrom(nextCampaign));
-      setConversationId(null);
-      setLastResponse(null);
+      resetCampaignChatState();
     } catch (err) {
       setError(err instanceof Error ? err.message : "DNDMind could not archive that campaign. Please try again.");
     } finally {
@@ -541,8 +565,7 @@ export default function Home() {
       setCampaignId(restoredCampaign.id);
       setCampaignFormMode(null);
       setCampaignForm(campaignFormFrom(restoredCampaign));
-      setConversationId(null);
-      setLastResponse(null);
+      resetCampaignChatState();
     } catch (err) {
       setError(err instanceof Error ? err.message : "DNDMind could not restore that campaign. Please try again.");
     } finally {
@@ -748,7 +771,10 @@ export default function Home() {
 
   function handleNavigationClick(item: (typeof navigationItems)[number]) {
     setActiveNavigationItem(item.label);
-    document.getElementById(item.targetId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setActiveMobileWorkspaceTab(mobileWorkspaceTabForNavigationItem(item));
+    window.setTimeout(() => {
+      document.getElementById(item.targetId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
     if (item.label === "Evaluations") {
       setInput("Run the sample eval suite for rules, memory, tools, and structured output.");
     }
@@ -1469,9 +1495,33 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-parchment text-ink lg:h-screen lg:overflow-hidden">
-      <div className="grid min-h-screen grid-cols-1 lg:h-screen lg:min-h-0 lg:grid-cols-[270px_minmax(0,1fr)_350px] lg:overflow-hidden">
-        <aside className="border-b border-white/10 bg-moss px-5 py-5 text-white shadow-2xl shadow-moss/20 lg:h-screen lg:overflow-y-auto lg:border-b-0 lg:border-r">
+    <main className="min-h-screen bg-parchment text-ink xl:h-screen xl:overflow-hidden">
+      <nav
+        className="sticky top-0 z-40 border-b border-moss/15 bg-parchment/95 px-3 py-2 shadow-sm backdrop-blur xl:hidden"
+        aria-label="Mobile workspace"
+      >
+        <div className="grid grid-cols-3 gap-2 rounded-md border border-moss/15 bg-white p-1">
+          {mobileWorkspaceTabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveMobileWorkspaceTab(tab.id)}
+              aria-pressed={activeMobileWorkspaceTab === tab.id}
+              className={`rounded px-3 py-2 text-sm font-semibold transition ${
+                activeMobileWorkspaceTab === tab.id ? "bg-ink text-white shadow-sm" : "text-moss hover:bg-parchment"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </nav>
+      <div className="grid min-h-[calc(100dvh-4rem)] grid-cols-1 xl:h-screen xl:min-h-0 xl:grid-cols-[270px_minmax(0,1fr)_350px] xl:overflow-hidden">
+        <aside
+          className={`border-b border-white/10 bg-moss px-5 py-5 text-white shadow-2xl shadow-moss/20 xl:block xl:h-screen xl:overflow-y-auto xl:border-b-0 xl:border-r ${
+            activeMobileWorkspaceTab === "campaign" ? "block" : "hidden"
+          }`}
+        >
           <div className="mb-7">
             <div className="flex items-center gap-3">
               <D20MindSparkLogo />
@@ -1769,16 +1819,35 @@ export default function Home() {
           </div>
         </aside>
 
-        <section id="command-center" className="flex min-h-[80vh] scroll-mt-4 flex-col lg:h-screen lg:min-h-0 lg:overflow-hidden">
-          <header className="border-b border-moss/15 bg-white/80 px-5 py-3 shadow-sm backdrop-blur">
+        <section
+          id="command-center"
+          className={`h-[calc(100dvh-4rem)] scroll-mt-16 flex-col xl:flex xl:h-screen xl:min-h-0 xl:scroll-mt-4 xl:overflow-hidden ${
+            activeMobileWorkspaceTab === "command" ? "flex" : "hidden"
+          }`}
+        >
+          <header className="shrink-0 border-b border-moss/15 bg-white/80 px-4 py-3 shadow-sm backdrop-blur xl:px-5">
             <div className="flex flex-col gap-2 xl:flex-row xl:items-end xl:justify-between">
               <div>
-                <p className="text-sm font-medium text-copper">Active campaign</p>
-                <h2 className="text-2xl font-semibold leading-tight">{activeCampaign?.name ?? (hasLoadedCampaigns ? "No active campaign" : "Loading campaign...")}</h2>
-                <p className="mt-1 max-w-4xl overflow-hidden text-sm leading-6 text-moss/75 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-copper xl:text-sm xl:font-medium xl:normal-case xl:tracking-normal">
+                    Active campaign
+                  </p>
+                  <span className="hidden text-moss/30 xl:inline">/</span>
+                  <span className="rounded-full bg-parchment px-2 py-0.5 text-xs font-semibold text-moss xl:hidden">
+                    {modeLabels[mode] ?? mode}
+                  </span>
+                </div>
+                <h2 className="mt-1 truncate text-xl font-semibold leading-tight xl:text-2xl">{activeCampaign?.name ?? (hasLoadedCampaigns ? "No active campaign" : "Loading campaign...")}</h2>
+                <p className="mt-1 hidden max-w-4xl overflow-hidden text-sm leading-6 text-moss/75 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] xl:block">
                   {activeCampaign?.description ?? (hasLoadedCampaigns ? "Create or restore a campaign to continue." : "Campaign context will appear here.")}
                 </p>
-                <div className="mt-3 grid max-w-3xl grid-cols-2 gap-2 md:grid-cols-4">
+                <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-moss/75 xl:hidden">
+                  <span>{party.length} PCs</span>
+                  <span>{documents.reduce((sum, item) => sum + item.chunkCount, 0)} notes</span>
+                  <span>{memory.npcs.length + memory.quests.length + memory.locations.length + memory.encounters.length} memory</span>
+                  <span>{prepSummary.openHooks.length} hooks</span>
+                </div>
+                <div className="mt-3 hidden max-w-3xl grid-cols-2 gap-2 xl:grid xl:grid-cols-4">
                   <StatusMetric label="Party" value={`${party.length} PCs`} />
                   <StatusMetric label="Knowledge" value={`${documents.reduce((sum, item) => sum + item.chunkCount, 0)} notes`} />
                   <StatusMetric label="Memory" value={`${memory.npcs.length + memory.quests.length + memory.locations.length + memory.encounters.length} items`} />
@@ -1786,7 +1855,7 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="flex flex-col gap-2 xl:w-[25rem] xl:items-end">
+              <div className="hidden flex-col gap-2 xl:flex xl:w-[25rem] xl:items-end">
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-moss/60">Task hints</p>
                 <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-4">
                   {modes.map((item) => (
@@ -1813,7 +1882,57 @@ export default function Home() {
             </div>
           </header>
 
-          <div className="border-b border-moss/15 bg-white px-5 py-2">
+          <details className="shrink-0 border-b border-moss/15 bg-white px-4 py-2 xl:hidden">
+            <summary className="cursor-pointer text-sm font-semibold text-moss marker:text-copper">Modes and context</summary>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              {modes.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  aria-pressed={mode === item}
+                  onClick={() => setMode(item)}
+                  className={`rounded-md border px-2.5 py-2 text-sm font-semibold shadow-sm transition ${
+                    mode === item
+                      ? item === "Auto"
+                        ? "border-ink bg-ink text-white shadow-ink/20 ring-2 ring-ink/15"
+                        : "border-copper bg-copper text-white shadow-copper/20 ring-2 ring-copper/20"
+                      : item === "Auto"
+                        ? "border-copper/40 bg-copper/10 text-ink hover:border-copper/70 hover:bg-copper/15"
+                        : "border-moss/20 bg-white text-moss hover:border-copper/60 hover:bg-parchment/60"
+                  }`}
+                >
+                  {modeLabels[item] ?? item}
+                </button>
+              ))}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {[
+                ["useRules", "Rules"],
+                ["useCampaignMemory", "Campaign Memory"],
+                ["usePartyInfo", "Party Info"],
+                ["useHomebrew", "Homebrew"]
+              ].map(([key, label]) => (
+                <label
+                  key={key}
+                  className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition ${
+                    context[key as keyof ChatContext]
+                      ? "border-copper/30 bg-copper/10 text-ink"
+                      : "border-moss/15 bg-parchment/50 text-moss/70"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={context[key as keyof ChatContext]}
+                    onChange={() => toggleContext(key as keyof ChatContext)}
+                    className="h-4 w-4 rounded accent-copper"
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </details>
+
+          <div className="hidden border-b border-moss/15 bg-white px-5 py-2 xl:block">
             <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
               <div className="flex flex-wrap gap-3">
                 {[
@@ -1905,14 +2024,24 @@ export default function Home() {
             </div>
           )}
 
-          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-[radial-gradient(circle_at_top,_rgba(216,226,220,0.55),_transparent_36rem)] px-5 pb-6 pt-5">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-[radial-gradient(circle_at_top,_rgba(216,226,220,0.55),_transparent_36rem)] px-4 pb-4 pt-3 xl:space-y-5 xl:px-5 xl:pb-6 xl:pt-5">
             {messages.length === 0 && (
-              <EmptyChatState
-                onPrompt={handleQuickPrompt}
-                onPromptSuggestion={handleQuickPromptSuggestion}
-                isGeneratingPromptSuggestion={isGeneratingPromptSuggestion}
-                onPreparedScene={handleLoadPreparedScene}
-              />
+              <>
+                <MobileEmptyChatState
+                  onPrompt={handleQuickPrompt}
+                  isGeneratingPromptSuggestion={isGeneratingPromptSuggestion}
+                  onPromptSuggestion={handlePromptSuggestion}
+                  onPreparedScene={handleLoadPreparedScene}
+                />
+                <div className="hidden xl:block">
+                  <EmptyChatState
+                    onPrompt={handleQuickPrompt}
+                    onPromptSuggestion={handleQuickPromptSuggestion}
+                    isGeneratingPromptSuggestion={isGeneratingPromptSuggestion}
+                    onPreparedScene={handleLoadPreparedScene}
+                  />
+                </div>
+              </>
             )}
             {messages.map((message, index) => (
               <ChatTimelineCard
@@ -1962,10 +2091,10 @@ export default function Home() {
             <div ref={timelineEndRef} />
           </div>
 
-          <form onSubmit={handleSubmit} className="shrink-0 border-t border-moss/15 bg-white/95 p-2 shadow-2xl shadow-moss/10">
+          <form onSubmit={handleSubmit} className="sticky bottom-0 z-30 shrink-0 border-t border-moss/15 bg-white/95 p-1.5 shadow-2xl shadow-moss/10 xl:static xl:p-2">
             <div className="rounded-md border border-moss/15 bg-ink p-2 shadow-inner">
               <div className="mb-1 flex flex-col gap-1 px-1 sm:flex-row sm:items-center sm:justify-between">
-                <span className="text-xs font-semibold uppercase tracking-[0.18em] text-mist/70">Command Console</span>
+                <span className="hidden text-xs font-semibold uppercase tracking-[0.18em] text-mist/70 sm:inline">Command Console</span>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="rounded-full bg-copper/20 px-2 py-0.5 text-xs font-semibold text-mist">{modeLabels[mode] ?? mode} hint</span>
                   <button
@@ -1986,7 +2115,7 @@ export default function Home() {
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 rows={2}
-                className="min-h-16 flex-1 resize-none rounded-md border border-white/10 bg-white px-3 py-2 text-sm leading-6 text-ink shadow-inner placeholder:text-moss/50"
+                className="min-h-12 flex-1 resize-none rounded-md border border-white/10 bg-white px-3 py-2 text-sm leading-6 text-ink shadow-inner placeholder:text-moss/50 sm:min-h-16"
                 placeholder="Ask for a ruling, NPC, character, combat beat, campaign recap, session summary, or scene setup..."
               />
               <button
@@ -2001,7 +2130,11 @@ export default function Home() {
           </form>
         </section>
 
-        <aside className="border-t border-moss/15 bg-white px-5 py-5 lg:h-screen lg:overflow-y-auto lg:border-l lg:border-t-0">
+        <aside
+          className={`border-t border-moss/15 bg-white px-5 py-5 xl:block xl:h-screen xl:overflow-y-auto xl:border-l xl:border-t-0 ${
+            activeMobileWorkspaceTab === "notes" ? "block" : "hidden"
+          }`}
+        >
           <section id="encounters" className="scroll-mt-4">
             <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-copper">Saved Encounters</h2>
             <SavedEncountersSection
@@ -2025,7 +2158,7 @@ export default function Home() {
                   }`}
                   inputMode="text"
                   maxLength={12}
-                  pattern="[0-9]{1,2}[dD][0-9]{1,4}([+-][0-9]{1,4})?"
+                  pattern="[0-9]{1,2}[dD][0-9]{1,4}(([+]|-)[0-9]{1,4})?"
                   aria-invalid={Boolean(diceExpressionError)}
                   aria-describedby="dice-format-help"
                   placeholder="1d20+5"
@@ -2786,6 +2919,53 @@ function EmptyChatState({
             Load Prepared Scene
           </button>
         </div>
+      </div>
+    </section>
+  );
+}
+
+function MobileEmptyChatState({
+  onPrompt,
+  onPromptSuggestion,
+  isGeneratingPromptSuggestion,
+  onPreparedScene
+}: {
+  onPrompt: (prompt: (typeof quickPrompts)[number]) => void;
+  onPromptSuggestion: () => void;
+  isGeneratingPromptSuggestion: boolean;
+  onPreparedScene: () => void;
+}) {
+  return (
+    <section className="rounded-md border border-moss/15 bg-white/90 p-3 shadow-sm xl:hidden">
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-copper">Ready</p>
+      <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+        {quickPrompts.slice(0, 4).map((prompt) => (
+          <button
+            key={prompt.label}
+            type="button"
+            onClick={() => onPrompt(prompt)}
+            className="shrink-0 rounded-md border border-moss/15 bg-parchment px-3 py-2 text-sm font-semibold text-ink"
+          >
+            {prompt.label}
+          </button>
+        ))}
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={onPromptSuggestion}
+          disabled={isGeneratingPromptSuggestion}
+          className="rounded-md border border-copper/30 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-copper disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isGeneratingPromptSuggestion ? "Sparking" : "Spark Prompt"}
+        </button>
+        <button
+          type="button"
+          onClick={onPreparedScene}
+          className="rounded-md bg-copper px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-white"
+        >
+          Prepared Scene
+        </button>
       </div>
     </section>
   );

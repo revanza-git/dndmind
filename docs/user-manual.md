@@ -9,7 +9,7 @@ This guide is written for people using the app, not for people setting it up. Yo
 Use this short checklist the first time you open DNDMind.
 
 1. Open the app in your browser.
-2. Choose a campaign from the left sidebar.
+2. Choose a campaign from the Campaign area. On phones, use the **Campaign** tab.
 3. If there are no active campaigns, click **New** or restore one from **Archived**.
 4. Check the party list on the right.
 5. Add rules, lore, NPC notes, or session notes in **Campaign Knowledge** if you want DNDMind to use them.
@@ -51,14 +51,14 @@ Expected result: DNDMind creates a party-aware encounter and saves it as campaig
 
 | Area | What it is for |
 | --- | --- |
-| Left Sidebar | Choose, create, edit, archive, or restore campaigns. Open Campaign Knowledge and the user manual. |
-| Center Workspace | Read chat answers, citations, tool results, generated cards, and save actions. |
+| Campaign Area | Choose, create, edit, archive, or restore campaigns. Open Campaign Knowledge and the user manual. On wide screens this is the left sidebar; on phones it is the **Campaign** tab. |
+| Chat Workspace | Read chat answers, citations, tool results, generated cards, and save actions. On phones this is the **Chat** tab. |
 | Top Summary Cards | See quick counts for party members, knowledge notes, memory items, and open hooks. |
 | Task Modes | Tell DNDMind what kind of work the next request needs. |
 | Context Toggles | Choose which saved information DNDMind may use for the next answer. |
 | Command Console | Type your request, send it, or clear the current chat. |
 | Spark | Drafts a prompt for the selected task mode using the current campaign context. |
-| Right Panel | Manage dice, session notes, party details, citations, tool traces, and campaign memory. |
+| Notes Area | Manage dice, session notes, party details, citations, tool traces, and campaign memory. On wide screens this is the right panel; on phones it is the **Notes** tab. |
 
 ## Campaigns
 
@@ -397,7 +397,7 @@ Likely cause: **Party Info** is off, or party details are missing.
 Try this:
 
 1. Turn **Party Info** on.
-2. Add each character's level, HP, AC, class, race, and notes.
+2. Add each character's level, HP, AC, class, race, and notes. On phones, party details are in the **Notes** tab.
 3. Ask again in **Encounter** mode.
 
 ### My upload will not add

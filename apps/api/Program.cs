@@ -1271,7 +1271,7 @@ app.MapDelete("/api/documents/{documentId:guid}", async (Guid documentId, Npgsql
     return deleted > 0 ? Results.NoContent() : Results.NotFound(new { error = "Document not found." });
 });
 
-app.MapPost("/api/chat", async (ChatRequest request, NpgsqlDataSource db, IHttpClientFactory httpClientFactory, ICurrentClientService currentClient) =>
+app.MapPost("/api/chat", async (ChatRequest request, NpgsqlDataSource db, IHttpClientFactory httpClientFactory, ICurrentClientService currentClient, HttpContext httpContext) =>
 {
     if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
     {
@@ -1287,6 +1287,11 @@ app.MapPost("/api/chat", async (ChatRequest request, NpgsqlDataSource db, IHttpC
     if (campaign is null)
     {
         return Results.NotFound(new { error = "Campaign not found." });
+    }
+
+    if (request.ConversationId is Guid requestedConversationId && !await ConversationBelongsToCampaign(requestedConversationId, request.CampaignId, db))
+    {
+        return Results.BadRequest(new { error = "conversationId must belong to this campaign." });
     }
 
     await EnsureDemoClientSeed(db, request.CampaignId, clientOwnerId, demoCampaignId, DemoClientOwnerId);
@@ -1318,15 +1323,31 @@ app.MapPost("/api/chat", async (ChatRequest request, NpgsqlDataSource db, IHttpC
         party,
         session);
 
+    var requestAborted = httpContext.RequestAborted;
     var client = httpClientFactory.CreateClient("ai-worker");
-    var workerResponse = await client.PostAsJsonAsync("/ai/chat", workerRequest);
+    HttpResponseMessage workerResponse;
+    try
+    {
+        workerResponse = await client.PostAsJsonAsync("/ai/chat", workerRequest, requestAborted);
+    }
+    catch (OperationCanceledException) when (requestAborted.IsCancellationRequested)
+    {
+        return Results.StatusCode(499);
+    }
+    catch (OperationCanceledException)
+    {
+        return Results.Problem(
+            "DNDMind is still waiting on the AI worker. Please try again in a moment, or restart the API and worker if Vertex is stuck.",
+            statusCode: StatusCodes.Status504GatewayTimeout);
+    }
+
     if (!workerResponse.IsSuccessStatusCode)
     {
-        var error = await workerResponse.Content.ReadAsStringAsync();
+        var error = await workerResponse.Content.ReadAsStringAsync(requestAborted);
         return Results.Problem(FriendlyWorkerError("AI request failed", error), statusCode: 502);
     }
 
-    var chatResponse = await workerResponse.Content.ReadFromJsonAsync<ChatResponse>();
+    var chatResponse = await workerResponse.Content.ReadFromJsonAsync<ChatResponse>(cancellationToken: requestAborted);
     if (chatResponse is null)
     {
         return Results.Problem("DNDMind could not get an AI response just now. Please try again in a moment.", statusCode: 502);
@@ -1535,6 +1556,16 @@ app.MapPost("/api/tools/execute", async (ToolExecuteRequest request, NpgsqlDataS
         return Results.NotFound(new { error = "Campaign not found." });
     }
 
+    var conversationScopeValidated = false;
+    if (request.ConversationId is Guid toolConversationId && request.CampaignId is Guid toolConversationCampaignId)
+    {
+        if (!await ConversationBelongsToCampaign(toolConversationId, toolConversationCampaignId, db))
+        {
+            return Results.BadRequest(new { error = "conversationId must belong to this campaign." });
+        }
+        conversationScopeValidated = true;
+    }
+
     var client = httpClientFactory.CreateClient("ai-worker");
     var workerResponse = await client.PostAsJsonAsync("/ai/tools/execute", new AiWorkerToolExecuteRequest(
         request.CampaignId,
@@ -1554,7 +1585,7 @@ app.MapPost("/api/tools/execute", async (ToolExecuteRequest request, NpgsqlDataS
         return Results.Problem("DNDMind could not complete that action just now. Please try again in a moment.", statusCode: 502);
     }
 
-    if (request.ConversationId is not null)
+    if (request.ConversationId is not null && conversationScopeValidated)
     {
         await StoreToolCall(request.ConversationId.Value, toolResponse.ToolName, toolResponse.Arguments, toolResponse.Result, toolResponse.Success, toolResponse.Error, db);
     }
@@ -2995,9 +3026,12 @@ static string FriendlyWorkerError(string prefix, string workerError)
         return "The AI is busy right now and could not finish. Please try again in a moment.";
     }
 
-    if (lower.Contains("api key") || lower.Contains("api_key"))
+    if (lower.Contains("api key")
+        || lower.Contains("api_key")
+        || lower.Contains("ai service is not connected")
+        || lower.Contains("vertex ai is not connected"))
     {
-        return "The AI service is not connected correctly. Ask the app admin to check the setup.";
+        return detail;
     }
 
     if (lower.Contains("rate-limit") || lower.Contains("rate limit") || lower.Contains("quota"))

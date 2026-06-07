@@ -74,7 +74,19 @@ class ImageGenerationTests(unittest.TestCase):
 
         self.assertEqual(payload["contents"][0]["parts"][0]["text"], "Draw the scene.")
         self.assertEqual(payload["generationConfig"]["responseModalities"], ["TEXT", "IMAGE"])
+        self.assertEqual(payload["generationConfig"]["imageConfig"]["aspectRatio"], "4:3")
+
+    def test_image_payload_uses_supported_configured_aspect_ratio(self):
+        with patch.dict("os.environ", {"IMAGE_ASPECT_RATIO": "16:9"}, clear=True):
+            payload = image_generation._image_generate_content_payload("Draw the scene.")
+
         self.assertEqual(payload["generationConfig"]["imageConfig"]["aspectRatio"], "16:9")
+
+    def test_image_payload_falls_back_for_unsupported_aspect_ratio(self):
+        with patch.dict("os.environ", {"IMAGE_ASPECT_RATIO": "2:1"}, clear=True):
+            payload = image_generation._image_generate_content_payload("Draw the scene.")
+
+        self.assertEqual(payload["generationConfig"]["imageConfig"]["aspectRatio"], "4:3")
 
     def test_npc_prompt_omits_hidden_secret_and_sets_portrait_direction(self):
         prompt = image_generation.build_image_prompt(
@@ -115,6 +127,7 @@ class ImageGenerationTests(unittest.TestCase):
         self.assertIn("3 Bandit", prompt)
         self.assertNotIn("sepia etching", prompt)
         self.assertIn("cinematic fantasy concept art", prompt)
+        self.assertIn("pulled-back, centered composition", prompt)
         self.assertIn("No readable text", prompt)
 
     def test_character_prompt_includes_playable_character_details_without_secret(self):

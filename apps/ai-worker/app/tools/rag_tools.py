@@ -23,8 +23,9 @@ def search_homebrew_tool(arguments: dict[str, Any], context: dict[str, Any] | No
 
 def search_campaign_memory_tool(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
     query = str(arguments.get("query") or "").strip()
-    campaign_id = arguments.get("campaignId") or (context or {}).get("campaignId")
-    client_owner_id = arguments.get("clientOwnerId") or (context or {}).get("clientOwnerId")
+    trusted_context = context or {}
+    campaign_id = trusted_context.get("campaignId")
+    client_owner_id = trusted_context.get("clientOwnerId")
     if not query:
         raise ValueError("query is required.")
     if not campaign_id:

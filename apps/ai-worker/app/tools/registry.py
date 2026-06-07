@@ -74,7 +74,7 @@ TOOLS: dict[str, ToolDefinition] = {
     "searchCampaignMemory": ToolDefinition(
         name="searchCampaignMemory",
         description="Search campaign memory chunks for the active campaign.",
-        parameters={"type": "object", "properties": {"query": {"type": "string"}, "campaignId": {"type": "string"}}, "required": ["query"]},
+        parameters={"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["query"]},
         handler=search_campaign_memory_tool,
     ),
     "saveNPC": ToolDefinition(

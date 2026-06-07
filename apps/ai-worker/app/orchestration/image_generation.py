@@ -23,8 +23,12 @@ IMAGE_STYLE_PRESETS = {
 
 SAFE_IMAGE_PROMPT_SUFFIX = (
     "Original fantasy art only. Do not reference copyrighted characters, logos, living artists, or imitation style names. "
+    "Keep all important characters, creatures, weapons, faces, and scene clues fully inside the frame with comfortable edge margins. "
+    "Use a pulled-back, centered composition with no subject touching the image edge and no cropped-off subjects. "
     "No readable text, no watermark, no UI, no gore."
 )
+
+SUPPORTED_IMAGE_ASPECT_RATIOS = {"1:1", "3:4", "4:3", "9:16", "16:9"}
 
 
 def image_generation_enabled() -> bool:
@@ -37,6 +41,11 @@ def image_provider() -> str:
 
 def image_model_name() -> str:
     return str(os.getenv("IMAGE_MODEL", "gemini-2.5-flash-image")).strip() or "gemini-2.5-flash-image"
+
+
+def image_aspect_ratio() -> str:
+    ratio = str(os.getenv("IMAGE_ASPECT_RATIO", "4:3")).strip()
+    return ratio if ratio in SUPPORTED_IMAGE_ASPECT_RATIOS else "4:3"
 
 
 def generate_image(request: Any) -> dict[str, Any]:
@@ -128,18 +137,7 @@ def _generate_gemini_image(prompt: str) -> str:
     model = image_model_name()
     model_path = model if model.startswith("models/") else f"models/{model}"
     url = f"https://generativelanguage.googleapis.com/v1beta/{model_path}:generateContent"
-    payload = {
-        "contents": [
-            {
-                "role": "user",
-                "parts": [{"text": prompt}],
-            }
-        ],
-        "generationConfig": {
-            "responseModalities": ["TEXT", "IMAGE"],
-            "imageConfig": {"aspectRatio": "16:9"},
-        },
-    }
+    payload = _image_generate_content_payload(prompt)
 
     try:
         response = httpx.post(
@@ -196,7 +194,7 @@ def _image_generate_content_payload(prompt: str) -> dict[str, Any]:
         ],
         "generationConfig": {
             "responseModalities": ["TEXT", "IMAGE"],
-            "imageConfig": {"aspectRatio": "16:9"},
+            "imageConfig": {"aspectRatio": image_aspect_ratio()},
         },
     }
 

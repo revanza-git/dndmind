@@ -296,10 +296,10 @@ function StructuredImagePanel({
   return (
     <div className="mt-4 overflow-hidden rounded-lg border border-moss/15 bg-ink">
       <div className="grid gap-0 md:grid-cols-[minmax(0,1fr)_17rem]">
-        <div className="flex aspect-video min-h-52 items-center justify-center bg-[radial-gradient(circle_at_35%_30%,_rgba(216,226,220,0.22),_transparent_18rem)]">
+        <div className="flex aspect-[4/3] w-full items-center justify-center bg-[radial-gradient(circle_at_35%_30%,_rgba(216,226,220,0.22),_transparent_18rem)]">
           {imageSrc ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={imageSrc} alt={`${outputType} generated visual`} className="h-full w-full object-cover" />
+            <img src={imageSrc} alt={`${outputType} generated visual`} className="h-full w-full object-contain" />
           ) : (
             <div className="px-5 text-center">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-mist/65">{imagePanelLabel(outputType)}</p>

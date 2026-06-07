@@ -57,7 +57,12 @@ def _search_chunks(
           )
           AND (
             kc.source_type <> 'campaign_memory'
-            OR kc.metadata->>'clientOwnerId' = %(client_owner_id)s
+            OR (
+              kc.campaign_id = %(campaign_id)s::uuid
+              AND kd.campaign_id = %(campaign_id)s::uuid
+              AND kc.metadata->>'clientOwnerId' = %(client_owner_id)s
+              AND kd.metadata->>'clientOwnerId' = %(client_owner_id)s
+            )
           )
         ORDER BY kc.embedding <=> %(embedding)s::vector
         LIMIT %(limit)s

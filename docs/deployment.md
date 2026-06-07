@@ -61,6 +61,7 @@ Image generation variables:
 - `IMAGE_GENERATION_ENABLED=false`
 - `IMAGE_PROVIDER=mock`, `gemini`, or `vertex`
 - `IMAGE_MODEL=gemini-2.5-flash-image`
+- `IMAGE_ASPECT_RATIO=4:3` with supported values `1:1`, `3:4`, `4:3`, `9:16`, and `16:9`
 - `IMAGE_TIMEOUT_SECONDS=60`
 
 Provider variables for Vertex AI Gemini mode:
@@ -75,7 +76,7 @@ Provider variables for Vertex AI Gemini mode:
 
 For local Docker Compose with Vertex, Application Default Credentials must be available inside the `ai-worker` container. One common setup is to mount the local gcloud ADC file into the container and set `GOOGLE_APPLICATION_CREDENTIALS=/gcloud/application_default_credentials.json`. Keep `MOCK_EMBEDDINGS=true` for the first Vertex chat pass unless you are intentionally configuring a real embedding provider.
 
-Real structured-card image generation is optional. Keep `IMAGE_GENERATION_ENABLED=false` for deterministic local placeholders. To turn it on, set `IMAGE_GENERATION_ENABLED=true` and choose `IMAGE_PROVIDER=gemini` with `GEMINI_API_KEY`, or `IMAGE_PROVIDER=vertex` with Vertex project, location, and ADC settings.
+Real structured-card image generation is optional. Keep `IMAGE_GENERATION_ENABLED=false` for deterministic local placeholders. To turn it on, set `IMAGE_GENERATION_ENABLED=true` and choose `IMAGE_PROVIDER=gemini` with `GEMINI_API_KEY`, or `IMAGE_PROVIDER=vertex` with Vertex project, location, and ADC settings. Unsupported image aspect ratios fall back to `4:3`.
 
 Embedding provider variables if `MOCK_EMBEDDINGS=false`:
 

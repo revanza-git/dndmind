@@ -1,7 +1,9 @@
 import unittest
+from unittest.mock import patch
 
 from app.tools.dice import roll_dice
 from app.tools.encounters import calculate_encounter_difficulty
+from app.tools.rag_tools import search_campaign_memory_tool
 from app.tools.registry import get_tool
 from app.orchestration.tool_loop import execute_manual_tool
 
@@ -37,7 +39,24 @@ class ToolTests(unittest.TestCase):
         self.assertTrue(response["success"])
         self.assertEqual(response["toolName"], "rollDice")
 
+    def test_campaign_memory_search_uses_trusted_context_scope(self):
+        with patch("app.tools.rag_tools.search_memory", return_value=[]) as search_memory:
+            search_campaign_memory_tool(
+                {
+                    "query": "Captain Vey",
+                    "limit": 3,
+                    "campaignId": "argument-campaign",
+                    "clientOwnerId": "argument-owner",
+                },
+                {"campaignId": "context-campaign", "clientOwnerId": "context-owner"},
+            )
+
+        search_memory.assert_called_once_with("context-campaign", "Captain Vey", 3, "context-owner")
+
+    def test_campaign_memory_search_requires_context_scope(self):
+        with self.assertRaisesRegex(ValueError, "campaignId is required"):
+            search_campaign_memory_tool({"query": "Captain Vey", "campaignId": "argument-campaign"}, {})
+
 
 if __name__ == "__main__":
     unittest.main()
-

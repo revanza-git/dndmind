@@ -37,7 +37,7 @@ Real provider support is available behind explicit configuration. Chat currently
 - `apps/web/components/structured` owns structured card rendering and suggested-action controls.
 - `apps/ai-worker/main.py`, `apps/ai-worker/app/orchestration`, `apps/ai-worker/app/tools`, and `apps/ai-worker/rag` own mock/provider AI behavior, RAG, tools, structured outputs, citations, and retrieval.
 - Vertex AI chat mode depends on `google-auth`, `VERTEX_PROJECT_ID`, `VERTEX_LOCATION`, `VERTEX_MODEL`, and optional in-container `GOOGLE_APPLICATION_CREDENTIALS`; keep `.env.example`, `docker-compose.yml`, README, and deployment docs aligned when changing provider setup.
-- `apps/ai-worker/app/orchestration/image_generation.py` owns optional structured-card image generation for NPC, character, and encounter cards. Keep it mock-first and deterministic by default with `IMAGE_GENERATION_ENABLED=false` and `IMAGE_PROVIDER=mock`; real image providers require explicit opt-in through Gemini API-key or Vertex ADC configuration.
+- `apps/ai-worker/app/orchestration/image_generation.py` owns optional structured-card image generation for NPC, character, and encounter cards. Keep it mock-first and deterministic by default with `IMAGE_GENERATION_ENABLED=false` and `IMAGE_PROVIDER=mock`; real image providers require explicit opt-in through Gemini API-key or Vertex ADC configuration. Keep `IMAGE_ASPECT_RATIO` documented in `.env.example`, `docker-compose.yml`, README, and deployment docs when changing image framing behavior.
 
 ## Contract Hotspots
 
