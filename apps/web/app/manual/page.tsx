@@ -269,7 +269,6 @@ const steps: GuideStep[] = [
 const modes = [
   ["Auto", "Mixed tasks and session prep.", "Prepare tonight's opening scene based on last session."],
   ["Rules", "Rules questions that need citations.", "How does advantage work?"],
-  ["Story", "Narration, atmosphere, and scene framing.", "Describe the ruined temple entrance."],
   ["Encounter", "Combat and challenge design.", "Create a hard ambush for my level 3 party."],
   ["NPC", "Character creation and relationship hooks.", "Generate a suspicious tavern keeper."],
   ["Combat", "Dice, initiative, tactics, and table actions.", "Roll initiative for the party and goblins."],
@@ -702,7 +701,7 @@ export default function ManualPage() {
                 <div className="mt-5 grid gap-3 md:grid-cols-2">
                   <InfoCard title="Rules questions" detail="Use Rules mode with Rules on. Add Homebrew only when custom rules should affect the ruling." tone="definition" />
                   <InfoCard title="Encounter design" detail="Use Encounter mode with Campaign Memory and Party Info on." tone="definition" />
-                  <InfoCard title="NPC or story work" detail="Use NPC, Story, or Auto mode with Campaign Memory on when the answer should fit your campaign." tone="definition" />
+                  <InfoCard title="NPC or story work" detail="Use NPC or Auto mode with Campaign Memory on when the answer should fit your campaign." tone="definition" />
                   <InfoCard title="Pure brainstorming" detail="Use Auto with only the context you need so the answer stays flexible." tone="definition" />
                 </div>
               </ManualSection>

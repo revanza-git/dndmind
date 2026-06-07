@@ -12,6 +12,7 @@ import {
   PartyCharacter,
   PartyCharacterEvent,
   PartyCharacterInput,
+  PromptSuggestionMode,
   Session,
   StructuredOutput,
   SuggestedAction,
@@ -37,6 +38,7 @@ import {
   getPartyCharacterEvents,
   getRecentPartyEvents,
   getSessions,
+  generatePromptSuggestion,
   ingestDocument,
   saveEncounter,
   saveLocation,
@@ -55,13 +57,28 @@ import {
 import { getClientId, getClientLabel, resetClientId } from "../lib/clientIdentity";
 import { StructuredOutputRenderer } from "../components/structured/StructuredOutputRenderer";
 
-const modes = ["Auto", "Rules", "Story", "Encounter", "NPC", "Combat", "Summarize"];
+const modes = ["Auto", "Rules", "Encounter", "NPC", "Character", "Recap", "Summarize"];
+const modeLabels: Record<string, string> = {
+  Encounter: "Encounter"
+};
 const quickPrompts = [
-  { label: "Ask a rules question", mode: "Rules", prompt: "How does advantage work, and when should I ask for a check?" },
-  { label: "Generate an NPC", mode: "NPC", prompt: "Generate a memorable tavern informant tied to the party's current quest." },
-  { label: "Create an encounter", mode: "Encounter", prompt: "Create a tense but fair encounter for tonight's session." },
-  { label: "Summarize session", mode: "Summarize", prompt: "Summarize the current session notes and extract unresolved hooks." },
-  { label: "Search campaign memory", mode: "Auto", prompt: "Search campaign memory for unresolved hooks involving Captain Vey." }
+  { label: "Ask a rules question", mode: "Rules", suggestionMode: "rules", prompt: "How does advantage work, and when should I ask for a check?" },
+  { label: "Generate an NPC", mode: "NPC", suggestionMode: "npc", prompt: "Generate a memorable tavern informant tied to the party's current quest." },
+  {
+    label: "Generate a character",
+    mode: "Character",
+    suggestionMode: "character",
+    prompt: "Generate a level 3 adventurer tied to this campaign who could work as a backup PC, rival, or hireling."
+  },
+  { label: "Create an encounter", mode: "Encounter", suggestionMode: "encounter", prompt: "Create a tense but fair encounter for tonight's session." },
+  {
+    label: "Recap so far",
+    mode: "Recap",
+    suggestionMode: "recap",
+    prompt: "Narrate what has happened so far in this campaign as a table-ready recap. Use saved campaign memory first, include concrete names, places, quests, and unresolved hooks, and do not invent missing facts."
+  },
+  { label: "Summarize session", mode: "Summarize", suggestionMode: "summarize", prompt: "Summarize the current session notes and extract unresolved hooks." },
+  { label: "Search campaign memory", mode: "Auto", suggestionMode: "auto", prompt: "Search campaign memory for unresolved hooks involving Captain Vey." }
 ];
 const navigationItems = [
   { label: "Command", targetId: "command-center" },
@@ -130,6 +147,17 @@ function sessionDraftKey(clientId: string, campaignId: string, sessionId: string
   return `dndmind_draft_${clientId}_${campaignId}_${sessionId ?? "new"}`;
 }
 
+function promptSuggestionModeFromHint(hintMode: string): PromptSuggestionMode {
+  const normalized = hintMode.trim().toLowerCase();
+  if (normalized === "combat") {
+    return "encounter";
+  }
+  if (normalized === "rules" || normalized === "npc" || normalized === "character" || normalized === "encounter" || normalized === "recap" || normalized === "summarize") {
+    return normalized;
+  }
+  return "auto";
+}
+
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
@@ -150,6 +178,7 @@ type ResultEnhancements = {
 type ChatRequest = {
   campaignId: string;
   conversationId: string | null;
+  sessionId?: string | null;
   message: string;
   mode: string;
   context: ChatContext;
@@ -235,6 +264,8 @@ export default function Home() {
   const [isSavingSession, setIsSavingSession] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isGeneratingPromptSuggestion, setIsGeneratingPromptSuggestion] = useState(false);
+  const [promptSuggestionError, setPromptSuggestionError] = useState<string | null>(null);
   const [actionStatus, setActionStatus] = useState<string | null>(null);
   const [sessionSaveStatus, setSessionSaveStatus] = useState<string | null>(null);
   const [draftStatus, setDraftStatus] = useState<string | null>(null);
@@ -532,6 +563,7 @@ export default function Home() {
       const response = await sendChat({
         campaignId: request.campaignId,
         conversationId: request.conversationId,
+        sessionId: request.sessionId,
         message: request.message,
         mode: request.mode,
         context: request.context
@@ -572,9 +604,19 @@ export default function Home() {
       return;
     }
 
+    let chatSessionId = activeSessionId;
+    if (mode.toLowerCase() === "summarize" && (activeSessionId || sessionNotes.trim())) {
+      const saved = await handleSaveSession();
+      if (!saved) {
+        return;
+      }
+      chatSessionId = saved.id;
+    }
+
     const request: ChatRequest = {
       campaignId,
       conversationId,
+      sessionId: chatSessionId,
       message: input.trim(),
       mode,
       context: { ...context }
@@ -630,6 +672,43 @@ export default function Home() {
   function handleQuickPrompt(prompt: (typeof quickPrompts)[number]) {
     setMode(prompt.mode);
     setInput(prompt.prompt);
+    if (prompt.suggestionMode === "recap") {
+      setContext((current) => ({ ...current, useCampaignMemory: true }));
+    }
+    setPromptSuggestionError(null);
+  }
+
+  async function handlePromptSuggestion(selectedMode: PromptSuggestionMode = promptSuggestionModeFromHint(mode)) {
+    if (!campaignId || isGeneratingPromptSuggestion) {
+      return;
+    }
+
+    setIsGeneratingPromptSuggestion(true);
+    setPromptSuggestionError(null);
+
+    try {
+      const response = await generatePromptSuggestion({
+        campaignId,
+        sessionId: activeSessionId,
+        mode: selectedMode,
+        currentInput: input
+      });
+      if (response.prompt.trim()) {
+        setInput(response.prompt);
+      }
+    } catch (err) {
+      setPromptSuggestionError(err instanceof Error ? err.message : "DNDMind could not draft a prompt suggestion. Please try again.");
+    } finally {
+      setIsGeneratingPromptSuggestion(false);
+    }
+  }
+
+  async function handleQuickPromptSuggestion(prompt: (typeof quickPrompts)[number]) {
+    setMode(prompt.mode);
+    if (prompt.suggestionMode === "recap") {
+      setContext((current) => ({ ...current, useCampaignMemory: true }));
+    }
+    await handlePromptSuggestion(prompt.suggestionMode as PromptSuggestionMode);
   }
 
   function handleLoadPreparedScene() {
@@ -1111,6 +1190,10 @@ export default function Home() {
       } else if (action.action === "saveLocation") {
         await saveLocation(campaignId, action.payload);
         setActionStatus("Location saved");
+      } else if (action.action === "saveCharacter") {
+        await createPartyCharacter(campaignId, partyCharacterInputFromStructuredPayload(action.payload));
+        await refreshParty();
+        setActionStatus("Character saved");
       } else if (action.action === "saveEncounter") {
         const response = await saveEncounter(campaignId, {
           ...action.payload,
@@ -1137,6 +1220,211 @@ export default function Home() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "DNDMind could not complete that action. Please try again.");
     }
+  }
+
+  function partyCharacterInputFromStructuredPayload(payload: Record<string, unknown>): PartyCharacterInput {
+    const level = positiveIntegerFromUnknown(payload.level, 1);
+    const abilityScores = abilityScoreMapFromPayload(payload);
+    const hpMax = firstIntegerFromUnknown(
+      [payload.hpMax, payload.maxHp, payload.hitPoints, payload.hitPointMaximum, extractLabeledNumber(payload.statSummary, "HP")],
+      null
+    ) ?? estimatedHpMax(payload, abilityScores, level);
+    const armorClass = firstIntegerFromUnknown(
+      [payload.armorClass, payload.ac, extractLabeledNumber(payload.statSummary, "AC")],
+      null
+    ) ?? estimatedArmorClass(payload, abilityScores);
+    const initiativeModifier = firstIntegerFromUnknown(
+      [payload.initiativeModifier, payload.initiative, extractLabeledNumber(payload.statSummary, "Initiative")],
+      null
+    ) ?? abilityModifier(abilityScores.dex);
+    const passivePerception = firstIntegerFromUnknown(
+      [payload.passivePerception, payload.passiveWisdom, extractLabeledNumber(payload.statSummary, "Passive Perception")],
+      null
+    ) ?? (10 + abilityModifier(abilityScores.wis));
+    const hpCurrent = firstIntegerFromUnknown([payload.hpCurrent, payload.currentHp], hpMax);
+
+    return {
+      name: text(payload.name) || "Generated Character",
+      className: nullableText(payload.classAndSubclass ?? payload.className),
+      race: nullableText(payload.ancestryOrSpecies ?? payload.race ?? payload.raceOrSpecies),
+      level,
+      hpCurrent,
+      hpMax,
+      tempHp: firstIntegerFromUnknown([payload.tempHp, payload.temporaryHp], null),
+      armorClass,
+      initiativeModifier,
+      passivePerception,
+      conditions: [],
+      notes: characterNotesFromStructuredPayload(payload)
+    };
+  }
+
+  function characterNotesFromStructuredPayload(payload: Record<string, unknown>): string | null {
+    const notes = [
+      noteLine("Role", payload.role),
+      noteLine("Background", payload.background),
+      noteLine("Stats", abilityScoresText(payload.abilityScores) || payload.statSummary),
+      noteLine("Personality Traits", listText(payload.personalityTraits)),
+      noteLine("Ideals/Bonds/Flaws", idealsBondsFlawsText(payload.idealsBondsFlaws)),
+      noteLine("Equipment", listText(payload.equipment)),
+      noteLine("Campaign Tie-In", payload.campaignTieIn),
+      noteLine("Secret or Hook", payload.secretOrHook)
+    ].filter(Boolean);
+
+    return notes.length ? notes.join("\n") : null;
+  }
+
+  function noteLine(label: string, value: unknown) {
+    const valueText = text(value).trim();
+    return valueText ? `${label}: ${valueText}` : "";
+  }
+
+  function listText(value: unknown) {
+    return Array.isArray(value) ? value.map(text).map((item) => item.trim()).filter(Boolean).join(", ") : text(value);
+  }
+
+  function idealsBondsFlawsText(value: unknown) {
+    const data = object(value);
+    const entries = ["ideal", "bond", "flaw"]
+      .map((key) => {
+        const label = sentenceCase(key);
+        const valueText = text(data[key] ?? data[label]).trim();
+        return valueText ? `${label}: ${valueText}` : "";
+      })
+      .filter(Boolean);
+    return entries.length ? entries.join("; ") : text(value);
+  }
+
+  function abilityScoresText(value: unknown) {
+    const scores = object(value);
+    return ["str", "dex", "con", "int", "wis", "cha"]
+      .map((key) => {
+        const score = scores[key] ?? scores[key.toUpperCase()];
+        const scoreText = text(score).trim();
+        return scoreText ? `${key.toUpperCase()} ${scoreText}` : "";
+      })
+      .filter(Boolean)
+      .join(", ");
+  }
+
+  function abilityScoreMapFromPayload(payload: Record<string, unknown>) {
+    const explicitScores = object(payload.abilityScores);
+    const summaryScores = abilityScoreMapFromText(text(payload.statSummary));
+    return {
+      str: firstIntegerFromUnknown([explicitScores.str, explicitScores.STR, summaryScores.str], 10) ?? 10,
+      dex: firstIntegerFromUnknown([explicitScores.dex, explicitScores.DEX, summaryScores.dex], 10) ?? 10,
+      con: firstIntegerFromUnknown([explicitScores.con, explicitScores.CON, summaryScores.con], 10) ?? 10,
+      int: firstIntegerFromUnknown([explicitScores.int, explicitScores.INT, summaryScores.int], 10) ?? 10,
+      wis: firstIntegerFromUnknown([explicitScores.wis, explicitScores.WIS, summaryScores.wis], 10) ?? 10,
+      cha: firstIntegerFromUnknown([explicitScores.cha, explicitScores.CHA, summaryScores.cha], 10) ?? 10
+    };
+  }
+
+  function abilityScoreMapFromText(value: string) {
+    const scores: Record<string, number> = {};
+    for (const key of ["str", "dex", "con", "int", "wis", "cha"]) {
+      const match = value.match(new RegExp(`\\b${key}\\w*\\s*(?:=|:)?\\s*(\\d{1,2})\\b`, "i"));
+      if (match) {
+        scores[key] = positiveIntegerFromUnknown(match[1], 10);
+      }
+    }
+    return scores;
+  }
+
+  function estimatedHpMax(payload: Record<string, unknown>, abilityScores: Record<string, number>, level: number) {
+    const hitDie = classHitDie(text(payload.classAndSubclass ?? payload.className));
+    const fixedAverage = Math.floor(hitDie / 2) + 1;
+    const conModifier = abilityModifier(abilityScores.con);
+    return Math.max(level, hitDie + conModifier + Math.max(0, level - 1) * (fixedAverage + conModifier));
+  }
+
+  function estimatedArmorClass(payload: Record<string, unknown>, abilityScores: Record<string, number>) {
+    const className = text(payload.classAndSubclass ?? payload.className).toLowerCase();
+    const equipment = listText(payload.equipment).toLowerCase();
+    const dexModifier = abilityModifier(abilityScores.dex);
+    const conModifier = abilityModifier(abilityScores.con);
+    const wisModifier = abilityModifier(abilityScores.wis);
+
+    const explicitArmor = armorClassFromEquipment(equipment, dexModifier);
+    if (explicitArmor !== null) {
+      return explicitArmor + (/\bshield\b/.test(equipment) ? 2 : 0);
+    }
+    if (className.includes("monk")) {
+      return 10 + dexModifier + wisModifier;
+    }
+    if (className.includes("barbarian")) {
+      return 10 + dexModifier + conModifier;
+    }
+    if (/\b(paladin|fighter|cleric)\b/.test(className)) {
+      return 16 + (/\bshield\b/.test(equipment) || className.includes("paladin") || className.includes("cleric") ? 2 : 0);
+    }
+    if (/\b(ranger|druid)\b/.test(className)) {
+      return 14 + Math.min(2, Math.max(0, dexModifier));
+    }
+    if (/\b(rogue|bard|warlock|artificer)\b/.test(className)) {
+      return 11 + dexModifier;
+    }
+    return 10 + dexModifier;
+  }
+
+  function armorClassFromEquipment(equipment: string, dexModifier: number) {
+    if (/\bplate\b/.test(equipment)) return 18;
+    if (/\bchain mail\b/.test(equipment)) return 16;
+    if (/\bsplint\b/.test(equipment)) return 17;
+    if (/\bbreastplate\b/.test(equipment)) return 14 + Math.min(2, Math.max(0, dexModifier));
+    if (/\bscale mail\b|\bhalf plate\b/.test(equipment)) return (equipment.includes("half plate") ? 15 : 14) + Math.min(2, Math.max(0, dexModifier));
+    if (/\bstudded leather\b/.test(equipment)) return 12 + dexModifier;
+    if (/\bleather\b/.test(equipment)) return 11 + dexModifier;
+    return null;
+  }
+
+  function classHitDie(className: string) {
+    const normalized = className.toLowerCase();
+    if (/\b(barbarian)\b/.test(normalized)) return 12;
+    if (/\b(fighter|paladin|ranger)\b/.test(normalized)) return 10;
+    if (/\b(artificer|bard|cleric|druid|monk|rogue|warlock)\b/.test(normalized)) return 8;
+    return 6;
+  }
+
+  function abilityModifier(score: number) {
+    return Math.floor((score - 10) / 2);
+  }
+
+  function extractLabeledNumber(value: unknown, label: string) {
+    const match = text(value).match(new RegExp(`\\b${label}\\b\\s*(?:=|:)?\\s*([+-]?\\d{1,3})\\b`, "i"));
+    return match ? Number.parseInt(match[1], 10) : null;
+  }
+
+  function firstIntegerFromUnknown(values: unknown[], fallback: number | null) {
+    for (const value of values) {
+      const parsed = integerFromUnknown(value);
+      if (parsed !== null) {
+        return parsed;
+      }
+    }
+    return fallback;
+  }
+
+  function integerFromUnknown(value: unknown) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return Math.floor(value);
+    }
+    const valueText = text(value).trim();
+    if (!valueText) {
+      return null;
+    }
+    const parsed = Number.parseInt(valueText, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  function positiveIntegerFromUnknown(value: unknown, fallback: number) {
+    const parsed = typeof value === "number" ? value : Number.parseInt(text(value), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+  }
+
+  function nullableText(value: unknown) {
+    const valueText = text(value).trim();
+    return valueText ? valueText : null;
   }
 
   async function saveCurrentSessionSummary(payload: Record<string, unknown>) {
@@ -1517,7 +1805,7 @@ export default function Home() {
                             : "border-moss/20 bg-white text-moss hover:border-copper/60 hover:bg-parchment/60"
                       }`}
                     >
-                      {item}
+                      {modeLabels[item] ?? item}
                     </button>
                   ))}
                 </div>
@@ -1619,7 +1907,12 @@ export default function Home() {
 
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-[radial-gradient(circle_at_top,_rgba(216,226,220,0.55),_transparent_36rem)] px-5 pb-6 pt-5">
             {messages.length === 0 && (
-              <EmptyChatState onPrompt={handleQuickPrompt} onPreparedScene={handleLoadPreparedScene} />
+              <EmptyChatState
+                onPrompt={handleQuickPrompt}
+                onPromptSuggestion={handleQuickPromptSuggestion}
+                isGeneratingPromptSuggestion={isGeneratingPromptSuggestion}
+                onPreparedScene={handleLoadPreparedScene}
+              />
             )}
             {messages.map((message, index) => (
               <ChatTimelineCard
@@ -1627,6 +1920,8 @@ export default function Home() {
                 message={message}
                 actionStatus={actionStatus}
                 onAction={handleSuggestedAction}
+                campaignId={campaignId}
+                conversationId={conversationId}
               />
             ))}
 
@@ -1669,17 +1964,30 @@ export default function Home() {
 
           <form onSubmit={handleSubmit} className="shrink-0 border-t border-moss/15 bg-white/95 p-2 shadow-2xl shadow-moss/10">
             <div className="rounded-md border border-moss/15 bg-ink p-2 shadow-inner">
-              <div className="mb-1 flex items-center justify-between px-1">
+              <div className="mb-1 flex flex-col gap-1 px-1 sm:flex-row sm:items-center sm:justify-between">
                 <span className="text-xs font-semibold uppercase tracking-[0.18em] text-mist/70">Command Console</span>
-                <span className="rounded-full bg-copper/20 px-2 py-0.5 text-xs font-semibold text-mist">{mode} hint</span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full bg-copper/20 px-2 py-0.5 text-xs font-semibold text-mist">{modeLabels[mode] ?? mode} hint</span>
+                  <button
+                    type="button"
+                    onClick={() => handlePromptSuggestion()}
+                    disabled={!campaignId || isGeneratingPromptSuggestion}
+                    aria-label="Generate a prompt suggestion"
+                    title="Generate a prompt suggestion"
+                    className="rounded-md border border-white/15 bg-white/10 px-2 py-0.5 text-xs font-semibold text-mist transition hover:border-copper/60 hover:bg-copper/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isGeneratingPromptSuggestion ? "Sparking" : "Spark"}
+                  </button>
+                </div>
               </div>
+              {promptSuggestionError && <p className="mb-2 px-1 text-xs font-semibold text-ember">{promptSuggestionError}</p>}
               <div className="flex flex-col gap-2 md:flex-row">
               <textarea
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 rows={2}
                 className="min-h-16 flex-1 resize-none rounded-md border border-white/10 bg-white px-3 py-2 text-sm leading-6 text-ink shadow-inner placeholder:text-moss/50"
-                placeholder="Ask for a ruling, NPC, combat beat, session summary, or scene setup..."
+                placeholder="Ask for a ruling, NPC, character, combat beat, campaign recap, session summary, or scene setup..."
               />
               <button
                 type="submit"
@@ -1896,6 +2204,7 @@ export default function Home() {
                   id: npc.id,
                   deleteKey: `npc:${npc.id}`,
                   title: npc.name,
+                  imageUrl: imageUrlFromMetadata(npc.metadata),
                   summary: compactEncounterPreview([npc.role, npc.disposition, npc.description].filter(Boolean).join(" · ") || "Saved NPC"),
                   pills: [npc.role, npc.disposition].filter(Boolean) as string[],
                   details: [
@@ -2039,6 +2348,7 @@ function SavedEncountersSection({
         const rewards = metadata.rewards ?? metadata.Rewards;
         const hooks = metadata.campaignHooks ?? metadata.CampaignHooks;
         const tactics = metadata.tactics ?? metadata.Tactics;
+        const imageUrl = imageUrlFromMetadata(metadata);
         const tacticsText = formatEncounterValue(tactics);
         const isExpanded = expandedEncounterId === encounter.id;
         const detailsId = `encounter-details-${encounter.id}`;
@@ -2061,12 +2371,18 @@ function SavedEncountersSection({
               }`}
             >
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 space-y-2">
+                <div className="flex min-w-0 gap-3">
+                  {imageUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={imageUrl} alt="" className="h-16 w-24 shrink-0 rounded-md border border-moss/10 object-cover shadow-sm" />
+                  )}
+                  <div className="min-w-0 space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="min-w-0 break-words text-sm font-semibold leading-5 text-ink">{encounter.title}</h3>
                     <EncounterMetaPill value={difficulty || "Encounter"} />
                   </div>
                   <p className="line-clamp-2 text-xs leading-5 text-moss/75">{summary}</p>
+                  </div>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-2">
                   {encounter.createdAt && (
@@ -2083,6 +2399,10 @@ function SavedEncountersSection({
 
             {isExpanded && (
               <div id={detailsId} className="space-y-3 border-t border-moss/10 bg-white p-3 text-sm">
+                {imageUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={imageUrl} alt="" className="aspect-video w-full rounded-md border border-moss/10 object-cover shadow-sm" />
+                )}
                 <div className="flex flex-wrap items-center gap-2">
                   <EncounterMetaPill value={difficulty || "Encounter"} />
                   {environment && <EncounterMetaPill value={isShortEncounterMeta(environment) ? environment : sentenceCase(compactEncounterPreview(environment, 36))} />}
@@ -2274,11 +2594,15 @@ function PrepMetric({ label, value, detail }: { label: string; value: string; de
 function ChatTimelineCard({
   message,
   actionStatus,
-  onAction
+  onAction,
+  campaignId,
+  conversationId
 }: {
   message: ChatMessage;
   actionStatus: string | null;
   onAction: (action: SuggestedAction) => Promise<void>;
+  campaignId: string | null;
+  conversationId: string | null;
 }) {
   const displayContent = splitAssistantContent(message.content);
 
@@ -2305,16 +2629,9 @@ function ChatTimelineCard({
           <div className="flex flex-wrap gap-2">
             {message.structuredOutput && <ContextBadge label="Table-ready card" />}
             {!!message.citations?.length && <ContextBadge label="Context checked" />}
-            {!!message.toolCalls?.length && <ContextBadge label="Behind-the-screen details" />}
           </div>
         </div>
         <AssistantResponseText content={displayContent.main} />
-        {displayContent.debug && (
-          <details className="mt-4 rounded-xl border border-moss/10 bg-parchment/70 px-4 py-3 text-sm text-moss">
-            <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.14em] text-copper">Advanced Details</summary>
-            <p className="mt-3 whitespace-pre-wrap leading-6 text-moss/75">{displayContent.debug}</p>
-          </details>
-        )}
       </div>
 
       <div className="space-y-4 p-5">
@@ -2324,21 +2641,12 @@ function ChatTimelineCard({
             suggestedActions={message.suggestedActions ?? []}
             onAction={onAction}
             status={actionStatus}
+            campaignId={campaignId}
+            conversationId={conversationId}
           />
         )}
 
         {!!message.citations?.length && <CitationSection citations={message.citations} />}
-
-        {!!message.toolCalls?.length && (
-          <section>
-            <SectionHeader eyebrow="Behind the Screen" title="Checks DNDMind ran for this answer" />
-            <div className="mt-3 grid gap-3 xl:grid-cols-2">
-              {message.toolCalls.map((toolCall, toolIndex) => (
-                <ToolCallCard key={`${toolCall.toolName}-${toolIndex}`} toolCall={toolCall} />
-              ))}
-            </div>
-          </section>
-        )}
       </div>
     </article>
   );
@@ -2425,9 +2733,13 @@ function CitationSection({ citations }: { citations: Citation[] }) {
 
 function EmptyChatState({
   onPrompt,
+  onPromptSuggestion,
+  isGeneratingPromptSuggestion,
   onPreparedScene
 }: {
   onPrompt: (prompt: (typeof quickPrompts)[number]) => void;
+  onPromptSuggestion: (prompt: (typeof quickPrompts)[number]) => void;
+  isGeneratingPromptSuggestion: boolean;
   onPreparedScene: () => void;
 }) {
   return (
@@ -2443,17 +2755,25 @@ function EmptyChatState({
           </p>
         </div>
 
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
           {quickPrompts.map((prompt) => (
-            <button
+            <div
               key={prompt.label}
-              type="button"
-              onClick={() => onPrompt(prompt)}
-              className="min-h-20 rounded-md border border-moss/15 bg-parchment/70 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-copper/50 hover:bg-white hover:shadow-md"
+              className="min-h-20 rounded-md border border-moss/15 bg-parchment/70 px-3 py-3 shadow-sm transition hover:-translate-y-0.5 hover:border-copper/50 hover:bg-white hover:shadow-md"
             >
-              <span className="block text-sm font-semibold text-ink">{prompt.label}</span>
-              <span className="mt-2 block text-xs leading-5 text-moss/70">{prompt.mode} hint</span>
-            </button>
+              <button type="button" onClick={() => onPrompt(prompt)} className="block w-full text-left">
+                <span className="block text-sm font-semibold text-ink">{prompt.label}</span>
+                <span className="mt-2 block text-xs leading-5 text-moss/70">{modeLabels[prompt.mode] ?? prompt.mode} hint</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onPromptSuggestion(prompt)}
+                disabled={isGeneratingPromptSuggestion}
+                className="mt-3 rounded-md border border-copper/30 bg-white px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-copper transition hover:bg-copper hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isGeneratingPromptSuggestion ? "Sparking" : "Spark"}
+              </button>
+            </div>
           ))}
         </div>
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-moss/10 bg-parchment/60 px-4 py-2">
@@ -2567,6 +2887,7 @@ type MemoryAccordionItem = {
   id: string;
   deleteKey: string;
   title: string;
+  imageUrl?: string | null;
   summary: string;
   pills: string[];
   details: Array<{ label: string; value: string | null | undefined }>;
@@ -2628,32 +2949,42 @@ function MemoryAccordionGroup({
                 isExpanded ? "bg-parchment/55" : "bg-white hover:bg-parchment/35"
               }`}
             >
-              <div className="grid gap-2">
-                <div className="flex min-w-0 items-start justify-between gap-3">
-                  <h3 className="min-w-0 break-words text-sm font-semibold leading-5 text-ink">{item.title}</h3>
-                  <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.12em] text-moss/55">
-                    {isExpanded ? "Collapse" : "Expand"}
-                  </span>
-                </div>
-                <div className="min-w-0">
-                  {item.pills.length > 0 && (
-                    <div className="flex min-w-0 flex-wrap gap-1.5">
-                      {item.pills.slice(0, 2).map((pill) => (
-                        <EncounterMetaPill
-                          key={pill}
-                          value={compactEncounterPreview(pill, 34)}
-                          className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap px-2 py-0.5 text-[10px] tracking-[0.08em]"
-                        />
-                      ))}
-                    </div>
-                  )}
-                  {item.summary && <p className="mt-2 line-clamp-2 text-xs leading-5 text-moss/75">{item.summary}</p>}
+              <div className="flex min-w-0 gap-3">
+                {item.imageUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={item.imageUrl} alt="" className="h-16 w-20 shrink-0 rounded-md border border-moss/10 object-cover shadow-sm" />
+                )}
+                <div className="grid min-w-0 flex-1 gap-2">
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <h3 className="min-w-0 break-words text-sm font-semibold leading-5 text-ink">{item.title}</h3>
+                    <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.12em] text-moss/55">
+                      {isExpanded ? "Collapse" : "Expand"}
+                    </span>
+                  </div>
+                  <div className="min-w-0">
+                    {item.pills.length > 0 && (
+                      <div className="flex min-w-0 flex-wrap gap-1.5">
+                        {item.pills.slice(0, 2).map((pill) => (
+                          <EncounterMetaPill
+                            key={pill}
+                            value={compactEncounterPreview(pill, 34)}
+                            className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap px-2 py-0.5 text-[10px] tracking-[0.08em]"
+                          />
+                        ))}
+                      </div>
+                    )}
+                    {item.summary && <p className="mt-2 line-clamp-2 text-xs leading-5 text-moss/75">{item.summary}</p>}
+                  </div>
                 </div>
               </div>
             </button>
 
             {isExpanded && (
               <div id={detailsId} className="space-y-3 border-t border-moss/10 bg-white p-3 text-sm">
+                {item.imageUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={item.imageUrl} alt="" className="aspect-video w-full rounded-md border border-moss/10 object-cover shadow-sm" />
+                )}
                 <div className="grid gap-3">
                   {item.details.map((detail) => (
                     <EncounterDetail key={detail.label} label={detail.label} value={detail.value ?? ""} />
@@ -3274,19 +3605,6 @@ function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
       <div className="mt-3">
         {toolCall.error ? <p className="text-ember">{toolCall.error}</p> : <ToolResult toolCall={toolCall} />}
       </div>
-      <details className="mt-3 overflow-hidden rounded-lg border border-moss/10 bg-white/70 px-3 py-2">
-        <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.14em] text-copper">Technical Details</summary>
-        <div className="mt-2 grid gap-3 md:grid-cols-2">
-          <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-copper">Input</p>
-            <KeyValue value={toolCall.arguments} />
-          </div>
-          <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-copper">Raw result</p>
-            <KeyValue value={toolCall.result} />
-          </div>
-        </div>
-      </details>
     </div>
   );
 }
@@ -3351,7 +3669,7 @@ function ToolResult({ toolCall }: { toolCall: ToolCall }) {
       </div>
     );
   }
-  return <KeyValue value={result} />;
+  return <p className="rounded-lg bg-white/70 px-3 py-2 leading-6 text-moss/80">Result ready.</p>;
 }
 
 function DiceRollResult({
@@ -3465,21 +3783,6 @@ function encounterDifficultyAdvice(difficulty: string) {
   return "Use this as a pacing signal, then tune for your table's actual resources and player choices.";
 }
 
-function KeyValue({ value }: { value: unknown }) {
-  if (!value || typeof value !== "object") {
-    return <p className="break-words [overflow-wrap:anywhere]">{String(value ?? "")}</p>;
-  }
-  return (
-    <div className="mt-1 min-w-0 space-y-1 leading-6">
-      {Object.entries(value as Record<string, unknown>).map(([key, item]) => (
-        <p key={key} className="break-words [overflow-wrap:anywhere]">
-          <span className="font-semibold">{key}:</span> {typeof item === "object" ? JSON.stringify(item) : String(item)}
-        </p>
-      ))}
-    </div>
-  );
-}
-
 function formatModifier(value: unknown) {
   const numeric = Number(value ?? 0);
   return `${numeric >= 0 ? "+" : ""}${numeric}`;
@@ -3580,6 +3883,15 @@ function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
+function imageUrlFromMetadata(value: unknown): string | null {
+  const metadata = object(value);
+  const imageUrl = text(metadata.imageUrl);
+  if (imageUrl.startsWith("data:image/svg+xml") || imageUrl.startsWith("https://") || imageUrl.startsWith("http://")) {
+    return imageUrl;
+  }
+  return null;
+}
+
 function text(value: unknown): string {
   return typeof value === "string" ? value : value === undefined || value === null ? "" : String(value);
 }
@@ -3605,6 +3917,9 @@ function briefingTitle(output: StructuredOutput | null | undefined) {
   }
   if (output?.type === "npc") {
     return "NPC Briefing";
+  }
+  if (output?.type === "character") {
+    return "Character Briefing";
   }
   if (output?.type === "quest") {
     return "Quest Briefing";
@@ -3834,8 +4149,39 @@ function enhancePlainNpcResult(
   selectedMode: string,
   base: ResultEnhancements
 ): ResultEnhancements {
+  if (shouldSkipPlainEntityEnhancement(userMessage, selectedMode)) {
+    return {
+      ...base,
+      structuredOutput: base.structuredOutput?.type === "session_summary" ? base.structuredOutput : null,
+      suggestedActions: base.structuredOutput?.type === "session_summary" ? base.suggestedActions : []
+    };
+  }
   if (base.structuredOutput) {
     return base;
+  }
+
+  const character = inferCharacterFromPlainText(userMessage, response.answer, selectedMode);
+  if (character) {
+    const structuredOutput: StructuredOutput = { type: "character", data: character };
+    const characterName = String(character.name || "this character");
+    return {
+      ...base,
+      structuredOutput,
+      suggestedActions: base.suggestedActions.length
+        ? base.suggestedActions
+        : [
+            {
+              label: "Add Campaign Tie",
+              action: "prompt",
+              payload: { message: `Deepen ${characterName}'s tie to one existing party member, faction, or unresolved hook.` }
+            },
+            {
+              label: "Make Hireling",
+              action: "prompt",
+              payload: { message: `Revise ${characterName} as a hireling with a clear price, limit, and complication.` }
+            }
+          ]
+    };
   }
 
   const npc = inferNpcFromPlainText(userMessage, response.answer, selectedMode);
@@ -3865,9 +4211,24 @@ function enhancePlainNpcResult(
   };
 }
 
+function shouldSkipPlainEntityEnhancement(userMessage: string, selectedMode: string) {
+  const prompt = userMessage.toLowerCase();
+  const mode = selectedMode.toLowerCase();
+  return (
+    mode === "summarize" ||
+    mode === "recap" ||
+    /\bsummar(?:y|ize|ise|izing)\b/.test(prompt) ||
+    /\bsession notes?\b/.test(prompt) ||
+    /\bpreviously\b|\brecap\b|\bwhat happened so far\b/.test(prompt)
+  );
+}
+
 function inferNpcFromPlainText(userMessage: string, answer: string, selectedMode: string): Record<string, unknown> | null {
   const prompt = userMessage.toLowerCase();
   const mode = selectedMode.toLowerCase();
+  if (looksLikeCharacterRequest(prompt, mode)) {
+    return null;
+  }
   const looksLikeNpcRequest =
     mode === "npc" ||
     /\bnpcs?\b/.test(prompt) ||
@@ -3899,6 +4260,61 @@ function inferNpcFromPlainText(userMessage: string, answer: string, selectedMode
       connection ||
       "Use this NPC to point the party toward one concrete lead from the current campaign memory."
   };
+}
+
+function inferCharacterFromPlainText(userMessage: string, answer: string, selectedMode: string): Record<string, unknown> | null {
+  const prompt = userMessage.toLowerCase();
+  const mode = selectedMode.toLowerCase();
+  if (!looksLikeCharacterRequest(prompt, mode) || !answer.trim()) {
+    return null;
+  }
+
+  const name = extractNpcName(answer) || "Generated Character";
+  const personalityTraits = splitStructuredText(extractLabeledSection(answer, "Personality Traits") || extractLabeledSection(answer, "Personality"));
+  const equipment = splitStructuredText(extractLabeledSection(answer, "Equipment"));
+  return {
+    name,
+    ancestryOrSpecies: extractLabeledSection(answer, "Ancestry") || extractLabeledSection(answer, "Species") || extractLabeledSection(answer, "Race") || "Humanoid",
+    classAndSubclass: extractLabeledSection(answer, "Class") || extractLabeledSection(answer, "Class/Subclass") || "Adventurer",
+    level: extractCharacterLevel(userMessage) || extractCharacterLevel(answer) || 3,
+    background: extractLabeledSection(answer, "Background") || "Campaign-tied wanderer",
+    role: extractLabeledSection(answer, "Role") || extractNpcRole(answer) || "Backup adventurer",
+    statSummary: extractLabeledSection(answer, "Stats") || extractLabeledSection(answer, "Ability Scores") || "Use standard array tuned toward the character's class.",
+    personalityTraits: personalityTraits.length ? personalityTraits : ["Practical under pressure", "Curious about the party's current trouble"],
+    idealsBondsFlaws: extractLabeledSection(answer, "Ideals/Bonds/Flaws") || extractLabeledSection(answer, "Ideal") || "Ideal: Protect the vulnerable. Bond: Owes someone in the campaign. Flaw: Keeps one dangerous truth hidden.",
+    equipment: equipment.length ? equipment : ["Class gear", "travel kit", "one campaign clue"],
+    campaignTieIn: extractLabeledSection(answer, "Campaign Tie-In") || extractLabeledSection(answer, "Connection to Campaign") || "Tie this character to an unresolved campaign hook or faction.",
+    secretOrHook: extractLabeledSection(answer, "Secret") || extractLabeledSection(answer, "Hook") || extractSecretFromAnswer(answer) || "They are connected to a threat the party has not fully understood."
+  };
+}
+
+function looksLikeCharacterRequest(prompt: string, mode: string) {
+  if (mode === "character") {
+    return true;
+  }
+  return (
+    /\b(?:playable|backup|player)\s+characters?\b/.test(prompt) ||
+    /\b(?:backup pc|pc backup|player character)\b/.test(prompt) ||
+    /\b(?:rival adventurer|adventuring rival|hireling|retainer)\b/.test(prompt) ||
+    /\bgenerate\s+a\s+level\s+\d+\b/.test(prompt) ||
+    /\b(?:create|generate|make)\b.{0,60}\b(?:ranger|cleric|fighter|wizard|rogue|bard|paladin|druid|barbarian|monk|warlock|sorcerer|artificer)\b/.test(prompt)
+  );
+}
+
+function extractCharacterLevel(value: string) {
+  const match = value.match(/\blevel\s+(\d{1,2})\b/i);
+  if (!match) {
+    return 0;
+  }
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function splitStructuredText(value: string): string[] {
+  if (!value.trim()) {
+    return [];
+  }
+  return value.split(/\s*(?:,|;|\n|\s+-\s+)\s*/).map((item) => item.trim()).filter(Boolean);
 }
 
 function extractNpcName(answer: string) {

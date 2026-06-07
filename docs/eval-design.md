@@ -13,6 +13,8 @@ Each eval case should define:
 - required citations, if retrieval is expected
 - required tool calls, if tool use is expected
 - expected structured output type, if a card is expected
+- expected prompt suggestion shape, if suggestion generation is expected
+- expected image prompt, provider status, or mock placeholder behavior, if image generation is expected
 
 Sample cases live in `db/seed/eval_cases.json`.
 
@@ -25,9 +27,12 @@ Sample cases live in `db/seed/eval_cases.json`.
 - Campaign response tone appears in mock/provider prompts as style-only guidance.
 - Provider routing accepts Gemini API-key mode and Vertex AI Gemini mode, builds the expected Vertex endpoint, and uses ADC bearer-token auth.
 - Party Info gating prevents saved party details from appearing in answers or tool arguments when disabled.
+- Prompt suggestions resolve the selected mode and include useful campaign context.
+- Campaign recaps and active-session summaries summarize saved context without requiring a new chat answer first.
+- Image generation builds safe prompts for NPC, character, and encounter cards while keeping disabled/mock behavior deterministic.
 - Dice and initiative prompts call deterministic tools.
 - Encounter prompts produce encounter difficulty/tool behavior and real-provider fallback cards when provider JSON is missing or partial.
-- NPC prompts produce structured output that can be saved.
+- NPC and character prompts produce structured output that can be saved.
 - Out-of-scope prompts short-circuit before mock or real provider generation.
 - Upload sanitization strips unsafe markup/control characters and caps indexed text.
 
@@ -40,6 +45,8 @@ Mock mode gives stable responses, stable tool results, and stable embeddings. Th
 - a missing tool call means orchestration changed
 - a disabled context appearing in an answer means context gating changed
 - a missing structured card means output shaping changed
+- a missing prompt suggestion means mode resolution or context assembly changed
+- an image generation status mismatch means optional media provider gating changed
 - a missing expected fact means context assembly changed
 - an unrelated prompt that reaches the provider means scope guarding changed
 - campaign tone changing scope, citations, tools, or structured-output behavior means style guarding changed

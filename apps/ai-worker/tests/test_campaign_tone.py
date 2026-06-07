@@ -11,7 +11,7 @@ def chat_request(system_tone: str) -> worker_main.ChatRequest:
         campaignId=campaign_id,
         conversationId=uuid4(),
         message="Describe the ruined bell tower entrance.",
-        mode="Story",
+        mode="Auto",
         clientOwnerId="test-owner",
         context=worker_main.ChatContext(useRules=True, useCampaignMemory=True, usePartyInfo=False),
         campaign=worker_main.Campaign(

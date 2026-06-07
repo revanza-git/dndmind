@@ -1,14 +1,15 @@
 import os
 import json
 import re
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 import psycopg
 
-from app.orchestration.gemini_provider import real_chat_response, real_session_summary
+from app.orchestration.gemini_provider import real_campaign_recap, real_chat_response, real_prompt_suggestion, real_session_summary
+from app.orchestration.image_generation import generate_image, image_generation_enabled, image_provider
 from app.orchestration.scope_guard import is_in_scope_prompt, out_of_scope_answer, out_of_scope_suggested_actions
 from app.orchestration.tool_loop import execute_manual_tool, run_mock_tool_loop
 from app.orchestration.structured_output import build_mock_structured_output, build_suggested_actions
@@ -68,6 +69,16 @@ class PartyCharacter(BaseModel):
     notes: str | None = None
 
 
+class ChatSession(BaseModel):
+    id: UUID
+    campaignId: UUID
+    sessionNumber: int
+    title: str
+    rawNotes: str | None = None
+    summary: str | None = None
+    status: str = "active"
+
+
 class ChatRequest(BaseModel):
     campaignId: UUID
     conversationId: UUID
@@ -77,6 +88,7 @@ class ChatRequest(BaseModel):
     context: ChatContext
     campaign: Campaign
     party: list[PartyCharacter] = Field(default_factory=list)
+    session: ChatSession | None = None
 
 
 class ChatResponse(BaseModel):
@@ -119,6 +131,20 @@ class SummarizeSessionRequest(BaseModel):
     sessionNumber: int
     title: str
     rawNotes: str
+
+
+class CampaignRecapRequest(BaseModel):
+    campaignId: UUID
+    campaignName: str
+    clientOwnerId: str | None = None
+    activeSessionTitle: str | None = None
+    activeSessionRawNotes: str | None = None
+    activeSessionSummary: str | None = None
+
+
+class CampaignRecapResponse(BaseModel):
+    recap: str
+    citations: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ExtractedNpc(BaseModel):
@@ -173,6 +199,69 @@ class ToolExecuteResponse(BaseModel):
     error: str | None = None
 
 
+PromptSuggestionMode = Literal["auto", "rules", "npc", "character", "encounter", "recap", "summarize"]
+ResolvedPromptSuggestionMode = Literal["rules", "npc", "character", "encounter", "recap", "summarize"]
+StructuredImageOutputType = Literal["npc", "character", "encounter"]
+
+
+class PromptSuggestionSession(BaseModel):
+    id: UUID
+    campaignId: UUID
+    sessionNumber: int
+    title: str
+    rawNotes: str | None = None
+    summary: str | None = None
+    status: str = "active"
+
+
+class PromptSuggestionMemory(BaseModel):
+    npcs: list[dict[str, Any]] = Field(default_factory=list)
+    quests: list[dict[str, Any]] = Field(default_factory=list)
+    locations: list[dict[str, Any]] = Field(default_factory=list)
+    encounters: list[dict[str, Any]] = Field(default_factory=list)
+    events: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class PromptSuggestionRequest(BaseModel):
+    campaignId: UUID
+    sessionId: UUID | None = None
+    mode: PromptSuggestionMode = "auto"
+    currentInput: str | None = None
+    clientOwnerId: str | None = None
+    campaign: Campaign
+    party: list[PartyCharacter] = Field(default_factory=list)
+    session: PromptSuggestionSession | None = None
+    memory: PromptSuggestionMemory = Field(default_factory=PromptSuggestionMemory)
+
+
+class PromptSuggestionResponse(BaseModel):
+    prompt: str
+    mode: PromptSuggestionMode
+    resolvedMode: ResolvedPromptSuggestionMode | None = None
+    reason: str | None = None
+
+
+class ImageGenerationRequest(BaseModel):
+    campaignId: UUID
+    conversationId: UUID | None = None
+    structuredOutputType: StructuredImageOutputType
+    structuredOutputData: dict[str, Any] = Field(default_factory=dict)
+    stylePreset: str = "cinematic"
+    clientOwnerId: str | None = None
+
+
+class ImageGenerationResponse(BaseModel):
+    imageUrl: str | None = None
+    imageData: str | None = None
+    imagePrompt: str
+    provider: str
+    model: str
+    status: str
+    error: str | None = None
+    imageGeneratedAt: str | None = None
+    imageStylePreset: str | None = None
+
+
 @app.get("/health")
 def health() -> dict[str, str | bool]:
     return {
@@ -182,6 +271,8 @@ def health() -> dict[str, str | bool]:
         "mockEmbeddings": mock_embeddings_enabled(),
         "llmProvider": os.getenv("LLM_PROVIDER", "gemini"),
         "embeddingProvider": "mock" if mock_embeddings_enabled() else embedding_provider(),
+        "imageGenerationEnabled": image_generation_enabled(),
+        "imageProvider": image_provider(),
     }
 
 
@@ -189,6 +280,12 @@ def health() -> dict[str, str | bool]:
 def chat(request: ChatRequest) -> ChatResponse:
     if not is_in_scope_prompt(request.message):
         return out_of_scope_chat_response(request)
+
+    if _is_active_session_summary_request(request):
+        try:
+            return active_session_summary_chat_response(request)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=friendly_provider_error(str(exc))) from exc
 
     if mock_llm_enabled():
         return mock_chat_response(request)
@@ -217,6 +314,59 @@ def out_of_scope_chat_response(request: ChatRequest) -> ChatResponse:
     )
 
 
+def _is_active_session_summary_request(request: ChatRequest) -> bool:
+    if request.session is None or not (request.session.rawNotes or "").strip():
+        return False
+    mode = str(request.mode or "").strip().lower()
+    if mode == "summarize":
+        return True
+    return bool(re.search(r"\bsummar(?:y|ize|ise|izing)\b.*\bsession\b|\bsession notes?\b", request.message, re.IGNORECASE))
+
+
+def active_session_summary_chat_response(request: ChatRequest) -> ChatResponse:
+    session = request.session
+    if session is None:
+        raise RuntimeError("Active session is missing.")
+
+    summary_request = SummarizeSessionRequest(
+        campaignId=request.campaignId,
+        sessionId=session.id,
+        sessionNumber=session.sessionNumber,
+        title=session.title,
+        rawNotes=session.rawNotes or "",
+    )
+    summary = mock_session_summary(summary_request) if mock_llm_enabled() else SummarizeSessionResponse(**real_session_summary(summary_request))
+    data = summary.model_dump()
+    structured_output = {"type": "session_summary", "data": data}
+    suggested_actions = build_suggested_actions(structured_output)
+    answer = _format_session_summary_answer(session, summary)
+
+    return ChatResponse(
+        conversationId=request.conversationId,
+        answer=answer,
+        mode=request.mode,
+        citations=[],
+        toolCalls=[],
+        structuredOutput=structured_output,
+        suggestedActions=suggested_actions,
+    )
+
+
+def _format_session_summary_answer(session: ChatSession, summary: SummarizeSessionResponse) -> str:
+    lines = [
+        f"Session {session.sessionNumber}: {session.title}",
+        "",
+        summary.summary,
+    ]
+    if summary.importantEvents:
+        lines.extend(["", "Important events:"])
+        lines.extend(f"- {event}" for event in summary.importantEvents[:6])
+    if summary.unresolvedHooks:
+        lines.extend(["", "Unresolved hooks:"])
+        lines.extend(f"- {hook}" for hook in summary.unresolvedHooks[:6])
+    return "\n".join(lines).strip()
+
+
 @app.post("/ai/tools/execute", response_model=ToolExecuteResponse)
 def execute_tool_endpoint(request: ToolExecuteRequest) -> ToolExecuteResponse:
     context = {
@@ -226,6 +376,27 @@ def execute_tool_endpoint(request: ToolExecuteRequest) -> ToolExecuteResponse:
     }
     response = execute_manual_tool(request.toolName, request.arguments, context)
     return ToolExecuteResponse(**response)
+
+
+@app.post("/prompt-suggestions", response_model=PromptSuggestionResponse)
+def prompt_suggestions(request: PromptSuggestionRequest) -> PromptSuggestionResponse:
+    if request.mode == "summarize" or (
+        request.mode == "auto" and request.session and request.session.rawNotes and not request.session.summary
+    ):
+        return mock_prompt_suggestion(request)
+
+    if mock_llm_enabled():
+        return mock_prompt_suggestion(request)
+
+    try:
+        return PromptSuggestionResponse(**real_prompt_suggestion(request))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=friendly_provider_error(str(exc))) from exc
+
+
+@app.post("/images/generate", response_model=ImageGenerationResponse)
+def generate_image_endpoint(request: ImageGenerationRequest) -> ImageGenerationResponse:
+    return ImageGenerationResponse(**generate_image(request))
 
 
 @app.post("/ai/ingest-document", response_model=IngestDocumentResponse)
@@ -307,6 +478,26 @@ def summarize_session(request: SummarizeSessionRequest) -> SummarizeSessionRespo
 
     try:
         return SummarizeSessionResponse(**real_session_summary(request))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=friendly_provider_error(str(exc))) from exc
+
+
+@app.post("/ai/campaign-recap", response_model=CampaignRecapResponse)
+def campaign_recap(request: CampaignRecapRequest) -> CampaignRecapResponse:
+    rows = retrieve_memory(
+        request.campaignId,
+        _campaign_recap_query(request),
+        8,
+        request.clientOwnerId,
+    )
+    context_text = format_memory_context(rows)
+    citations = [row["citation"] for row in rows if row.get("citation")]
+
+    if mock_llm_enabled():
+        return mock_campaign_recap(request, context_text, citations)
+
+    try:
+        return CampaignRecapResponse(**real_campaign_recap(request, context_text, citations))
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=friendly_provider_error(str(exc))) from exc
 
@@ -426,6 +617,141 @@ def mock_chat_response(request: ChatRequest) -> ChatResponse:
         structuredOutput=structured_output,
         suggestedActions=suggested_actions,
     )
+
+
+def mock_prompt_suggestion(request: PromptSuggestionRequest) -> PromptSuggestionResponse:
+    resolved_mode, reason = _resolve_prompt_suggestion_mode(request)
+    prompt = _build_prompt_suggestion(request, resolved_mode)
+    return PromptSuggestionResponse(
+        prompt=prompt,
+        mode=request.mode,
+        resolvedMode=resolved_mode if request.mode == "auto" else None,
+        reason=reason,
+    )
+
+
+def _resolve_prompt_suggestion_mode(request: PromptSuggestionRequest) -> tuple[ResolvedPromptSuggestionMode, str]:
+    if request.mode != "auto":
+        return request.mode, f"Using the selected {request.mode} hint."
+
+    current = str(request.currentInput or "").lower()
+    if re.search(r"\b(rule|ruling|spell|advantage|check|action|bonus action|reaction|saving throw)\b", current):
+        return "rules", "The current draft looks like a rules or ruling question."
+    if re.search(r"\b(playable character|player character|backup character|backup pc|hireling|retainer|rival adventurer|level \d+ .*(?:ranger|cleric|fighter|wizard|rogue|bard|paladin|druid|barbarian|monk|warlock|sorcerer|artificer))\b", current):
+        return "character", "The current draft asks for a playable or near-playable character."
+    if re.search(r"\b(npc|villain|ally|informant|shopkeeper|patron)\b", current):
+        return "npc", "The current draft asks for a character."
+    if re.search(r"\b(encounter|combat|monster|ambush|fight|battle)\b", current):
+        return "encounter", "The current draft points toward an encounter."
+    if re.search(r"\b(what happened so far|previously|campaign recap|recap so far)\b", current):
+        return "recap", "The current draft asks for a campaign recap."
+    if re.search(r"\b(summary|summarize|session notes|hooks?)\b", current):
+        return "summarize", "The current draft points toward session summarization."
+
+    session_text = " ".join(
+        value
+        for value in [
+            request.session.title if request.session else "",
+            request.session.rawNotes if request.session else "",
+            request.session.summary if request.session else "",
+        ]
+        if value
+    )
+    if request.session and request.session.rawNotes and not request.session.summary:
+        return "summarize", "The active session has notes that are not summarized yet."
+    if request.party and (_memory_count(request.memory, "events") or _memory_count(request.memory, "quests") or _memory_count(request.memory, "locations")):
+        return "encounter", "Party details and campaign hooks are available for a table-ready encounter."
+    if _memory_count(request.memory, "npcs") == 0:
+        return "npc", "No saved NPCs are available yet, so an NPC draft is useful."
+    if re.search(r"\b(last session|previously|what happened|betray|escaped|mystery|unknown)\b", session_text, re.IGNORECASE):
+        return "recap", "The active campaign context has story continuity worth recapping."
+    return "rules", "Defaulting to a useful ruling prompt when no stronger table-prep cue is present."
+
+
+def _build_prompt_suggestion(request: PromptSuggestionRequest, mode: ResolvedPromptSuggestionMode) -> str:
+    campaign_name = request.campaign.name.strip() or "this campaign"
+    tone = request.campaign.systemTone.strip() or "DNDMind's default practical table style"
+    party = _prompt_party_summary(request.party)
+    session = _prompt_session_summary(request.session)
+    memory = _prompt_memory_summary(request.memory)
+    current = _compact_for_prompt(request.currentInput, 220)
+    current_line = f" Build from this rough draft if useful: {current}" if current else ""
+
+    if mode == "rules":
+        return (
+            f"For {campaign_name}, draft a concise D&D rules/ruling question for the table. "
+            f"Use the campaign tone as style only: {tone}. Ask for the likely ruling, edge cases, and a fast DM call. "
+            f"Context: {session} {party}{current_line}"
+        ).strip()
+    if mode == "npc":
+        return (
+            f"Create a memorable NPC for {campaign_name} who can matter in the next scene. "
+            f"Use tone: {tone}. Include name, role, motive, secret, connection to the party, and one actionable quest hook. "
+            f"Campaign context: {memory} {session}{current_line}"
+        ).strip()
+    if mode == "character":
+        return (
+            f"Generate a playable or near-playable character for {campaign_name}. "
+            f"Use tone: {tone}. Include name, ancestry/species, class/subclass, level, background, role, ability scores or stat summary, "
+            f"personality traits, ideals/bonds/flaws, equipment, campaign tie-in, and a secret or hook. "
+            f"The character can be a backup PC, rival adventurer, hireling, or table-ready ally. Context: {party} {memory} {session}{current_line}"
+        ).strip()
+    if mode == "encounter":
+        return (
+            f"Create a table-ready encounter for {campaign_name}. "
+            f"Use tone: {tone}. Include difficulty, environment, monsters or opposition, tactics, scaling options, rewards, and campaign hooks. "
+            f"Party/context: {party} {memory} {session}{current_line}"
+        ).strip()
+    if mode == "recap":
+        return (
+            f"Narrate what has happened so far in {campaign_name} as a table-ready recap. "
+            "Use saved campaign memory first, then the active session context if relevant. "
+            "Include concrete names, places, quests, and unresolved hooks, but do not invent missing facts. "
+            f"Use tone as style only: {tone}. Campaign context: {memory} {session}{current_line}"
+        ).strip()
+    return (
+        f"Summarize the active session for {campaign_name}. "
+        "Extract important events, NPC updates, locations, quests, encounters, items, and unresolved hooks without inventing facts. "
+        f"Use tone as style only: {tone}. Session context: {session}{current_line}"
+    ).strip()
+
+
+def _prompt_party_summary(party: list[PartyCharacter]) -> str:
+    if not party:
+        return "No party details are registered."
+    return "Party: " + "; ".join(_format_party_member(member) for member in party[:6]) + "."
+
+
+def _prompt_session_summary(session: PromptSuggestionSession | None) -> str:
+    if session is None:
+        return "No active session is selected."
+    notes = _compact_for_prompt(session.summary or session.rawNotes, 180)
+    detail = f" Notes: {notes}" if notes else ""
+    return f"Session {session.sessionNumber}, {session.title}.{detail}"
+
+
+def _prompt_memory_summary(memory: PromptSuggestionMemory) -> str:
+    parts = []
+    for label, key in [("NPCs", "npcs"), ("quests", "quests"), ("locations", "locations"), ("encounters", "encounters"), ("hooks", "events")]:
+        names = [_memory_label(item) for item in getattr(memory, key)[:3]]
+        if names:
+            parts.append(f"{label}: {', '.join(names)}")
+    return "; ".join(parts) + "." if parts else "No saved campaign memory yet."
+
+
+def _memory_label(item: dict[str, Any]) -> str:
+    return str(item.get("name") or item.get("title") or item.get("summary") or item.get("eventType") or "memory item")
+
+
+def _memory_count(memory: PromptSuggestionMemory, key: str) -> int:
+    return len(getattr(memory, key, []))
+
+
+def _compact_for_prompt(value: str | None, max_length: int) -> str:
+    if not value:
+        return ""
+    compact = re.sub(r"\s+", " ", value).strip()
+    return compact if len(compact) <= max_length else compact[:max_length].rstrip() + "..."
 
 
 def _format_campaign_tone_section(request: ChatRequest) -> str:
@@ -560,6 +886,55 @@ def mock_session_summary(request: SummarizeSessionRequest) -> SummarizeSessionRe
         items=items,
         unresolvedHooks=_unique(hooks)[:8],
     )
+
+
+def mock_campaign_recap(request: CampaignRecapRequest, context_text: str, citations: list[dict[str, Any]]) -> CampaignRecapResponse:
+    memory_lines = _memory_lines_from_context(context_text)
+    active_notes = " ".join(
+        value.strip()
+        for value in [request.activeSessionSummary or "", request.activeSessionRawNotes or ""]
+        if value and value.strip()
+    )
+    active_sentences = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+", active_notes)
+        if sentence.strip()
+    ][:3]
+
+    if not memory_lines and not active_sentences:
+        recap = (
+            f"Previously in {request.campaignName}, there is not enough saved campaign memory yet "
+            "to narrate a reliable recap. Summarize a session or save campaign memory first."
+        )
+    else:
+        beats = _unique(memory_lines[:5] + active_sentences)
+        recap = f"Previously in {request.campaignName}: " + " ".join(beats)
+        if not recap.endswith((".", "!", "?")):
+            recap += "."
+
+    return CampaignRecapResponse(recap=recap, citations=citations)
+
+
+def _campaign_recap_query(request: CampaignRecapRequest) -> str:
+    parts = [
+        "campaign recap what happened so far important events unresolved hooks quests NPC locations betray last session previous session",
+        request.activeSessionTitle or "",
+        request.activeSessionSummary or "",
+        request.activeSessionRawNotes or "",
+    ]
+    return " ".join(part for part in parts if part).strip()
+
+
+def _memory_lines_from_context(context_text: str) -> list[str]:
+    lines = []
+    for line in context_text.splitlines():
+        cleaned = line.strip()
+        if not cleaned or cleaned.startswith("[") or cleaned.startswith("#"):
+            continue
+        if cleaned.startswith("##"):
+            continue
+        lines.append(cleaned.removeprefix("- ").strip())
+    return _unique(lines)
 
 
 def _is_important(sentence: str) -> bool:

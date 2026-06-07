@@ -22,10 +22,11 @@ class PromptIntent:
 
 _MODE_TO_INTENT = {
     "rules": "rules",
-    "story": "story",
     "encounter": "encounter",
     "npc": "npc",
+    "character": "character",
     "combat": "combat",
+    "recap": "recap",
     "summarize": "summarize",
 }
 
@@ -82,6 +83,19 @@ _INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
         r"\bguard captain\b",
         r"\bquest giver\b",
     ),
+    "character": (
+        r"\bplayable character\b",
+        r"\bplayer character\b",
+        r"\bbackup character\b",
+        r"\bbackup pc\b",
+        r"\brival adventurer\b",
+        r"\badventuring rival\b",
+        r"\bhireling\b",
+        r"\bretainer\b",
+        r"\badventurer\b",
+        r"\bgenerate\s+a\s+level\s+\d+\b",
+        r"\b(?:create|generate|make)\b.{0,60}\b(?:ranger|cleric|fighter|wizard|rogue|bard|paladin|druid|barbarian|monk|warlock|sorcerer|artificer)\b",
+    ),
     "combat": (
         r"\bcombat\b",
         r"\binitiative\b",
@@ -91,10 +105,17 @@ _INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
     ),
     "summarize": (
         r"\bsummar(?:y|ize|ise|izing)\b",
-        r"\brecap\b",
         r"\bsession notes?\b",
         r"\bextract unresolved hooks?\b",
         r"\bimportant events?\b",
+    ),
+    "recap": (
+        r"\brecap\b",
+        r"\bpreviously\b",
+        r"\bwhat happened so far\b",
+        r"\bcampaign so far\b",
+        r"\bstory so far\b",
+        r"\blast session\b",
     ),
     "memory": (
         r"\bcampaign memory\b",
@@ -124,7 +145,7 @@ _INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
     ),
 }
 
-_INTENT_PRIORITY = ("rules", "summarize", "encounter", "combat", "npc", "quest", "location", "memory", "story")
+_INTENT_PRIORITY = ("rules", "recap", "summarize", "encounter", "combat", "character", "npc", "quest", "location", "memory", "story")
 
 
 def execute_manual_tool(tool_name: str, arguments: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -183,7 +204,7 @@ def detect_prompt_intent(message: str) -> PromptIntent:
 
     ordered = sorted(scores, key=lambda item: (-scores[item], _INTENT_PRIORITY.index(item)))
     primary = ordered[0]
-    is_strong = scores[primary] >= 2 or primary in {"rules", "encounter", "combat", "summarize", "npc"}
+    is_strong = scores[primary] >= 2 or primary in {"rules", "encounter", "combat", "recap", "summarize", "character", "npc"}
     return PromptIntent(primary=primary, detected=tuple(ordered), is_strong=is_strong)
 
 
@@ -231,7 +252,7 @@ def _plan_mock_tools(request: Any) -> list[tuple[str, dict[str, Any]]]:
     if request.context.useHomebrew and (_should_search_rules(request, intent) or "homebrew" in lower):
         tools.append(("searchHomebrew", {"query": message, "limit": 4}))
 
-    if request.context.useCampaignMemory and _should_search_campaign_memory(intent, lower):
+    if request.context.useCampaignMemory and _should_search_campaign_memory(request, intent, lower):
         tools.append(("searchCampaignMemory", {"query": message, "limit": 4}))
 
     return tools
@@ -251,8 +272,10 @@ def _should_calculate_encounter(request: Any, intent: PromptIntent) -> bool:
     return selected_mode_intent(request.mode) == "encounter" and not _strong_unrelated_to_encounter(intent)
 
 
-def _should_search_campaign_memory(intent: PromptIntent, lower: str) -> bool:
-    if any(item in intent.detected for item in ("memory", "npc", "quest")):
+def _should_search_campaign_memory(request: Any, intent: PromptIntent, lower: str) -> bool:
+    if selected_mode_intent(request.mode) == "recap" and not prompt_conflicts_with_mode(intent, request.mode):
+        return True
+    if any(item in intent.detected for item in ("memory", "recap", "npc", "character", "quest")):
         return True
     return any(term in lower for term in ["last session", "previous", "betray", "betrayed"])
 
@@ -260,13 +283,13 @@ def _should_search_campaign_memory(intent: PromptIntent, lower: str) -> bool:
 def _strong_non_rules_task(intent: PromptIntent) -> bool:
     if "rules" in intent.detected:
         return False
-    return bool(intent.is_strong and intent.primary in {"story", "encounter", "npc", "combat", "summarize", "memory", "quest", "location"})
+    return bool(intent.is_strong and intent.primary in {"story", "encounter", "character", "npc", "combat", "recap", "summarize", "memory", "quest", "location"})
 
 
 def _strong_unrelated_to_encounter(intent: PromptIntent) -> bool:
     if not intent.is_strong or "encounter" in intent.detected:
         return False
-    return bool(intent.primary in {"rules", "story", "npc", "combat", "summarize", "memory", "quest", "location"})
+    return bool(intent.primary in {"rules", "story", "character", "npc", "combat", "recap", "summarize", "memory", "quest", "location"})
 
 
 def _tool_call_response(tool_name: str, arguments: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:

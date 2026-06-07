@@ -1,19 +1,93 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
+
 import { SuggestedActions } from "../chat/SuggestedActions";
-import { StructuredOutput, SuggestedAction } from "../../lib/api";
+import {
+  generateImage,
+  ImageGenerationResponse,
+  ImageStylePreset,
+  SaveImageMetadata,
+  StructuredImageOutputType,
+  StructuredOutput,
+  SuggestedAction
+} from "../../lib/api";
 
 type RendererProps = {
   output: StructuredOutput | null | undefined;
   suggestedActions: SuggestedAction[];
   onAction: (action: SuggestedAction) => Promise<void>;
   status?: string | null;
+  campaignId: string | null;
+  conversationId?: string | null;
 };
 
-export function StructuredOutputRenderer({ output, suggestedActions, onAction, status }: RendererProps) {
+const imageStylePresetsByOutputType: Record<StructuredImageOutputType, ImageStylePreset[]> = {
+  character: ["cinematic", "parchment sketch", "combat stance", "anime"],
+  npc: ["cinematic", "parchment sketch", "anime"],
+  encounter: ["cinematic", "anime"]
+};
+
+export function StructuredOutputRenderer({ output, suggestedActions, onAction, status, campaignId, conversationId }: RendererProps) {
+  const [stylePreset, setStylePreset] = useState<ImageStylePreset>("cinematic");
+  const [image, setImage] = useState<ImageGenerationResponse | null>(null);
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const outputType = output?.type;
+  const imageOutputType = outputType === "npc" || outputType === "character" || outputType === "encounter" ? outputType : null;
+  const acceptedStylePreset = imageOutputType ? acceptedImageStylePreset(imageOutputType, stylePreset) : "cinematic";
+
+  useEffect(() => {
+    if (imageOutputType && !imageStylePresetsByOutputType[imageOutputType].includes(stylePreset)) {
+      setStylePreset("cinematic");
+    }
+  }, [imageOutputType, stylePreset]);
+
   if (!output) {
     return null;
   }
 
   const actions = mergeActions(suggestedActions, defaultActionsFor(output));
+  const imageMetadata = image ? saveImageMetadataFrom(image, acceptedStylePreset) : null;
+
+  async function handleGenerateImage() {
+    if (!campaignId || !imageOutputType || isGeneratingImage || !output) {
+      return;
+    }
+
+    setIsGeneratingImage(true);
+    setImageError(null);
+    try {
+      const generated = await generateImage({
+        campaignId,
+        conversationId,
+        structuredOutputType: imageOutputType,
+        structuredOutputData: output.data,
+        stylePreset: acceptedStylePreset
+      });
+      setImage(generated);
+    } catch (err) {
+      setImageError(err instanceof Error ? err.message : "DNDMind could not generate an image. Please try again.");
+    } finally {
+      setIsGeneratingImage(false);
+    }
+  }
+
+  async function handleAction(action: SuggestedAction) {
+    if (!imageMetadata || !isImageSaveAction(action.action)) {
+      await onAction(action);
+      return;
+    }
+
+    await onAction({
+      ...action,
+      payload: {
+        ...action.payload,
+        image: imageMetadata
+      }
+    });
+  }
 
   return (
     <div className="border-t border-moss/10 pt-4">
@@ -28,25 +102,75 @@ export function StructuredOutputRenderer({ output, suggestedActions, onAction, s
           </div>
         </div>
         <div className="p-5 md:p-6">
-          {output.type === "npc" && <NpcCard data={output.data} />}
+          {output.type === "npc" && (
+            <NpcCard
+              data={output.data}
+              imagePanel={
+                <StructuredImagePanel
+                  outputType="npc"
+                  image={image}
+                  stylePreset={acceptedStylePreset}
+                  isLoading={isGeneratingImage}
+                  error={imageError}
+                  onGenerate={handleGenerateImage}
+                  onStyleChange={setStylePreset}
+                  disabled={!campaignId}
+                />
+              }
+            />
+          )}
+          {output.type === "character" && (
+            <CharacterCard
+              data={output.data}
+              imagePanel={
+                <StructuredImagePanel
+                  outputType="character"
+                  image={image}
+                  stylePreset={acceptedStylePreset}
+                  isLoading={isGeneratingImage}
+                  error={imageError}
+                  onGenerate={handleGenerateImage}
+                  onStyleChange={setStylePreset}
+                  disabled={!campaignId}
+                />
+              }
+            />
+          )}
           {output.type === "quest" && <QuestCard data={output.data} />}
           {output.type === "location" && <LocationCard data={output.data} />}
-          {output.type === "encounter" && <EncounterCard data={output.data} />}
+          {output.type === "encounter" && (
+            <EncounterCard
+              data={output.data}
+              imagePanel={
+                <StructuredImagePanel
+                  outputType="encounter"
+                  image={image}
+                  stylePreset={acceptedStylePreset}
+                  isLoading={isGeneratingImage}
+                  error={imageError}
+                  onGenerate={handleGenerateImage}
+                  onStyleChange={setStylePreset}
+                  disabled={!campaignId}
+                />
+              }
+            />
+          )}
           {output.type === "session_summary" && <SessionSummaryCard data={output.data} />}
           {output.type === "initiative_order" && <InitiativeOrderCard data={output.data} />}
           {output.type === "dice_roll" && <DiceRollCard data={output.data} />}
-          <SuggestedActions actions={actions} onAction={onAction} status={status} />
+          <SuggestedActions actions={actions} onAction={handleAction} status={status} />
         </div>
       </div>
     </div>
   );
 }
 
-function NpcCard({ data }: { data: Record<string, unknown> }) {
+function NpcCard({ data, imagePanel }: { data: Record<string, unknown>; imagePanel?: ReactNode }) {
   const role = [text(data.role), text(data.raceOrSpecies)].filter(Boolean).join(" · ");
   return (
     <div>
       <CardTitle title={text(data.name) || "Generated NPC"} detail={role} badge="NPC" />
+      {imagePanel}
       <p className="mt-3 text-base leading-7 text-moss">{text(data.description)}</p>
       <InfoGrid
         items={[
@@ -55,6 +179,37 @@ function NpcCard({ data }: { data: Record<string, unknown> }) {
           ["Secret", text(data.secret)],
           ["Quest Hook", text(data.questHook)],
           ["Party Link", text(data.relationshipToParty)]
+        ]}
+      />
+    </div>
+  );
+}
+
+function CharacterCard({ data, imagePanel }: { data: Record<string, unknown>; imagePanel?: ReactNode }) {
+  const detail = [
+    text(data.ancestryOrSpecies) || text(data.species) || text(data.raceOrSpecies),
+    text(data.classAndSubclass) || text(data.className),
+    text(data.level) ? `Level ${text(data.level)}` : ""
+  ].filter(Boolean).join(" · ");
+  const abilityScores = object(data.abilityScores);
+  const idealsBondsFlaws = object(data.idealsBondsFlaws);
+
+  return (
+    <div>
+      <CardTitle title={text(data.name) || "Generated Character"} detail={detail} badge="Character" />
+      {imagePanel}
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <Metric label="Role" value={text(data.role) || "Adventurer"} />
+        <Metric label="Background" value={text(data.background) || "Campaign-tied"} />
+        <Metric label="Stats" value={formatCharacterStats(abilityScores, text(data.statSummary))} />
+      </div>
+      <InfoGrid
+        items={[
+          ["Personality", strings(data.personalityTraits).join(" · ") || text(data.personalityTraits) || text(data.personality)],
+          ["Ideals / Bonds / Flaws", formatIdealsBondsFlaws(idealsBondsFlaws, text(data.idealsBondsFlaws))],
+          ["Equipment", strings(data.equipment).join(" · ") || text(data.equipment)],
+          ["Campaign Tie-In", text(data.campaignTieIn) || text(data.relationshipToParty)],
+          ["Secret or Hook", text(data.secretOrHook) || text(data.secret) || text(data.hook)]
         ]}
       />
     </div>
@@ -83,13 +238,14 @@ function LocationCard({ data }: { data: Record<string, unknown> }) {
   );
 }
 
-function EncounterCard({ data }: { data: Record<string, unknown> }) {
+function EncounterCard({ data, imagePanel }: { data: Record<string, unknown>; imagePanel?: ReactNode }) {
   const monsters = Array.isArray(data.monsters) ? data.monsters : [];
   const scaling = object(data.scalingOptions);
   const difficulty = text(data.difficulty) || "Encounter";
   return (
     <div>
       <CardTitle title={text(data.title) || "Encounter"} detail={text(data.environment)} badge={difficulty} badgeClassName={difficultyBadgeClass(difficulty)} />
+      {imagePanel}
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         {monsters.map((monster, index) => {
           const item = object(monster);
@@ -114,6 +270,82 @@ function EncounterCard({ data }: { data: Record<string, unknown> }) {
       />
     </div>
   );
+}
+
+function StructuredImagePanel({
+  outputType,
+  image,
+  stylePreset,
+  isLoading,
+  error,
+  onGenerate,
+  onStyleChange,
+  disabled
+}: {
+  outputType: StructuredImageOutputType;
+  image: ImageGenerationResponse | null;
+  stylePreset: ImageStylePreset;
+  isLoading: boolean;
+  error: string | null;
+  onGenerate: () => void;
+  onStyleChange: (preset: ImageStylePreset) => void;
+  disabled: boolean;
+}) {
+  const imageSrc = image?.imageUrl || image?.imageData || "";
+  const imageStylePresets = imageStylePresetsByOutputType[outputType];
+  return (
+    <div className="mt-4 overflow-hidden rounded-lg border border-moss/15 bg-ink">
+      <div className="grid gap-0 md:grid-cols-[minmax(0,1fr)_17rem]">
+        <div className="flex aspect-video min-h-52 items-center justify-center bg-[radial-gradient(circle_at_35%_30%,_rgba(216,226,220,0.22),_transparent_18rem)]">
+          {imageSrc ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={imageSrc} alt={`${outputType} generated visual`} className="h-full w-full object-cover" />
+          ) : (
+            <div className="px-5 text-center">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-mist/65">{imagePanelLabel(outputType)}</p>
+              <p className="mt-2 text-sm leading-6 text-mist/80">No image generated yet.</p>
+            </div>
+          )}
+        </div>
+        <div className="border-t border-white/10 bg-ink p-3 md:border-l md:border-t-0">
+          <label className="block text-[11px] font-semibold uppercase tracking-[0.14em] text-mist/65" htmlFor={`image-style-${outputType}`}>
+            Style
+          </label>
+          <select
+            id={`image-style-${outputType}`}
+            value={stylePreset}
+            onChange={(event) => onStyleChange(event.target.value as ImageStylePreset)}
+            disabled={isLoading}
+            className="mt-2 w-full rounded-md border border-white/15 bg-white/10 px-2 py-2 text-sm font-semibold text-mist outline-none transition focus:border-copper/70 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {imageStylePresets.map((preset) => (
+              <option key={preset} value={preset} className="bg-ink text-mist">
+                {sentenceCase(preset)}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={onGenerate}
+            disabled={disabled || isLoading}
+            className="mt-3 w-full rounded-md border border-copper/50 bg-copper px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-copper/90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isLoading ? "Generating..." : imageSrc ? "Regenerate Image" : "Generate Image"}
+          </button>
+          {image && (
+            <p className="mt-3 text-xs leading-5 text-mist/65">
+              {sentenceCase(image.status)} with {image.provider} / {image.model}
+            </p>
+          )}
+          {error && <p className="mt-3 text-xs font-semibold leading-5 text-ember">{error}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function acceptedImageStylePreset(outputType: StructuredImageOutputType, preset: ImageStylePreset): ImageStylePreset {
+  return imageStylePresetsByOutputType[outputType].includes(preset) ? preset : "cinematic";
 }
 
 function SessionSummaryCard({ data }: { data: Record<string, unknown> }) {
@@ -297,6 +529,42 @@ function difficultyBadgeClass(difficulty: string) {
   return "bg-copper text-white";
 }
 
+function saveImageMetadataFrom(image: ImageGenerationResponse, selectedStylePreset: ImageStylePreset): SaveImageMetadata | null {
+  const imageUrl = image.imageUrl || null;
+  const imagePrompt = image.imagePrompt?.trim();
+  if (!imageUrl && !imagePrompt) {
+    return null;
+  }
+
+  return {
+    imageUrl,
+    imagePrompt,
+    imageProvider: image.provider,
+    imageModel: image.model,
+    imageGeneratedAt: image.imageGeneratedAt ?? new Date().toISOString(),
+    imageStylePreset: image.imageStylePreset ?? selectedStylePreset
+  };
+}
+
+function isImageSaveAction(action: string) {
+  return action === "saveNPC" || action === "saveEncounter";
+}
+
+function imagePanelLabel(outputType: StructuredImageOutputType) {
+  if (outputType === "npc") {
+    return "NPC visual";
+  }
+  if (outputType === "character") {
+    return "Character visual";
+  }
+  return "Encounter visual";
+}
+
+function sentenceCase(value: string) {
+  const spaced = value.replaceAll("_", " ").trim();
+  return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : "";
+}
+
 function defaultActionsFor(output: StructuredOutput): SuggestedAction[] {
   if (output.type === "encounter") {
     const title = text(output.data.title);
@@ -338,6 +606,23 @@ function defaultActionsFor(output: StructuredOutput): SuggestedAction[] {
     ];
   }
 
+  if (output.type === "character") {
+    const name = text(output.data.name) || "this character";
+    return [
+      { label: "Save Character", action: "saveCharacter", payload: output.data },
+      {
+        label: "Add Campaign Tie",
+        action: "prompt",
+        payload: { message: `Deepen ${name}'s tie to one existing party member, faction, or unresolved hook.` }
+      },
+      {
+        label: "Make Hireling",
+        action: "prompt",
+        payload: { message: `Revise ${name} as a hireling with a clear price, limit, and complication.` }
+      }
+    ];
+  }
+
   if (output.type === "quest") {
     const title = text(output.data.title) || "this quest";
     return [
@@ -360,6 +645,26 @@ function defaultActionsFor(output: StructuredOutput): SuggestedAction[] {
   }
 
   return [];
+}
+
+function formatCharacterStats(abilityScores: Record<string, unknown>, fallback: string) {
+  const entries = ["str", "dex", "con", "int", "wis", "cha"]
+    .map((key) => {
+      const value = abilityScores[key] ?? abilityScores[key.toUpperCase()];
+      return value === undefined || value === null || value === "" ? "" : `${key.toUpperCase()} ${value}`;
+    })
+    .filter(Boolean);
+  return entries.length ? entries.join(" · ") : fallback || "Table-ready stat summary";
+}
+
+function formatIdealsBondsFlaws(value: Record<string, unknown>, fallback: string) {
+  const entries = ["ideal", "bond", "flaw"]
+    .map((key) => {
+      const textValue = text(value[key]);
+      return textValue ? `${sentenceCase(key)}: ${textValue}` : "";
+    })
+    .filter(Boolean);
+  return entries.length ? entries.join(" · ") : fallback;
 }
 
 function mergeActions(primary: SuggestedAction[], fallback: SuggestedAction[]) {

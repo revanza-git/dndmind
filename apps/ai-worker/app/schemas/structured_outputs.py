@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 StructuredOutputType = Literal[
     "npc",
+    "character",
     "quest",
     "location",
     "encounter",
@@ -24,6 +25,28 @@ class NpcOutput(BaseModel):
     secret: str
     relationshipToParty: str
     questHook: str
+
+
+class CharacterOutput(BaseModel):
+    name: str
+    ancestryOrSpecies: str
+    classAndSubclass: str
+    level: int = 1
+    background: str
+    role: str
+    abilityScores: dict[str, int] = Field(default_factory=dict)
+    statSummary: str = ""
+    hpCurrent: int | None = None
+    hpMax: int | None = None
+    tempHp: int | None = None
+    armorClass: int | None = None
+    initiativeModifier: int | None = None
+    passivePerception: int | None = None
+    personalityTraits: list[str] = Field(default_factory=list)
+    idealsBondsFlaws: dict[str, str] = Field(default_factory=dict)
+    equipment: list[str] = Field(default_factory=list)
+    campaignTieIn: str
+    secretOrHook: str
 
 
 class QuestOutput(BaseModel):
@@ -108,4 +131,3 @@ class SuggestedAction(BaseModel):
     label: str
     action: str
     payload: dict[str, Any] = Field(default_factory=dict)
-

@@ -93,6 +93,23 @@ export type ChatResponse = {
   suggestedActions: SuggestedAction[];
 };
 
+export type PromptSuggestionMode = "auto" | "rules" | "npc" | "character" | "encounter" | "recap" | "summarize";
+export type ResolvedPromptSuggestionMode = Exclude<PromptSuggestionMode, "auto">;
+
+export type PromptSuggestionRequest = {
+  campaignId: string;
+  sessionId?: string | null;
+  mode: PromptSuggestionMode;
+  currentInput?: string | null;
+};
+
+export type PromptSuggestionResponse = {
+  prompt: string;
+  mode: PromptSuggestionMode;
+  resolvedMode?: ResolvedPromptSuggestionMode | null;
+  reason?: string | null;
+};
+
 export type ToolCall = {
   toolName: string;
   arguments: Record<string, unknown>;
@@ -103,6 +120,7 @@ export type ToolCall = {
 
 export type StructuredOutputType =
   | "npc"
+  | "character"
   | "quest"
   | "location"
   | "encounter"
@@ -113,6 +131,38 @@ export type StructuredOutputType =
 export type StructuredOutput = {
   type: StructuredOutputType;
   data: Record<string, unknown>;
+};
+
+export type StructuredImageOutputType = "npc" | "character" | "encounter";
+export type ImageStylePreset = "cinematic" | "parchment sketch" | "combat stance" | "anime";
+
+export type ImageGenerationRequest = {
+  campaignId: string;
+  conversationId?: string | null;
+  structuredOutputType: StructuredImageOutputType;
+  structuredOutputData: Record<string, unknown>;
+  stylePreset?: ImageStylePreset;
+};
+
+export type ImageGenerationResponse = {
+  imageUrl?: string | null;
+  imageData?: string | null;
+  imagePrompt: string;
+  provider: string;
+  model: string;
+  status: string;
+  error?: string | null;
+  imageGeneratedAt?: string | null;
+  imageStylePreset?: ImageStylePreset | string | null;
+};
+
+export type SaveImageMetadata = {
+  imageUrl?: string | null;
+  imagePrompt?: string | null;
+  imageProvider?: string | null;
+  imageModel?: string | null;
+  imageGeneratedAt?: string | null;
+  imageStylePreset?: ImageStylePreset | string | null;
 };
 
 export type SuggestedAction = {
@@ -163,6 +213,7 @@ export type MemoryNpc = {
   role: string | null;
   description: string | null;
   disposition: string | null;
+  metadata: Record<string, unknown>;
 };
 
 export type MemoryQuest = {
@@ -271,6 +322,9 @@ function friendlyError(message: string, fallback: string) {
   }
   if (lower.includes("rate limit") || lower.includes("rate-limit") || lower.includes("quota")) {
     return "The AI is getting too many requests right now. Please wait a moment, then try again.";
+  }
+  if (lower.includes("image generation")) {
+    return message;
   }
   if (lower.includes("embedding dimensions") || lower.includes("database expects") || lower.includes("pgvector schema")) {
     return "Campaign knowledge is not set up correctly. Ask the app admin to check the knowledge setup.";
@@ -608,6 +662,7 @@ export async function deleteDocument(documentId: string): Promise<void> {
 export async function sendChat(input: {
   campaignId: string;
   conversationId: string | null;
+  sessionId?: string | null;
   message: string;
   mode: string;
   context: ChatContext;
@@ -623,6 +678,38 @@ export async function sendChat(input: {
   }
 
   return response.json();
+}
+
+export async function generatePromptSuggestion(input: PromptSuggestionRequest): Promise<PromptSuggestionResponse> {
+  const response = await apiFetch("/api/prompt-suggestions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "DNDMind could not draft a prompt suggestion. Please try again."));
+  }
+
+  return response.json();
+}
+
+export async function generateImage(input: ImageGenerationRequest): Promise<ImageGenerationResponse> {
+  const response = await apiFetch("/api/images/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "DNDMind could not generate an image. Please try again."));
+  }
+
+  const image = (await response.json()) as ImageGenerationResponse;
+  if (image.status === "failed") {
+    throw new Error(image.error || "DNDMind could not generate an image. Please try again.");
+  }
+  return image;
 }
 
 export async function executeTool(input: {

@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from app.orchestration.structured_output import build_mock_structured_output, build_suggested_actions
 from app.orchestration.gemini_provider import _fallback_structured_output, real_chat_response
-from app.schemas.structured_outputs import EncounterOutput, NpcOutput
+from app.schemas.structured_outputs import CharacterOutput, EncounterOutput, NpcOutput
 
 
 def request(message: str, mode: str = "Auto"):
@@ -37,6 +37,26 @@ class StructuredOutputTests(unittest.TestCase):
         encounter = EncounterOutput(**output["data"])
         self.assertEqual(encounter.difficulty, "Hard")
         self.assertGreater(len(encounter.monsters), 0)
+
+    def test_character_detection_and_schema(self):
+        output = build_mock_structured_output(request("Generate a level 3 elven ranger for this party.", "Character"), [])
+
+        self.assertEqual(output["type"], "character")
+        character = CharacterOutput(**output["data"])
+        self.assertEqual(character.level, 3)
+        self.assertIn("Ranger", character.classAndSubclass)
+        self.assertTrue(character.campaignTieIn)
+        self.assertEqual(character.hpCurrent, character.hpMax)
+        self.assertIsNotNone(character.armorClass)
+        self.assertIsNotNone(character.initiativeModifier)
+        self.assertIsNotNone(character.passivePerception)
+        actions = build_suggested_actions(output)
+        self.assertEqual(actions[0]["action"], "saveCharacter")
+
+    def test_rival_adventurer_is_character_not_npc(self):
+        output = build_mock_structured_output(request("Create a rival adventurer tied to the current campaign.", "Auto"), [])
+
+        self.assertEqual(output["type"], "character")
 
     def test_rules_mode_npc_prompt_produces_npc_card(self):
         output = build_mock_structured_output(request("Generate a suspicious tavern keeper NPC", "Rules"), [])
@@ -114,6 +134,36 @@ Wren saw Captain Vey slip into the Serpent's Coil smuggler tunnels shortly after
         npc = NpcOutput(**output["data"])
         self.assertEqual(npc.name, '"Whisper" Wren')
         self.assertIn("Captain Vey", npc.description)
+
+    def test_real_provider_plain_character_answer_becomes_table_ready(self):
+        answer = """
+**Lethariel Moonglen**
+Ancestry: Elf
+Class/Subclass: Ranger, Gloom Stalker
+Level: 3
+Background: Outlander
+Role: Backup PC and rival scout
+Ability Scores: STR 10, DEX 16, CON 13, INT 11, WIS 15, CHA 9
+Personality Traits: Patient, dryly funny
+Ideal: Leave no one behind.
+Bond: Carries a token from Blackwater Mine.
+Flaw: Hides injuries until they become a problem.
+Equipment: Longbow, twin shortswords, explorer's pack
+Campaign Tie-In: Tracking the Ashen Knives through old mine roads.
+Secret: Knows who paid Captain Vey.
+"""
+        output = _fallback_structured_output(request("Generate a level 3 elven ranger for this party.", "Character"), answer, None)
+
+        self.assertIsNotNone(output)
+        self.assertEqual(output["type"], "character")
+        character = CharacterOutput(**output["data"])
+        self.assertEqual(character.level, 3)
+        self.assertEqual(character.abilityScores["dex"], 16)
+        self.assertEqual(character.hpMax, 25)
+        self.assertEqual(character.armorClass, 16)
+        self.assertEqual(character.initiativeModifier, 3)
+        self.assertEqual(character.passivePerception, 12)
+        self.assertIn("Captain Vey", character.secretOrHook)
 
     def test_real_provider_encounter_mode_plain_answer_becomes_save_ready(self):
         answer = """

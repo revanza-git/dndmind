@@ -3,7 +3,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from app.orchestration.tool_loop import _plan_mock_tools, detect_prompt_intent
-from main import Campaign, ChatContext, ChatRequest, PartyCharacter, mock_chat_response
+from main import Campaign, ChatContext, ChatRequest, ChatSession, PartyCharacter, active_session_summary_chat_response, mock_chat_response
 from rag import retriever
 
 
@@ -29,6 +29,7 @@ def chat_request(
     party: list[PartyCharacter] | None = None,
     mode: str = "Auto",
     system_tone: str = "Heroic",
+    session: ChatSession | None = None,
 ) -> ChatRequest:
     campaign_id = uuid4()
     members = party if party is not None else [party_member()]
@@ -41,6 +42,7 @@ def chat_request(
         context=context,
         campaign=Campaign(id=campaign_id, name="Test Campaign", description=None, systemTone=system_tone),
         party=[member.model_copy(update={"campaignId": campaign_id}) for member in members],
+        session=session.model_copy(update={"campaignId": campaign_id}) if session else None,
     )
 
 
@@ -168,8 +170,8 @@ class ContextToggleTests(unittest.TestCase):
 
         self.assertFalse(any(name == "searchRules" for name, _ in planned))
 
-    def test_story_mode_rules_prompt_searches_rules_when_enabled(self):
-        request = chat_request("How does advantage work?", ChatContext(useRules=True), party=[], mode="Story")
+    def test_auto_mode_rules_prompt_searches_rules_when_enabled(self):
+        request = chat_request("How does advantage work?", ChatContext(useRules=True), party=[], mode="Auto")
 
         planned = _plan_mock_tools(request)
 
@@ -185,6 +187,30 @@ class ContextToggleTests(unittest.TestCase):
         planned = _plan_mock_tools(request)
 
         self.assertTrue(any(name == "calculateEncounterDifficulty" for name, _ in planned))
+
+    def test_summarize_mode_uses_active_session_notes_directly(self):
+        session = ChatSession(
+            id=uuid4(),
+            campaignId=uuid4(),
+            sessionNumber=1,
+            title="Blackwater Mine",
+            rawNotes="Captain Vey betrayed the party. Mira discovered the hidden map. The party recovered the Dawn Shard.",
+            summary=None,
+            status="active",
+        )
+        request = chat_request(
+            "Summarize Session 1 notes.",
+            ChatContext(),
+            mode="Summarize",
+            session=session,
+        )
+
+        response = active_session_summary_chat_response(request)
+
+        self.assertIn("Session 1: Blackwater Mine", response.answer)
+        self.assertIn("Captain Vey betrayed the party", response.answer)
+        self.assertEqual(response.structuredOutput["type"], "session_summary")
+        self.assertTrue(any(action["action"] == "saveSessionSummary" for action in response.suggestedActions))
 
 
 if __name__ == "__main__":

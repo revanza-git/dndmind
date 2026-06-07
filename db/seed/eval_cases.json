@@ -17,7 +17,7 @@
   {
     "id": "memory-betrayal",
     "name": "Campaign memory recalls betrayal",
-    "mode": "Story",
+    "mode": "Auto",
     "prompt": "Who betrayed the party last session?",
     "context": {
       "useRules": false,

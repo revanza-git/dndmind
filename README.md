@@ -10,7 +10,7 @@ Dungeon Masters need to manage rules, campaign continuity, party context, sessio
 
 ## Solution
 
-DNDMind combines Campaign Knowledge RAG, campaign memory, campaign lifecycle controls, guarded response tone, structured output, context-aware tool calling, scope guarding, and deterministic evals into one command-center interface. The default path uses `MOCK_LLM=true` and `MOCK_EMBEDDINGS=true`, so the project can be reviewed locally without paid API usage or external model calls.
+DNDMind combines Campaign Knowledge RAG, campaign memory, campaign lifecycle controls, guarded response tone, prompt suggestions, structured output, optional structured-card images, context-aware tool calling, scope guarding, and deterministic evals into one command-center interface. The default path uses `MOCK_LLM=true` and `MOCK_EMBEDDINGS=true`, so the project can be reviewed locally without paid API usage or external model calls.
 
 ## Architecture
 
@@ -26,25 +26,27 @@ flowchart LR
   API -->|campaign, chat, memory| DB
   API -->|AI context| Worker
   Worker -->|RAG search| DB
-  Worker -->|chat and summaries| Model
+  Worker -->|chat, summaries, suggestions, optional images| Model
   Worker -->|answer, citations, tools, cards| API
   API --> Web
 ```
 
-The frontend renders the DM command center, Campaign menu, Campaign Knowledge library, downloadable templates, and local browser profile header for browser-owned sessions. The API owns campaign lifecycle, party management, upload validation, chat persistence, memory writes, demo seed hydration, and worker proxying. The AI worker handles prompt orchestration, guarded campaign tone, scope guarding, upload sanitization, RAG, structured output, context-aware tool execution, and mock, Gemini API-key, or Vertex AI provider calls. PostgreSQL stores campaign entities, archive state, messages, memory, knowledge chunks, party history, and pgvector embeddings.
+The frontend renders the DM command center, Campaign menu, Campaign Knowledge library, prompt suggestion controls, downloadable templates, and local browser profile header for browser-owned sessions. The API owns campaign lifecycle, party management, upload validation, chat persistence, memory writes, demo seed hydration, and worker proxying. The AI worker handles prompt orchestration, guarded campaign tone, scope guarding, upload sanitization, RAG, prompt suggestions, structured output, optional card image generation, context-aware tool execution, and mock, Gemini API-key, or Vertex AI provider calls. PostgreSQL stores campaign entities, archive state, messages, memory, knowledge chunks, party history, and pgvector embeddings.
 
 ## Key Features
 
 - Campaign create/edit/archive/restore management
 - Party management
 - AI command center chat
+- Prompt suggestion spark for the selected mode and campaign context
 - Guarded campaign response tone
 - Campaign Knowledge library with `.txt` and `.md` templates
 - Rules and Homebrew RAG with citations
 - Campaign memory RAG, including saved encounters
 - Session notes and summarization
 - Tabletop RPG scope guard with helpful redirect actions
-- NPC, quest, location, encounter, dice roll, and initiative structured cards
+- NPC, character, quest, location, encounter, dice roll, initiative, recap, and summary structured cards
+- Optional NPC, character, and encounter image generation with deterministic local placeholders
 - Context-aware tool calling with persisted traces
 - Dice roller
 - Encounter difficulty calculator
@@ -60,6 +62,8 @@ The frontend renders the DM command center, Campaign menu, Campaign Knowledge li
 - Vector search
 - Prompt orchestration
 - Multi-provider chat routing
+- Prompt suggestion generation
+- Optional Gemini or Vertex image generation
 - Guarded style hints
 - Upload validation and sanitization
 - Structured output
@@ -120,6 +124,9 @@ Open:
 | `LLM_PROVIDER` | Real AI provider when `MOCK_LLM=false`; supports `gemini` or `vertex`. |
 | `GEMINI_API_KEY` | Gemini API key for `LLM_PROVIDER=gemini`; keep empty for mock or Vertex mode. |
 | `GEMINI_MODEL` | Gemini chat model, defaulting to `gemini-2.5-flash`. |
+| `IMAGE_GENERATION_ENABLED=false` | Keeps NPC and encounter image generation disabled by default. Disabled mode returns deterministic mock placeholder metadata. |
+| `IMAGE_PROVIDER` | Image provider for structured card visuals; use `mock`, `gemini`, or `vertex`. |
+| `IMAGE_MODEL` | Gemini image generation model, defaulting to `gemini-2.5-flash-image`. |
 | `VERTEX_PROJECT_ID` | Google Cloud project ID for `LLM_PROVIDER=vertex`. |
 | `VERTEX_LOCATION` | Vertex AI location, defaulting to `global`. |
 | `VERTEX_MODEL` | Vertex Gemini model, defaulting to `gemini-2.5-flash`. |
@@ -137,6 +144,8 @@ Open:
 
 To use Gemini API-key mode instead of mock responses, copy `.env.example` to `.env`, set `MOCK_LLM=false`, set `LLM_PROVIDER=gemini`, and put your key in `GEMINI_API_KEY`.
 
+To enable real Gemini image generation for NPC, character, and encounter structured cards, set `IMAGE_GENERATION_ENABLED=true` and choose either `IMAGE_PROVIDER=gemini` with `GEMINI_API_KEY`, or `IMAGE_PROVIDER=vertex` with `VERTEX_PROJECT_ID`, `VERTEX_LOCATION`, and ADC via `GOOGLE_APPLICATION_CREDENTIALS`. This does not change the main text/chat provider flow. Keep `IMAGE_PROVIDER=mock` or `IMAGE_GENERATION_ENABLED=false` for deterministic local placeholders.
+
 To use Vertex AI Gemini through Application Default Credentials, set `MOCK_LLM=false`, `LLM_PROVIDER=vertex`, `VERTEX_PROJECT_ID=project-de842900-cb0b-4155-b9c`, `VERTEX_LOCATION=global`, and `VERTEX_MODEL=gemini-2.5-flash`. For local Docker usage, make ADC available inside the `ai-worker` container by mounting your gcloud ADC JSON file and setting `GOOGLE_APPLICATION_CREDENTIALS` to the mounted path, such as `/gcloud/application_default_credentials.json`. Keep `MOCK_EMBEDDINGS=true` for the first Vertex chat pass unless you intentionally wire a real embedding provider.
 
 To make RAG use Gemini embeddings too, set `MOCK_EMBEDDINGS=false` and `EMBEDDING_PROVIDER=gemini`. Gemini embeddings are requested at 1536 dimensions to match the current `knowledge_chunks.embedding vector(1536)` schema.
@@ -151,10 +160,12 @@ To make RAG use Gemini embeddings too, set `MOCK_EMBEDDINGS=false` and `EMBEDDIN
 6. Review the answer and its citations.
 7. Paste session notes from `db/seed/session_notes.md`.
 8. Save and summarize the session.
-9. Generate an NPC.
-10. Create and save an encounter so it becomes campaign memory.
-11. Roll dice from the command center.
-12. Review Session Prep for open hooks, quests, and usable knowledge.
+9. Use Spark to draft a context-aware prompt.
+10. Generate an NPC or Character card.
+11. Optionally generate a card image, then save the card.
+12. Create and save an encounter so it becomes campaign memory.
+13. Roll dice from the command center.
+14. Review Session Prep for open hooks, quests, and usable knowledge.
 
 For a guided walkthrough, open the in-app manual at `http://localhost:3000/manual` or read `docs/user-manual.md`.
 
@@ -175,6 +186,9 @@ DNDMind is designed for deterministic evaluation in mock mode. The sample eval c
 - Campaign tone stays style-only and does not override scope or grounding
 - JSON validity
 - Context-toggle and tool-calling correctness
+- Prompt suggestion behavior
+- Character and recap structured output behavior
+- Image generation prompt building and mock fallback behavior
 - Hallucination and out-of-scope resistance
 - Encounter fallback, save, and memory correctness
 

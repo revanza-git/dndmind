@@ -11,7 +11,7 @@ flowchart LR
   API[ASP.NET Core API<br/>Validation, persistence, worker proxy]
   DB[(PostgreSQL + pgvector<br/>Campaigns, chat, memory, vectors)]
   Worker[FastAPI AI Worker<br/>RAG, tools, structured output]
-  Provider[Gemini API, Vertex AI Gemini, or Mock LLM<br/>Chat and summaries]
+  Provider[Gemini API, Vertex AI Gemini, or Mock LLM<br/>Chat, summaries, suggestions, images]
 
   DM --> Web
   Web -->|HTTP + X-Dndmind-Client-Id| API
@@ -38,6 +38,7 @@ Next.js Frontend
 ASP.NET Core API
   public HTTP boundary for the browser
   campaign, party, session, memory, and document endpoints
+  prompt suggestion, recap, and image-generation proxy endpoints
   campaign archive filtering and restore flow
   demo seed hydration per browser client owner
   document upload validation and filename normalization
@@ -50,9 +51,11 @@ FastAPI AI Worker
   tabletop RPG scope guard and redirect suggestions
   upload sanitization before document chunking and embedding
   rules, homebrew, and campaign memory retrieval
+  prompt suggestions and campaign recap generation
   session summary extraction
   context-toggle-aware deterministic tool execution
   structured output shaping
+  optional NPC, character, and encounter image generation
 
 PostgreSQL + pgvector
   campaign source of truth
@@ -73,6 +76,8 @@ PostgreSQL + pgvector
 8. The API stores the assistant message and tool-call traces. Saved encounters also create campaign-memory documents for later retrieval.
 9. The frontend renders normal text, citations, tool cards, and structured cards.
 
+Prompt suggestions, campaign recaps, and structured-card image generation use neighboring worker endpoints. They still flow through the API so the browser keeps one product boundary and the worker remains the only model-facing service.
+
 ## Why ASP.NET Core + FastAPI
 
 The ASP.NET Core API is the durable application backend. It owns validation, persistence, browser-facing routes, and stable product contracts.
@@ -86,6 +91,8 @@ This split is useful for a portfolio project because it demonstrates a realistic
 - Two backend services add Docker and networking overhead, but make AI iteration cleaner.
 - Mock embeddings are not semantically equivalent to real embeddings, but they make local demos deterministic and free. Gemini embeddings can be enabled at 1536 dimensions to match the current pgvector schema.
 - The current worker has a mock-first provider path plus Gemini API-key and Vertex AI chat modes; deterministic mock mode remains the safest portfolio demo path.
+- Prompt suggestions and campaign recaps reuse the same mock/provider split as chat so local review stays deterministic.
+- Structured-card image generation is disabled by default and returns deterministic placeholders unless explicitly enabled with Gemini API-key or Vertex image provider settings.
 - Vertex AI mode uses Application Default Credentials through `google-auth`, so local Docker setups must mount ADC credentials into the worker container without committing them.
 - The scope guard is intentionally lightweight and deterministic. It keeps obvious unrelated prompts out of the product path, but it is not a full safety classifier.
 - Campaign response tone is a style hint only; the worker prompt explicitly keeps scope, grounding, citations, tool results, and structured-output requirements higher priority.

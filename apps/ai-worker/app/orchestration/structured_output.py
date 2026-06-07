@@ -1,8 +1,10 @@
+import re
 from typing import Any
 
 from app.orchestration.tool_loop import detect_prompt_intent, prompt_conflicts_with_mode, selected_mode_intent
 from app.schemas.structured_outputs import (
     DiceRollOutput,
+    CharacterOutput,
     EncounterMonsterOutput,
     EncounterOutput,
     EncounterScalingOutput,
@@ -25,6 +27,8 @@ def build_mock_structured_output(request: Any, tool_calls: list[dict[str, Any]])
     requested_type = _requested_output_type(request)
     if requested_type == "npc":
         return _as_output("npc", _mock_npc(request))
+    if requested_type == "character":
+        return _as_output("character", _mock_character(request))
     if requested_type == "encounter":
         return _as_output("encounter", _mock_encounter(request, tool_calls))
     if requested_type == "session_summary":
@@ -53,6 +57,7 @@ def _requested_output_type(request: Any) -> str | None:
 def _intent_to_output_type(intent: str | None) -> str | None:
     return {
         "npc": "npc",
+        "character": "character",
         "encounter": "encounter",
         "summarize": "session_summary",
         "quest": "quest",
@@ -64,6 +69,7 @@ def build_suggested_actions(structured_output: dict[str, Any] | None) -> list[di
     if not structured_output:
         return [
             SuggestedAction(label="Generate NPC", action="prompt", payload={"message": "Generate a suspicious tavern keeper NPC."}).model_dump(),
+            SuggestedAction(label="Generate Character", action="prompt", payload={"message": "Generate a level 3 elven ranger for this party."}).model_dump(),
             SuggestedAction(label="Create Quest", action="prompt", payload={"message": "Create a quest hook based on the cult from last session."}).model_dump(),
         ]
 
@@ -71,6 +77,7 @@ def build_suggested_actions(structured_output: dict[str, Any] | None) -> list[di
     data = structured_output["data"]
     mapping = {
         "npc": ("Save NPC", "saveNPC"),
+        "character": ("Save Character", "saveCharacter"),
         "quest": ("Save Quest", "saveQuest"),
         "location": ("Save Location", "saveLocation"),
         "encounter": ("Save Encounter", "saveEncounter"),
@@ -127,6 +134,53 @@ def _mock_npc(request: Any) -> NpcOutput:
     )
 
 
+def _mock_character(request: Any) -> CharacterOutput:
+    lower = request.message.lower()
+    level = _requested_level(lower) or 3
+    healer = "healer" in lower or "cleric" in lower
+    rival = "rival" in lower
+    hireling = "hireling" in lower
+    ranger = "ranger" in lower
+    ability_scores = {"str": 10, "dex": 16, "con": 13, "int": 11, "wis": 15, "cha": 9} if ranger else {"str": 8, "dex": 13, "con": 14, "int": 10, "wis": 16, "cha": 12}
+    hp_max = _estimated_hp_max(level, 10 if ranger else 8, ability_scores["con"])
+    initiative_modifier = _ability_modifier(ability_scores["dex"])
+    return CharacterOutput(
+        name="Elaris Thornwhisper" if ranger else "Tamsin Vale",
+        ancestryOrSpecies="Elf" if "elven" in lower or "elf" in lower or ranger else "Human",
+        classAndSubclass="Ranger, Gloom Stalker" if ranger else ("Cleric, Life Domain" if healer else "Rogue, Scout"),
+        level=level,
+        background="Outlander" if ranger else "Faction Agent",
+        role="Rival adventurer" if rival else ("Hireling healer" if hireling or healer else "Backup adventurer"),
+        abilityScores=ability_scores,
+        statSummary="Built for scouting, ranged pressure, and survival checks." if ranger else "Built for support, field medicine, and steady Wisdom checks.",
+        hpCurrent=hp_max,
+        hpMax=hp_max,
+        tempHp=0,
+        armorClass=16 if ranger else (18 if healer else 14),
+        initiativeModifier=initiative_modifier,
+        passivePerception=10 + _ability_modifier(ability_scores["wis"]),
+        personalityTraits=["Quietly observant", "Keeps promises even when they become inconvenient"],
+        idealsBondsFlaws={
+            "ideal": "No one should be abandoned in dangerous country.",
+            "bond": "They carry a token from someone tied to the campaign's current trouble.",
+            "flaw": "They hide bad news until they have a plan to fix it.",
+        },
+        equipment=["well-used class gear", "traveler's clothes", "healer's kit" if healer else "marked map case", "one clue tied to an unresolved hook"],
+        campaignTieIn="They are tracking the same faction pressure currently brushing against the party.",
+        secretOrHook="They know a name connected to the next campaign lead, but revealing it would expose an old debt.",
+    )
+
+
+def _estimated_hp_max(level: int, hit_die: int, constitution_score: int) -> int:
+    fixed_average = hit_die // 2 + 1
+    constitution_modifier = _ability_modifier(constitution_score)
+    return max(level, hit_die + constitution_modifier + max(0, level - 1) * (fixed_average + constitution_modifier))
+
+
+def _ability_modifier(score: int) -> int:
+    return (score - 10) // 2
+
+
 def _mock_quest(request: Any) -> QuestOutput:
     return QuestOutput(
         title="Ashes in the Ledger",
@@ -140,6 +194,14 @@ def _mock_quest(request: Any) -> QuestOutput:
         reward="A favor from the Dawn Bell and access to the sealed town archive.",
         unresolvedHooks=["Who paid Captain Vey?", "Why is the cult buying mining lanterns?"],
     )
+
+
+def _requested_level(lower: str) -> int:
+    match = re.search(r"\blevel\s+(\d{1,2})\b", lower)
+    if not match:
+        return 0
+    parsed = int(match.group(1))
+    return parsed if parsed > 0 else 0
 
 
 def _mock_location(request: Any) -> LocationOutput:

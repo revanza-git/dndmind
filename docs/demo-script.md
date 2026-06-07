@@ -23,6 +23,7 @@ Point out:
 - campaign selector
 - create/edit/archive/restore controls
 - mode buttons
+- Spark prompt suggestion controls
 - context toggles
 - party and memory panels
 - Campaign Knowledge upload and templates
@@ -92,6 +93,8 @@ Narration:
 
 ## 2:10 - 3:00 Structured Output Cards
 
+Click **Spark** with NPC mode selected to draft a campaign-aware prompt, then send it or adjust it.
+
 Prompt:
 
 ```text
@@ -102,6 +105,7 @@ Expected result:
 
 - structured NPC card appears
 - save action appears
+- optional image controls appear on visual card types
 - clicking save persists the NPC into the Memory panel
 
 Then prompt:
@@ -117,7 +121,7 @@ Expected result:
 
 Narration:
 
-"The worker returns AI-shaped JSON, and the frontend renders it as reusable campaign cards. Save actions turn generated ideas into persistent campaign state. Encounters are also indexed as memory so future prompts can find them."
+"The worker returns AI-shaped JSON, and the frontend renders it as reusable campaign cards. Save actions turn generated ideas into persistent campaign state. Encounters are also indexed as memory so future prompts can find them. Image generation is optional and mock-first, so the demo stays deterministic without provider keys."
 
 ## 3:00 - 3:40 Tool Calling
 
@@ -160,6 +164,17 @@ Expected result:
 
 - the response reflects the tone as style
 - scope, citations, tools, and structured cards still behave normally
+
+Optional recap check:
+
+```text
+Recap the campaign so far and list the open hooks.
+```
+
+Expected result:
+
+- recap mode summarizes saved memory and session context
+- unresolved hooks are easy to reuse for the next scene
 
 ## 4:20 - 5:00 Close
 

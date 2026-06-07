@@ -11,6 +11,7 @@ from app.orchestration.structured_output import build_suggested_actions
 from app.orchestration.tool_loop import detect_prompt_intent, prompt_conflicts_with_mode, run_provider_tool_loop, selected_mode_intent
 from app.schemas.structured_outputs import (
     DiceRollOutput,
+    CharacterOutput,
     EncounterOutput,
     InitiativeOrderOutput,
     LocationOutput,
@@ -26,6 +27,7 @@ from rag.retriever import search_homebrew, search_memory, search_rules
 
 STRUCTURED_MODELS = {
     "npc": NpcOutput,
+    "character": CharacterOutput,
     "quest": QuestOutput,
     "location": LocationOutput,
     "encounter": EncounterOutput,
@@ -77,6 +79,7 @@ def real_chat_response(request: Any) -> dict[str, Any]:
     model_payload = _call_gemini(request, retrieved_context, tool_calls)
 
     structured_output = _normalize_structured_output(model_payload.get("structuredOutput"))
+    structured_output = _filter_structured_output_for_mode(request, structured_output)
     suggested_actions = _normalize_suggested_actions(model_payload.get("suggestedActions"))
     answer = str(model_payload.get("answer") or "").strip()
     if not answer:
@@ -84,6 +87,7 @@ def real_chat_response(request: Any) -> dict[str, Any]:
     used_structured_fallback = False
     if structured_output is None:
         structured_output = _fallback_structured_output(request, answer, model_payload.get("structuredOutput"), tool_calls)
+        structured_output = _filter_structured_output_for_mode(request, structured_output)
         used_structured_fallback = structured_output is not None
     if structured_output and (used_structured_fallback or not suggested_actions):
         suggested_actions = build_suggested_actions(structured_output)
@@ -95,6 +99,19 @@ def real_chat_response(request: Any) -> dict[str, Any]:
         "structuredOutput": structured_output,
         "suggestedActions": suggested_actions,
     }
+
+
+def _filter_structured_output_for_mode(request: Any, structured_output: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not structured_output:
+        return None
+    output_type = str(structured_output.get("type") or "").strip()
+    mode = str(getattr(request, "mode", "") or "").strip().lower()
+    intent = detect_prompt_intent(str(getattr(request, "message", "") or ""))
+    if mode == "summarize" or "summarize" in intent.detected:
+        return structured_output if output_type == "session_summary" else None
+    if mode == "recap" or "recap" in intent.detected:
+        return None
+    return structured_output
 
 
 def real_session_summary(request: Any) -> dict[str, Any]:
@@ -119,6 +136,61 @@ def real_session_summary(request: Any) -> dict[str, Any]:
         model_payload = {"summary": "Gemini returned an empty summary.", "unresolvedHooks": []}
 
     return _normalize_session_summary(model_payload)
+
+
+def real_campaign_recap(request: Any, context_text: str, citations: list[dict[str, Any]]) -> dict[str, Any]:
+    _ensure_gemini_provider()
+
+    payload = {
+        "campaignId": str(request.campaignId),
+        "campaignName": request.campaignName,
+        "activeSession": {
+            "title": request.activeSessionTitle,
+            "rawNotes": request.activeSessionRawNotes,
+            "summary": request.activeSessionSummary,
+        },
+        "retrievedCampaignMemory": context_text,
+    }
+    model_payload = _generate_json(
+        _campaign_recap_system_instruction(),
+        (
+            "Narrate what has happened so far in this campaign from the supplied memory. "
+            "Return only one JSON object matching the requested keys.\n\n"
+            f"{json.dumps(payload, default=str)}"
+        ),
+    )
+    recap = str((model_payload or {}).get("recap") or (model_payload or {}).get("answer") or "").strip()
+    if not recap:
+        recap = (
+            f"Previously in {request.campaignName}, there is not enough saved campaign memory yet "
+            "to narrate a reliable recap."
+        )
+    return {"recap": recap, "citations": _dedupe_citations(citations)}
+
+
+def real_prompt_suggestion(request: Any) -> dict[str, Any]:
+    _ensure_gemini_provider()
+
+    model_payload = _generate_json(_prompt_suggestion_system_instruction(), _prompt_suggestion_user_prompt(request)) or {}
+    prompt = str(model_payload.get("prompt") or "").strip()
+    if not prompt:
+        prompt = "Draft a concise D&D table prompt using the selected campaign context."
+
+    requested_mode = _normalize_prompt_suggestion_mode(getattr(request, "mode", "auto")) or "auto"
+    resolved_mode = model_payload.get("resolvedMode")
+    resolved_mode = _normalize_prompt_suggestion_mode(resolved_mode) if resolved_mode is not None else None
+    if resolved_mode == "auto":
+        resolved_mode = None
+    if requested_mode != "auto":
+        resolved_mode = None
+
+    reason = model_payload.get("reason")
+    return {
+        "prompt": prompt,
+        "mode": requested_mode,
+        "resolvedMode": resolved_mode,
+        "reason": str(reason).strip() if reason else None,
+    }
 
 
 def _ensure_gemini_provider() -> None:
@@ -274,9 +346,18 @@ def _retrieve_context(request: Any) -> tuple[str, list[dict[str, Any]]]:
     rules_like = "rules" in intent.detected or (
         selected_mode_intent(request.mode) == "rules" and not prompt_conflicts_with_mode(intent, request.mode)
     )
-    memory_like = any(item in intent.detected for item in ("memory", "npc", "quest")) or any(
+    memory_like = (
+        selected_mode_intent(request.mode) == "recap" and not prompt_conflicts_with_mode(intent, request.mode)
+    ) or any(item in intent.detected for item in ("memory", "recap", "npc", "quest")) or any(
         term in lower for term in ["last session", "previous", "betray", "betrayed"]
     )
+    session = getattr(request, "session", None)
+    session_notes = str(getattr(session, "rawNotes", "") or "").strip()
+    if session and session_notes and selected_mode_intent(request.mode) == "summarize":
+        title = str(getattr(session, "title", "") or "Active session").strip()
+        number = getattr(session, "sessionNumber", None)
+        heading = f"Active session notes: Session {number}, {title}" if number else f"Active session notes: {title}"
+        sections.append(f"{heading}\n{session_notes}")
 
     if request.context.useRules and rules_like:
         try:
@@ -317,11 +398,14 @@ def _system_instruction() -> str:
         "and keep debug details out of the answer. "
         "The selectedMode field is a UI hint, not a command; when selectedMode conflicts with detected intent or the message, "
         "follow the message and detected intent. "
+        "For recap requests, narrate a table-ready 'previously in this campaign' recap from supplied campaign memory without inventing missing facts. "
+        "For summarize requests, summarize the supplied active session notes directly; do not claim the notes are missing when activeSession is present. "
         "Return only one JSON object with keys: answer, structuredOutput, suggestedActions. "
         "structuredOutput must be null or an object with type and data. Valid types are "
-        "npc, quest, location, encounter, session_summary, initiative_order, dice_roll. "
+        "npc, character, quest, location, encounter, session_summary, initiative_order, dice_roll. "
+        "For character data, include hpCurrent, hpMax, tempHp, armorClass, initiativeModifier, and passivePerception when they can be reasonably assigned. "
         "suggestedActions must use these case-sensitive action names when applicable: "
-        "saveNPC, saveQuest, saveLocation, saveEncounter, saveSessionSummary, prompt."
+        "saveNPC, saveCharacter, saveQuest, saveLocation, saveEncounter, saveSessionSummary, prompt."
     )
 
 
@@ -337,6 +421,26 @@ def _summary_system_instruction() -> str:
     )
 
 
+def _campaign_recap_system_instruction() -> str:
+    return (
+        "You are DNDMind, an AI Dungeon Master narrator. Write a coherent 'previously in this campaign' recap "
+        "using only supplied campaign memory and active session notes. Do not invent facts. Keep secrets and DM-only "
+        "inferences out unless they are explicit in the supplied context. Make it useful to read aloud at the table, "
+        "with 2 to 4 short paragraphs and concrete names, places, quests, and unresolved hooks when available. "
+        "Return only one JSON object with keys: recap."
+    )
+
+
+def _prompt_suggestion_system_instruction() -> str:
+    return (
+        "You are DNDMind, an AI Dungeon Master co-pilot. Generate only a concise editable prompt draft for the DM to send later, "
+        "not the answer to that prompt. Return one JSON object with keys: prompt, mode, resolvedMode, reason. "
+        "mode must echo one of auto, rules, npc, character, encounter, recap, summarize. resolvedMode must be null unless mode is auto; "
+        "when mode is auto, resolvedMode must be one of rules, npc, character, encounter, recap, summarize. "
+        "The prompt should be table-ready, specific to supplied campaign/session context when useful, and short enough to fit in a command console."
+    )
+
+
 def _user_prompt(request: Any, retrieved_context: str, tool_calls: list[dict[str, Any]]) -> str:
     party = [_party_member(member) for member in request.party] if request.context.usePartyInfo else []
     intent = detect_prompt_intent(request.message)
@@ -349,6 +453,7 @@ def _user_prompt(request: Any, retrieved_context: str, tool_calls: list[dict[str
     }
     payload = {
         "campaign": request.campaign.model_dump(mode="json"),
+        "activeSession": request.session.model_dump(mode="json") if getattr(request, "session", None) else None,
         "selectedMode": request.mode,
         "intent": intent.as_payload(),
         "mode": request.mode,
@@ -369,6 +474,27 @@ def _user_prompt(request: Any, retrieved_context: str, tool_calls: list[dict[str
     )
 
 
+def _prompt_suggestion_user_prompt(request: Any) -> str:
+    payload = {
+        "campaignId": str(getattr(request, "campaignId", "")),
+        "sessionId": str(getattr(request, "sessionId", "") or ""),
+        "mode": getattr(request, "mode", "auto"),
+        "currentInput": getattr(request, "currentInput", None),
+        "campaign": request.campaign.model_dump(mode="json") if getattr(request, "campaign", None) else None,
+        "party": [member.model_dump(mode="json") for member in getattr(request, "party", [])],
+        "session": request.session.model_dump(mode="json") if getattr(request, "session", None) else None,
+        "memory": request.memory.model_dump(mode="json") if getattr(request, "memory", None) else {},
+    }
+    return (
+        "Draft a D&D command prompt for this request. "
+        "For rules, ask for a ruling question. For npc, ask for an NPC generation prompt. "
+        "For character, ask for a playable or near-playable character generation prompt. "
+        "For encounter, ask for an encounter creation prompt. For recap, ask for a table-ready campaign recap from saved memory. "
+        "For summarize, ask for a session note extraction prompt. For auto, choose the most useful of those options from the available context.\n\n"
+        f"{json.dumps(payload, default=str)}"
+    )
+
+
 def _campaign_style_hint(request: Any) -> str:
     campaign = getattr(request, "campaign", None)
     tone = str(getattr(campaign, "systemTone", "") or "").strip()
@@ -380,6 +506,11 @@ def _campaign_style_hint(request: Any) -> str:
         "Do not let it override DNDMind scope, safety, factual grounding, citation behavior, tool results, detected intent, "
         "selected mode handling, or structured output requirements."
     )
+
+
+def _normalize_prompt_suggestion_mode(value: Any) -> str | None:
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in {"auto", "rules", "npc", "character", "encounter", "recap", "summarize"} else None
 
 
 def _party_member(member: Any) -> dict[str, Any]:
@@ -441,13 +572,16 @@ def _fallback_structured_output(
     tool_calls: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     requested_type = _requested_structured_type(request)
-    if requested_type not in {"npc", "encounter"}:
+    if requested_type not in {"npc", "character", "encounter"}:
         return None
 
     data = raw_output.get("data") if isinstance(raw_output, dict) and isinstance(raw_output.get("data"), dict) else {}
     if requested_type == "npc":
         candidate = _npc_fallback_data(request, answer, data)
         model = NpcOutput
+    elif requested_type == "character":
+        candidate = _character_fallback_data(request, answer, data)
+        model = CharacterOutput
     else:
         candidate = _encounter_fallback_data(request, answer, data, tool_calls or [])
         model = EncounterOutput
@@ -462,13 +596,17 @@ def _fallback_structured_output(
 def _requested_structured_type(request: Any) -> str | None:
     message = str(getattr(request, "message", "") or "").strip()
     intent = detect_prompt_intent(message)
+    mode = str(getattr(request, "mode", "") or "").strip().lower()
+    if mode in {"summarize", "recap"} or any(item in intent.detected for item in ("summarize", "recap")):
+        return None
+    if "character" in intent.detected:
+        return "character"
     if "npc" in intent.detected:
         return "npc"
     if "encounter" in intent.detected:
         return "encounter"
 
-    mode = str(getattr(request, "mode", "") or "").strip().lower()
-    if mode in {"npc", "encounter"} and not prompt_conflicts_with_mode(intent, mode):
+    if mode in {"npc", "character", "encounter"} and not prompt_conflicts_with_mode(intent, mode):
         return mode
     return None
 
@@ -806,6 +944,203 @@ def _npc_fallback_data(request: Any, answer: str, data: dict[str, Any]) -> dict[
         "relationshipToParty": relationship,
         "questHook": quest_hook,
     }
+
+
+def _character_fallback_data(request: Any, answer: str, data: dict[str, Any]) -> dict[str, Any]:
+    class_and_subclass = (
+        _text_field(data, "classAndSubclass")
+        or _text_field(data, "class")
+        or _extract_labeled(answer, "Class/Subclass")
+        or _extract_labeled(answer, "Class")
+        or "Adventurer"
+    )
+    level = _positive_int(data.get("level"), _character_level_from_text(str(getattr(request, "message", "") or "") + " " + answer))
+    ability_scores = _ability_scores(data.get("abilityScores") or data.get("ability_scores"), answer)
+    equipment = _text_list(data.get("equipment")) or _extract_labeled_list(answer, "Equipment") or ["Class gear", "travel kit", "one campaign clue"]
+    hp_max = _first_int(
+        data.get("hpMax"),
+        data.get("maxHp"),
+        data.get("hitPoints"),
+        _extract_labeled_number(answer, "HP"),
+        fallback=_estimated_character_hp(level, class_and_subclass, ability_scores),
+    )
+    return {
+        "name": _text_field(data, "name") or _extract_npc_name(answer) or "Generated Character",
+        "ancestryOrSpecies": (
+            _text_field(data, "ancestryOrSpecies")
+            or _text_field(data, "species")
+            or _text_field(data, "raceOrSpecies")
+            or _extract_labeled(answer, "Ancestry")
+            or _extract_labeled(answer, "Species")
+            or _extract_labeled(answer, "Race")
+            or "Humanoid"
+        ),
+        "classAndSubclass": class_and_subclass,
+        "level": level,
+        "background": _text_field(data, "background") or _extract_labeled(answer, "Background") or "Campaign-tied wanderer",
+        "role": _text_field(data, "role") or _extract_labeled(answer, "Role") or _character_role_from_request(request),
+        "abilityScores": ability_scores,
+        "statSummary": _text_field(data, "statSummary") or _extract_labeled(answer, "Stat Summary") or _extract_labeled(answer, "Ability Scores") or "Use standard array tuned toward the character's class.",
+        "hpCurrent": _first_int(data.get("hpCurrent"), data.get("currentHp"), fallback=hp_max),
+        "hpMax": hp_max,
+        "tempHp": _first_int(data.get("tempHp"), data.get("temporaryHp"), fallback=0),
+        "armorClass": _first_int(data.get("armorClass"), data.get("ac"), _extract_labeled_number(answer, "AC"), fallback=_estimated_character_ac(class_and_subclass, equipment, ability_scores)),
+        "initiativeModifier": _first_int(data.get("initiativeModifier"), data.get("initiative"), _extract_labeled_number(answer, "Initiative"), fallback=_ability_modifier(ability_scores.get("dex", 10))),
+        "passivePerception": _first_int(data.get("passivePerception"), data.get("passiveWisdom"), _extract_labeled_number(answer, "Passive Perception"), fallback=10 + _ability_modifier(ability_scores.get("wis", 10))),
+        "personalityTraits": _text_list(data.get("personalityTraits")) or _extract_labeled_list(answer, "Personality Traits") or _extract_labeled_list(answer, "Personality") or ["Practical under pressure", "Curious about the party's current trouble"],
+        "idealsBondsFlaws": _ideals_bonds_flaws(data.get("idealsBondsFlaws") or data.get("ideals_bonds_flaws"), answer),
+        "equipment": equipment,
+        "campaignTieIn": _text_field(data, "campaignTieIn") or _extract_labeled(answer, "Campaign Tie-In") or _extract_labeled(answer, "Connection to Campaign") or "Tie this character to an unresolved campaign hook or faction.",
+        "secretOrHook": _text_field(data, "secretOrHook") or _extract_labeled(answer, "Secret") or _extract_labeled(answer, "Hook") or "They know one dangerous detail about the campaign's next lead.",
+    }
+
+
+def _character_level_from_text(value: str) -> int:
+    match = re.search(r"\blevel\s+(\d{1,2})\b", str(value or ""), flags=re.IGNORECASE)
+    if not match:
+        return 3
+    return _positive_int(match.group(1), 3)
+
+
+def _character_role_from_request(request: Any) -> str:
+    message = str(getattr(request, "message", "") or "")
+    if re.search(r"\brival\b", message, flags=re.IGNORECASE):
+        return "Rival adventurer"
+    if re.search(r"\bhireling|retainer\b", message, flags=re.IGNORECASE):
+        return "Hireling"
+    if re.search(r"\bbackup\b", message, flags=re.IGNORECASE):
+        return "Backup PC"
+    return "Table-ready adventurer"
+
+
+def _ability_scores(value: Any, answer: str) -> dict[str, int]:
+    if isinstance(value, dict):
+        scores = {
+            key.lower(): _positive_int(raw, 0)
+            for key, raw in value.items()
+            if key.lower() in {"str", "dex", "con", "int", "wis", "cha"} and _positive_int(raw, 0) > 0
+        }
+        if scores:
+            return scores
+
+    labeled = _extract_labeled(answer, "Ability Scores") or _extract_labeled(answer, "Stats")
+    scores: dict[str, int] = {}
+    for key in ("str", "dex", "con", "int", "wis", "cha"):
+        match = re.search(rf"\b{key}\w*\s*(?:=|:)?\s*(\d{{1,2}})\b", labeled, flags=re.IGNORECASE)
+        if match:
+            scores[key] = _positive_int(match.group(1), 0)
+    return scores or {"str": 10, "dex": 14, "con": 13, "int": 11, "wis": 15, "cha": 12}
+
+
+def _estimated_character_hp(level: int, class_and_subclass: str, ability_scores: dict[str, int]) -> int:
+    hit_die = _class_hit_die(class_and_subclass)
+    fixed_average = hit_die // 2 + 1
+    constitution_modifier = _ability_modifier(ability_scores.get("con", 10))
+    return max(level, hit_die + constitution_modifier + max(0, level - 1) * (fixed_average + constitution_modifier))
+
+
+def _estimated_character_ac(class_and_subclass: str, equipment: list[str], ability_scores: dict[str, int]) -> int:
+    class_name = str(class_and_subclass or "").lower()
+    equipment_text = " ".join(equipment).lower()
+    dex_modifier = _ability_modifier(ability_scores.get("dex", 10))
+    con_modifier = _ability_modifier(ability_scores.get("con", 10))
+    wis_modifier = _ability_modifier(ability_scores.get("wis", 10))
+    explicit_armor = _armor_class_from_equipment(equipment_text, dex_modifier)
+    if explicit_armor is not None:
+        return explicit_armor + (2 if re.search(r"\bshield\b", equipment_text) else 0)
+    if "monk" in class_name:
+        return 10 + dex_modifier + wis_modifier
+    if "barbarian" in class_name:
+        return 10 + dex_modifier + con_modifier
+    if re.search(r"\b(paladin|fighter|cleric)\b", class_name):
+        return 16 + (2 if re.search(r"\bshield\b", equipment_text) or "paladin" in class_name or "cleric" in class_name else 0)
+    if re.search(r"\b(ranger|druid)\b", class_name):
+        return 14 + min(2, max(0, dex_modifier))
+    if re.search(r"\b(rogue|bard|warlock|artificer)\b", class_name):
+        return 11 + dex_modifier
+    return 10 + dex_modifier
+
+
+def _armor_class_from_equipment(equipment_text: str, dex_modifier: int) -> int | None:
+    if re.search(r"\bplate\b", equipment_text):
+        return 18
+    if re.search(r"\bchain mail\b", equipment_text):
+        return 16
+    if re.search(r"\bsplint\b", equipment_text):
+        return 17
+    if re.search(r"\bbreastplate\b", equipment_text):
+        return 14 + min(2, max(0, dex_modifier))
+    if re.search(r"\bhalf plate\b", equipment_text):
+        return 15 + min(2, max(0, dex_modifier))
+    if re.search(r"\bscale mail\b", equipment_text):
+        return 14 + min(2, max(0, dex_modifier))
+    if re.search(r"\bstudded leather\b", equipment_text):
+        return 12 + dex_modifier
+    if re.search(r"\bleather\b", equipment_text):
+        return 11 + dex_modifier
+    return None
+
+
+def _class_hit_die(class_and_subclass: str) -> int:
+    class_name = str(class_and_subclass or "").lower()
+    if "barbarian" in class_name:
+        return 12
+    if re.search(r"\b(fighter|paladin|ranger)\b", class_name):
+        return 10
+    if re.search(r"\b(artificer|bard|cleric|druid|monk|rogue|warlock)\b", class_name):
+        return 8
+    return 6
+
+
+def _ability_modifier(score: int) -> int:
+    return (score - 10) // 2
+
+
+def _extract_labeled_number(value: str, label: str) -> int | None:
+    match = re.search(rf"\b{re.escape(label)}\b\s*(?:=|:)?\s*([+-]?\d{{1,3}})\b", str(value or ""), flags=re.IGNORECASE)
+    return int(match.group(1)) if match else None
+
+
+def _first_int(*values: Any, fallback: int | None = None) -> int | None:
+    for value in values:
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        text_value = str(value or "").strip()
+        if not text_value:
+            continue
+        try:
+            return int(text_value)
+        except ValueError:
+            continue
+    return fallback
+
+
+def _ideals_bonds_flaws(value: Any, answer: str) -> dict[str, str]:
+    if isinstance(value, dict):
+        normalized = {
+            key: str(value.get(key) or "").strip()
+            for key in ("ideal", "bond", "flaw")
+            if str(value.get(key) or "").strip()
+        }
+        if normalized:
+            return normalized
+
+    ideal = _extract_labeled(answer, "Ideal")
+    bond = _extract_labeled(answer, "Bond")
+    flaw = _extract_labeled(answer, "Flaw")
+    combined = _extract_labeled(answer, "Ideals/Bonds/Flaws")
+    return {
+        "ideal": ideal or _extract_prefixed_value(combined, "Ideal") or "Do right by people caught in larger schemes.",
+        "bond": bond or _extract_prefixed_value(combined, "Bond") or "Owes a debt to someone tied to the campaign.",
+        "flaw": flaw or _extract_prefixed_value(combined, "Flaw") or "Keeps secrets until trust is undeniable.",
+    }
+
+
+def _extract_prefixed_value(value: str, label: str) -> str:
+    match = re.search(rf"\b{re.escape(label)}\s*:\s*([^.;]+)", str(value or ""), flags=re.IGNORECASE)
+    return match.group(1).strip() if match else ""
 
 
 def _text_field(data: dict[str, Any], key: str) -> str:

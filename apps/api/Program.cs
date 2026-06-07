@@ -744,16 +744,18 @@ app.MapPost("/api/campaigns/{campaignId:guid}/npcs", async (Guid campaignId, Sav
     cmd.Parameters.AddWithValue("disposition", (object?)request.RelationshipToParty?.Trim() ?? DBNull.Value);
     cmd.Parameters.Add(new NpgsqlParameter("metadata", NpgsqlDbType.Jsonb)
     {
-        Value = JsonSerializer.Serialize(new
-        {
-            source = "structured_output",
+        Value = JsonSerializer.Serialize(BuildStructuredMetadata(
             clientOwnerId,
-            request.RaceOrSpecies,
-            request.Personality,
-            request.Motivation,
-            request.Secret,
-            request.QuestHook
-        })
+            new Dictionary<string, object?>
+            {
+                ["RaceOrSpecies"] = request.RaceOrSpecies,
+                ["Personality"] = request.Personality,
+                ["Motivation"] = request.Motivation,
+                ["Secret"] = request.Secret,
+                ["QuestHook"] = request.QuestHook
+            },
+            request.Image,
+            "npc"))
     });
 
     await using var reader = await cmd.ExecuteReaderAsync();
@@ -1010,17 +1012,19 @@ app.MapPost("/api/campaigns/{campaignId:guid}/encounters", async (Guid campaignI
     cmd.Parameters.AddWithValue("summary", (object?)request.Tactics?.Trim() ?? DBNull.Value);
     cmd.Parameters.Add(new NpgsqlParameter("metadata", NpgsqlDbType.Jsonb)
     {
-        Value = JsonSerializer.Serialize(new
-        {
-            source = "structured_output",
+        Value = JsonSerializer.Serialize(BuildStructuredMetadata(
             clientOwnerId,
-            request.Difficulty,
-            request.Environment,
-            request.Monsters,
-            request.ScalingOptions,
-            request.Rewards,
-            request.CampaignHooks
-        })
+            new Dictionary<string, object?>
+            {
+                ["Difficulty"] = request.Difficulty,
+                ["Environment"] = request.Environment,
+                ["Monsters"] = request.Monsters,
+                ["ScalingOptions"] = request.ScalingOptions,
+                ["Rewards"] = request.Rewards,
+                ["CampaignHooks"] = request.CampaignHooks
+            },
+            request.Image,
+            "encounter"))
     });
 
     EncounterDto encounter;
@@ -1285,6 +1289,18 @@ app.MapPost("/api/chat", async (ChatRequest request, NpgsqlDataSource db, IHttpC
         return Results.NotFound(new { error = "Campaign not found." });
     }
 
+    await EnsureDemoClientSeed(db, request.CampaignId, clientOwnerId, demoCampaignId, DemoClientOwnerId);
+
+    SessionDto? session = null;
+    if (request.SessionId is Guid sessionId)
+    {
+        session = await LoadSession(sessionId, clientOwnerId, db);
+        if (session is null || session.CampaignId != request.CampaignId)
+        {
+            return Results.NotFound(new { error = "Session not found." });
+        }
+    }
+
     IReadOnlyList<PartyCharacterDto> party = request.Context.UsePartyInfo
         ? await LoadParty(request.CampaignId, db)
         : Array.Empty<PartyCharacterDto>();
@@ -1299,7 +1315,8 @@ app.MapPost("/api/chat", async (ChatRequest request, NpgsqlDataSource db, IHttpC
         clientOwnerId,
         request.Context,
         campaign,
-        party);
+        party,
+        session);
 
     var client = httpClientFactory.CreateClient("ai-worker");
     var workerResponse = await client.PostAsJsonAsync("/ai/chat", workerRequest);
@@ -1326,6 +1343,180 @@ app.MapPost("/api/chat", async (ChatRequest request, NpgsqlDataSource db, IHttpC
     await StoreToolCalls(conversationId, response.ToolCalls, db);
 
     return Results.Ok(response);
+});
+
+app.MapPost("/api/campaigns/{campaignId:guid}/recap", async (Guid campaignId, CampaignRecapRequest request, NpgsqlDataSource db, IHttpClientFactory httpClientFactory, ICurrentClientService currentClient) =>
+{
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
+    var campaign = await LoadCampaign(campaignId, db);
+    if (campaign is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
+
+    await EnsureDemoClientSeed(db, campaignId, clientOwnerId, demoCampaignId, DemoClientOwnerId);
+
+    SessionDto? session = null;
+    if (request.SessionId is Guid sessionId)
+    {
+        session = await LoadSession(sessionId, clientOwnerId, db);
+        if (session is null || session.CampaignId != campaignId)
+        {
+            return Results.NotFound(new { error = "Session not found." });
+        }
+    }
+
+    var activeSessionTitle = CompactText(request.ActiveSessionTitle, 200);
+    var activeSessionRawNotes = CompactText(request.ActiveSessionRawNotes, 8000);
+    var activeSessionSummary = CompactText(request.ActiveSessionSummary, 4000);
+
+    var workerRequest = new AiWorkerCampaignRecapRequest(
+        campaignId,
+        campaign.Name,
+        clientOwnerId,
+        string.IsNullOrWhiteSpace(activeSessionTitle) ? session?.Title : activeSessionTitle,
+        string.IsNullOrWhiteSpace(activeSessionRawNotes) ? session?.RawNotes : activeSessionRawNotes,
+        string.IsNullOrWhiteSpace(activeSessionSummary) ? session?.Summary : activeSessionSummary);
+
+    var client = httpClientFactory.CreateClient("ai-worker");
+    var workerResponse = await client.PostAsJsonAsync("/ai/campaign-recap", workerRequest);
+    if (!workerResponse.IsSuccessStatusCode)
+    {
+        var error = await workerResponse.Content.ReadAsStringAsync();
+        return Results.Problem(FriendlyWorkerError("AI campaign recap failed", error), statusCode: 502);
+    }
+
+    var recapResponse = await workerResponse.Content.ReadFromJsonAsync<CampaignRecapResponse>();
+    if (recapResponse is null)
+    {
+        return Results.Problem("DNDMind could not narrate the campaign recap just now. Please try again in a moment.", statusCode: 502);
+    }
+
+    return Results.Ok(recapResponse);
+});
+
+app.MapPost("/api/prompt-suggestions", async (PromptSuggestionRequest request, NpgsqlDataSource db, IHttpClientFactory httpClientFactory, ICurrentClientService currentClient) =>
+{
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
+    if (request.CampaignId == Guid.Empty)
+    {
+        return Results.BadRequest(new { error = "campaignId is required." });
+    }
+
+    var normalizedMode = NormalizePromptSuggestionMode(request.Mode);
+    if (normalizedMode is null)
+    {
+        return Results.BadRequest(new { error = "mode must be auto, rules, npc, character, encounter, recap, or summarize." });
+    }
+
+    var campaign = await LoadCampaign(request.CampaignId, db);
+    if (campaign is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
+
+    await EnsureDemoClientSeed(db, request.CampaignId, clientOwnerId, demoCampaignId, DemoClientOwnerId);
+
+    SessionDto? session = null;
+    if (request.SessionId is Guid sessionId)
+    {
+        session = await LoadSession(sessionId, clientOwnerId, db);
+        if (session is null || session.CampaignId != request.CampaignId)
+        {
+            return Results.NotFound(new { error = "Session not found." });
+        }
+    }
+
+    var party = await LoadParty(request.CampaignId, db);
+    var memory = await LoadCampaignMemory(request.CampaignId, clientOwnerId, db);
+    var workerRequest = new AiWorkerPromptSuggestionRequest(
+        request.CampaignId,
+        request.SessionId,
+        normalizedMode,
+        request.CurrentInput,
+        clientOwnerId,
+        campaign,
+        party,
+        session,
+        memory);
+
+    var client = httpClientFactory.CreateClient("ai-worker");
+    var workerResponse = await client.PostAsJsonAsync("/prompt-suggestions", workerRequest);
+    if (!workerResponse.IsSuccessStatusCode)
+    {
+        var error = await workerResponse.Content.ReadAsStringAsync();
+        return Results.Problem(FriendlyWorkerError("AI prompt suggestion failed", error), statusCode: 502);
+    }
+
+    var suggestion = await workerResponse.Content.ReadFromJsonAsync<PromptSuggestionResponse>();
+    return suggestion is null
+        ? Results.Problem("DNDMind could not draft a prompt suggestion just now. Please try again in a moment.", statusCode: 502)
+        : Results.Ok(suggestion);
+});
+
+app.MapPost("/api/images/generate", async (ImageGenerationRequest request, NpgsqlDataSource db, IHttpClientFactory httpClientFactory, ICurrentClientService currentClient) =>
+{
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
+    if (request.CampaignId == Guid.Empty)
+    {
+        return Results.BadRequest(new { error = "campaignId is required." });
+    }
+
+    var outputType = NormalizeStructuredImageOutputType(request.StructuredOutputType);
+    if (outputType is null)
+    {
+        return Results.BadRequest(new { error = "structuredOutputType must be npc, character, or encounter." });
+    }
+
+    var stylePreset = NormalizeImageStylePreset(request.StylePreset);
+    if (stylePreset is null || !ImageStylePresetAllowedForOutputType(outputType, stylePreset))
+    {
+        return Results.BadRequest(new { error = ImageStylePresetErrorMessage(outputType) });
+    }
+
+    var campaign = await LoadCampaign(request.CampaignId, db);
+    if (campaign is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
+
+    if (request.ConversationId is Guid conversationId && !await ConversationBelongsToCampaign(conversationId, request.CampaignId, db))
+    {
+        return Results.BadRequest(new { error = "conversationId must belong to this campaign." });
+    }
+
+    var workerRequest = new AiWorkerImageGenerationRequest(
+        request.CampaignId,
+        request.ConversationId,
+        outputType,
+        request.StructuredOutputData,
+        stylePreset,
+        clientOwnerId);
+
+    var client = httpClientFactory.CreateClient("ai-worker");
+    var workerResponse = await client.PostAsJsonAsync("/images/generate", workerRequest);
+    if (!workerResponse.IsSuccessStatusCode)
+    {
+        var error = await workerResponse.Content.ReadAsStringAsync();
+        return Results.Problem(FriendlyWorkerError("AI image generation failed", error), statusCode: 502);
+    }
+
+    var image = await workerResponse.Content.ReadFromJsonAsync<ImageGenerationResponse>();
+    return image is null
+        ? Results.Problem("DNDMind could not generate an image just now. Please try again in a moment.", statusCode: 502)
+        : Results.Ok(image);
 });
 
 app.MapPost("/api/tools/execute", async (ToolExecuteRequest request, NpgsqlDataSource db, IHttpClientFactory httpClientFactory, ICurrentClientService currentClient) =>
@@ -1913,6 +2104,32 @@ static async Task<List<PartyCharacterDto>> LoadParty(Guid campaignId, NpgsqlData
     return party;
 }
 
+static async Task<CampaignMemoryDto> LoadCampaignMemory(Guid campaignId, string clientOwnerId, NpgsqlDataSource db)
+{
+    var npcs = await LoadMemoryRows<NpcDto>(db, """
+        SELECT id, campaign_id, name, role, description, disposition, last_seen_session_id, metadata, created_at, updated_at
+        FROM npcs WHERE campaign_id = @campaignId AND client_owner_id = @clientOwnerId ORDER BY updated_at DESC, name
+        """, campaignId, clientOwnerId, ReadNpc);
+    var quests = await LoadMemoryRows<QuestDto>(db, """
+        SELECT id, campaign_id, title, status, description, last_seen_session_id, metadata, created_at, updated_at
+        FROM quests WHERE campaign_id = @campaignId AND client_owner_id = @clientOwnerId ORDER BY updated_at DESC, title
+        """, campaignId, clientOwnerId, ReadQuest);
+    var locations = await LoadMemoryRows<LocationDto>(db, """
+        SELECT id, campaign_id, name, description, location_type, last_seen_session_id, metadata, created_at, updated_at
+        FROM locations WHERE campaign_id = @campaignId AND client_owner_id = @clientOwnerId ORDER BY updated_at DESC, name
+        """, campaignId, clientOwnerId, ReadLocation);
+    var encounters = await LoadMemoryRows<EncounterDto>(db, """
+        SELECT id, campaign_id, session_id, title, summary, outcome, metadata, created_at
+        FROM encounters WHERE campaign_id = @campaignId AND client_owner_id = @clientOwnerId ORDER BY created_at DESC, title
+        """, campaignId, clientOwnerId, ReadEncounter);
+    var events = await LoadMemoryRows<MemoryEventDto>(db, """
+        SELECT id, campaign_id, session_id, event_type, title, description, metadata, created_at
+        FROM memory_events WHERE campaign_id = @campaignId AND client_owner_id = @clientOwnerId ORDER BY created_at DESC LIMIT 50
+        """, campaignId, clientOwnerId, ReadMemoryEvent);
+
+    return new CampaignMemoryDto(npcs, quests, locations, encounters, events);
+}
+
 static async Task<PartyCharacterDto?> LoadPartyCharacter(Guid characterId, NpgsqlDataSource db)
 {
     const string sql = """
@@ -1970,6 +2187,124 @@ static void AddPartyCharacterParameters(NpgsqlCommand cmd, PartyCharacterWriteRe
 
 static object BlankToDbNull(string? value) =>
     string.IsNullOrWhiteSpace(value) ? DBNull.Value : value.Trim();
+
+static string? NormalizePromptSuggestionMode(string? mode)
+{
+    var normalized = string.IsNullOrWhiteSpace(mode) ? "auto" : mode.Trim().ToLowerInvariant();
+    return normalized is "auto" or "rules" or "npc" or "character" or "encounter" or "recap" or "summarize" ? normalized : null;
+}
+
+static string? NormalizeStructuredImageOutputType(string? type)
+{
+    var normalized = string.IsNullOrWhiteSpace(type) ? "" : type.Trim().ToLowerInvariant();
+    return normalized is "npc" or "character" or "encounter" ? normalized : null;
+}
+
+static string? NormalizeImageStylePreset(string? preset)
+{
+    var normalized = string.IsNullOrWhiteSpace(preset) ? "cinematic" : preset.Trim().ToLowerInvariant().Replace("_", " ");
+    return normalized is "cinematic" or "parchment sketch" or "combat stance" or "anime"
+        ? normalized
+        : null;
+}
+
+static bool ImageStylePresetAllowedForOutputType(string outputType, string stylePreset) =>
+    outputType switch
+    {
+        "character" => stylePreset is "cinematic" or "parchment sketch" or "combat stance" or "anime",
+        "npc" => stylePreset is "cinematic" or "parchment sketch" or "anime",
+        "encounter" => stylePreset is "cinematic" or "anime",
+        _ => false
+    };
+
+static string ImageStylePresetErrorMessage(string outputType) =>
+    outputType switch
+    {
+        "character" => "stylePreset must be cinematic, parchment sketch, combat stance, or anime for character.",
+        "npc" => "stylePreset must be cinematic, parchment sketch, or anime for npc.",
+        "encounter" => "stylePreset must be cinematic or anime for encounter.",
+        _ => "stylePreset must match the selected structuredOutputType."
+    };
+
+static Dictionary<string, object?> BuildStructuredMetadata(string clientOwnerId, IEnumerable<KeyValuePair<string, object?>> values, SaveImageMetadata? image, string? imageOutputType = null)
+{
+    var metadata = new Dictionary<string, object?>
+    {
+        ["source"] = "structured_output",
+        ["clientOwnerId"] = clientOwnerId
+    };
+
+    foreach (var (key, value) in values)
+    {
+        metadata[key] = value;
+    }
+
+    foreach (var (key, value) in BuildValidatedImageMetadata(image, imageOutputType))
+    {
+        metadata[key] = value;
+    }
+
+    return metadata;
+}
+
+static Dictionary<string, object?> BuildValidatedImageMetadata(SaveImageMetadata? image, string? imageOutputType = null)
+{
+    var metadata = new Dictionary<string, object?>();
+    if (image is null)
+    {
+        return metadata;
+    }
+
+    var imageUrl = ValidateImageUrl(image.ImageUrl);
+    var imagePrompt = CompactText(image.ImagePrompt, 1500);
+    var provider = ValidateImageProvider(image.ImageProvider);
+    var model = CompactText(image.ImageModel, 120);
+    var stylePreset = NormalizeImageStylePreset(image.ImageStylePreset);
+    if (stylePreset is not null && imageOutputType is not null && !ImageStylePresetAllowedForOutputType(imageOutputType, stylePreset))
+    {
+        stylePreset = null;
+    }
+    var generatedAt = image.ImageGeneratedAt is DateTimeOffset timestamp
+        ? timestamp.UtcDateTime.ToString("O")
+        : null;
+
+    if (imageUrl is not null) metadata["imageUrl"] = imageUrl;
+    if (!string.IsNullOrWhiteSpace(imagePrompt)) metadata["imagePrompt"] = imagePrompt;
+    if (provider is not null) metadata["imageProvider"] = provider;
+    if (!string.IsNullOrWhiteSpace(model)) metadata["imageModel"] = model;
+    if (generatedAt is not null) metadata["imageGeneratedAt"] = generatedAt;
+    if (stylePreset is not null) metadata["imageStylePreset"] = stylePreset;
+    return metadata;
+}
+
+static string? ValidateImageUrl(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return null;
+    }
+
+    var trimmed = value.Trim();
+    if (trimmed.Length > 4096)
+    {
+        return null;
+    }
+    if (trimmed.StartsWith("data:image/svg+xml", StringComparison.OrdinalIgnoreCase))
+    {
+        return trimmed;
+    }
+    if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http")
+    {
+        return trimmed;
+    }
+    return null;
+}
+
+static string? ValidateImageProvider(string? value)
+{
+    var normalized = string.IsNullOrWhiteSpace(value) ? "" : value.Trim().ToLowerInvariant();
+    return normalized is "mock" or "gemini" or "vertex" ? normalized : null;
+}
 
 static bool TryPrepareUploadDocument(UploadDocumentRequest request, out PreparedUploadDocument upload, out string validationError)
 {
@@ -2575,6 +2910,21 @@ static async Task<Guid> CreateConversation(Guid campaignId, string firstMessage,
     return (Guid)id!;
 }
 
+static async Task<bool> ConversationBelongsToCampaign(Guid conversationId, Guid campaignId, NpgsqlDataSource db)
+{
+    const string sql = """
+        SELECT EXISTS (
+          SELECT 1 FROM ai_conversations
+          WHERE id = @conversationId AND campaign_id = @campaignId
+        )
+        """;
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("conversationId", conversationId);
+    cmd.Parameters.AddWithValue("campaignId", campaignId);
+    var result = await cmd.ExecuteScalarAsync();
+    return result is bool value && value;
+}
+
 static async Task StoreMessage(Guid conversationId, string role, string? mode, string content, object metadata, NpgsqlDataSource db)
 {
     const string sql = """
@@ -2908,9 +3258,40 @@ public record MemoryEventDto(
 public record ChatRequest(
     Guid CampaignId,
     Guid? ConversationId,
+    Guid? SessionId,
     string Message,
     string Mode,
     ChatContext Context);
+
+public record PromptSuggestionRequest(
+    Guid CampaignId,
+    Guid? SessionId,
+    string Mode,
+    string? CurrentInput);
+
+public record PromptSuggestionResponse(
+    string Prompt,
+    string Mode,
+    string? ResolvedMode,
+    string? Reason);
+
+public record ImageGenerationRequest(
+    Guid CampaignId,
+    Guid? ConversationId,
+    string StructuredOutputType,
+    JsonElement StructuredOutputData,
+    string? StylePreset);
+
+public record ImageGenerationResponse(
+    string? ImageUrl,
+    string? ImageData,
+    string ImagePrompt,
+    string Provider,
+    string Model,
+    string Status,
+    string? Error,
+    DateTimeOffset? ImageGeneratedAt,
+    string? ImageStylePreset);
 
 public record ToolExecuteRequest(
     Guid? CampaignId,
@@ -2934,7 +3315,8 @@ public record SaveNpcRequest(
     string? Motivation,
     string? Secret,
     string? RelationshipToParty,
-    string? QuestHook);
+    string? QuestHook,
+    SaveImageMetadata? Image);
 
 public record SaveQuestRequest(
     string Title,
@@ -2963,7 +3345,16 @@ public record SaveEncounterRequest(
     JsonElement? ScalingOptions,
     string[]? Rewards,
     string[]? CampaignHooks,
-    Guid? SessionId);
+    Guid? SessionId,
+    SaveImageMetadata? Image);
+
+public record SaveImageMetadata(
+    string? ImageUrl,
+    string? ImagePrompt,
+    string? ImageProvider,
+    string? ImageModel,
+    DateTimeOffset? ImageGeneratedAt,
+    string? ImageStylePreset);
 
 public record AiWorkerChatRequest(
     Guid CampaignId,
@@ -2973,7 +3364,41 @@ public record AiWorkerChatRequest(
     string ClientOwnerId,
     ChatContext Context,
     CampaignDto Campaign,
-    IReadOnlyList<PartyCharacterDto> Party);
+    IReadOnlyList<PartyCharacterDto> Party,
+    SessionDto? Session);
+
+public record AiWorkerPromptSuggestionRequest(
+    Guid CampaignId,
+    Guid? SessionId,
+    string Mode,
+    string? CurrentInput,
+    string ClientOwnerId,
+    CampaignDto Campaign,
+    IReadOnlyList<PartyCharacterDto> Party,
+    SessionDto? Session,
+    CampaignMemoryDto Memory);
+
+public record CampaignRecapRequest(
+    Guid? SessionId,
+    string? ActiveSessionTitle,
+    string? ActiveSessionRawNotes,
+    string? ActiveSessionSummary);
+
+public record AiWorkerCampaignRecapRequest(
+    Guid CampaignId,
+    string CampaignName,
+    string ClientOwnerId,
+    string? ActiveSessionTitle,
+    string? ActiveSessionRawNotes,
+    string? ActiveSessionSummary);
+
+public record AiWorkerImageGenerationRequest(
+    Guid CampaignId,
+    Guid? ConversationId,
+    string StructuredOutputType,
+    JsonElement StructuredOutputData,
+    string StylePreset,
+    string ClientOwnerId);
 
 public record AiWorkerIngestDocumentRequest(
     Guid DocumentId,
@@ -3003,6 +3428,10 @@ public record IngestDocumentResponse(
     int ChunkCount,
     string EmbeddingModel,
     bool MockEmbeddings);
+
+public record CampaignRecapResponse(
+    string Recap,
+    JsonElement[] Citations);
 
 public record SessionSummaryResponse(
     string Summary,

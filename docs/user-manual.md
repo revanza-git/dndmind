@@ -1,325 +1,301 @@
 # DNDMind User Manual
 
-DNDMind helps a Dungeon Master prepare sessions, answer rules questions, remember campaign details, create NPCs and encounters, summarize notes, and roll dice from one command center.
+DNDMind is a Dungeon Master co-pilot. It helps you keep campaign notes organized, ask rules questions, create NPCs and encounters, summarize sessions, search campaign memory, and roll dice from one command center.
 
-Use this manual when you want to know what to click, what each control means, and what result to expect.
+This guide is written for people using the app, not for people setting it up. You do not need to know how the app is built.
 
-## First 5 Minutes
+## Start Here
 
-1. Open DNDMind.
-   - Go to the app in your browser.
-   - You do not need to create an account.
-2. Choose a campaign.
-   - Use the campaign selector in the left sidebar.
-   - To follow this guide, choose `Embers of Blackwater`.
-   - If the selector says **No active campaigns**, click **New** to make one or restore one from **Archived**.
-3. Check the party.
-   - Look at the Party panel on the right.
-   - Add or update character level, HP, AC, class, race, initiative, passive perception, and notes if needed.
-4. Add campaign knowledge.
-   - Open **Campaign Knowledge** in the left sidebar.
-   - Add rules, lore, NPC notes, locations, quests, or session notes.
-   - Choose the right document type, then click **Add to Campaign**.
-5. Add session notes.
-   - Paste raw table notes into **Session Notes**.
-   - Click **Save**, then **Summarize**.
-6. Ask DNDMind for help.
-   - Choose a Task Hint mode, turn on the context toggles you want, type a prompt, and click **Send**.
-7. Save useful results.
-   - If DNDMind creates a useful NPC, encounter, quest, location, or summary card, click the matching save button.
+Use this short checklist the first time you open DNDMind.
 
-## Quick Tutorial
+1. Open the app in your browser.
+2. Choose a campaign from the left sidebar.
+3. If there are no active campaigns, click **New** or restore one from **Archived**.
+4. Check the party list on the right.
+5. Add rules, lore, NPC notes, or session notes in **Campaign Knowledge** if you want DNDMind to use them.
+6. Choose a task mode, such as **Auto**, **Rules**, **Encounter**, **NPC**, **Character**, **Recap**, or **Summarize**.
+7. Turn on the context toggles you want DNDMind to use.
+8. Type a request in the command console and click **Send**.
+9. Save useful NPCs, quests, locations, encounters, or summaries when DNDMind offers a save button.
 
-Goal: create and save one encounter using campaign memory and party details.
+Good first prompt:
 
-1. Select `Embers of Blackwater`.
-2. Confirm that `Embers of Blackwater` appears as the active campaign at the top.
+```text
+Create a medium encounter for this party involving Captain Vey and the Ashen Knives.
+```
+
+## First Successful Run
+
+Try this walkthrough if you want to learn the app by doing one complete task.
+
+Goal: create and save one encounter.
+
+1. Select `Embers of Blackwater`, or create a new campaign if your campaign list is empty.
+2. Confirm that the campaign name appears at the top of the workspace.
 3. Turn on **Campaign Memory** and **Party Info**.
-4. Choose **Encounter** in Task Hints.
-5. Type: `Create a medium encounter for this party involving Captain Vey and the Ashen Knives.`
+4. Choose **Encounter** mode.
+5. Type:
+
+```text
+Create a medium encounter for this party involving Captain Vey and the Ashen Knives.
+```
+
 6. Click **Send**.
-7. Review the answer, tool result, memory used, and encounter card.
-8. Click **Save Encounter** if you want to keep it.
+7. Read the encounter briefing.
+8. Check any tool results, memory references, or structured encounter card.
+9. Click **Save Encounter** if the result fits your session.
 
-Expected result: DNDMind shows an encounter briefing, any tool or memory context it used, and a structured encounter card you can save.
+Expected result: DNDMind creates a party-aware encounter and saves it as campaign memory when you approve it.
 
-## Command Center Map
+## Screen Map
 
-| Area | What you use it for |
+| Area | What it is for |
 | --- | --- |
-| Left Sidebar | Choose, create, edit, archive, or restore campaigns; open Campaign Knowledge; navigate app areas; and return to this manual. |
-| Campaign Knowledge | Add source material DNDMind can search and cite for the active campaign. |
-| Center Workspace | Read the chat, answers, citations, tool results, and generated cards. |
+| Left Sidebar | Choose, create, edit, archive, or restore campaigns. Open Campaign Knowledge and the user manual. |
+| Center Workspace | Read chat answers, citations, tool results, generated cards, and save actions. |
 | Top Summary Cards | See quick counts for party members, knowledge notes, memory items, and open hooks. |
-| Context Toggles | Decide which sources DNDMind may use for the next answer. |
-| Task Hints | Tell DNDMind what kind of work the next prompt needs. |
-| Right Panel | Roll dice, manage session notes, review party details, and check memory. |
-| Command Console | Type your request, send it, or clear the current chat when you want a fresh conversation. |
+| Task Modes | Tell DNDMind what kind of work the next request needs. |
+| Context Toggles | Choose which saved information DNDMind may use for the next answer. |
+| Command Console | Type your request, send it, or clear the current chat. |
+| Spark | Drafts a prompt for the selected task mode using the current campaign context. |
+| Right Panel | Manage dice, session notes, party details, citations, tool traces, and campaign memory. |
 
-## Campaign Menu
+## Campaigns
 
-The Campaign menu is the first place to check before you ask DNDMind for help. It tells the app which campaign you are working on right now.
+A campaign is the main container for your game. DNDMind uses the active campaign for chat, party details, session notes, Campaign Knowledge, saved cards, and campaign memory.
 
-When you choose a campaign, DNDMind uses that campaign for chat, session notes, party details, saved cards, campaign memory, and Campaign Knowledge. If the wrong campaign is selected, your next answer may use the wrong story context.
+Before asking a story-specific question, check the active campaign name. If the wrong campaign is selected, DNDMind may use the wrong story context.
 
-### What each control means
+### Campaign Controls
 
-| Control | What it does | When to use it |
+| Control | What it does | Use it when |
 | --- | --- | --- |
-| **New** | Opens a small form for a new campaign. | You are starting a new table, adventure, one-shot, or test campaign. |
-| **Edit** | Opens the form for the selected campaign. | You want to rename the campaign, update its description, or change the response tone. |
-| **Archive** | Moves the selected campaign out of the active list. It does not delete it. | You are done with a campaign for now and want to keep the active list tidy. |
-| Campaign selector | Chooses the active campaign. | You want DNDMind to use a different campaign. |
-| **Archived** list | Shows campaigns you put away. | You want to restore an older campaign. |
-| **Restore** | Moves an archived campaign back into the active campaign selector. | You want to use an archived campaign again. |
+| **New** | Creates a campaign. | You are starting a new adventure, table, one-shot, or test campaign. |
+| **Edit** | Updates the selected campaign name, description, or response tone. | The campaign premise or writing style needs a change. |
+| **Archive** | Moves the selected campaign out of the active list without deleting it. | You are done with a campaign for now. |
+| Campaign selector | Chooses the active campaign. | You want DNDMind to work in a different campaign. |
+| **Archived** | Shows campaigns that were put away. | You want to bring back an older campaign. |
+| **Restore** | Returns an archived campaign to the active list. | You want to use that campaign again. |
 
-### Create a campaign
+### Create a Campaign
 
 1. Click **New**.
 2. Enter a campaign name.
-3. Add a description if you want DNDMind to know the premise, mood, or main conflict.
-4. Add a campaign response tone if you want a consistent style, such as `Wry gothic suspense` or `Direct, table-ready notes`.
+3. Add a short description if helpful.
+4. Add a response tone if you want a consistent style, such as `Direct, table-ready notes`.
 5. Click **Save**.
 
-Expected result: the new campaign becomes the active campaign, and its name appears at the top of the main workspace.
+Expected result: the new campaign becomes active.
 
-### Edit a campaign
+### Archive or Restore a Campaign
 
-1. Choose the campaign from the selector.
-2. Click **Edit**.
-3. Change the name, description, or response tone.
-4. Click **Save**.
+Archive keeps your active list tidy. It does not delete the campaign.
 
-Use **Edit** for campaign-level details only. Party members, session notes, rules documents, and saved NPCs are managed in their own areas.
+To archive:
 
-### Archive a campaign
-
-1. Choose the campaign you want to put away.
+1. Choose the campaign.
 2. Click **Archive**.
 3. Confirm the message.
 
-Expected result: the campaign leaves the active selector and appears under **Archived**. If another active campaign exists, DNDMind selects one for you. If no active campaigns remain, the selector says **No active campaigns**.
+To restore:
 
-Archiving is useful when a campaign is finished, paused, or only needed later. It is not the same as deleting.
-
-### Restore an archived campaign
-
-1. Find the campaign under **Archived**.
-2. Click **Restore**.
-
-Expected result: the campaign returns to the active selector and becomes the selected campaign.
-
-### If you see "No active campaigns"
-
-This means there is no campaign currently ready to use from the active list.
-
-You can:
-
-1. Click **New** to create a campaign.
-2. Look under **Archived** and click **Restore** on an older campaign.
-
-Some parts of DNDMind work best after you have an active campaign. Create or restore one before adding campaign notes, saving cards, or asking story-specific questions.
+1. Look under **Archived**.
+2. Click **Restore** on the campaign you want.
 
 ## Campaign Knowledge
 
-Campaign Knowledge is where you give DNDMind source text for the active campaign. It can include published rules references, homebrew rules, setting lore, NPC notes, locations, quests, and pasted session notes.
+Campaign Knowledge is where you add source material DNDMind can search. Use it for rules, homebrew, lore, NPC notes, locations, quests, and session notes.
 
-Use it when you want DNDMind to answer from material you provided instead of only giving a general response.
+Add information here when you want DNDMind to answer from your material instead of guessing from a short prompt.
 
-### What to add
+### What to Add
 
 | Material | Good use |
 | --- | --- |
-| Rules | Rulings that should include citations, such as advantage, conditions, actions, or spell notes. |
-| Homebrew | Custom table rules, house mechanics, custom monsters, custom items, or setting-specific mechanics. |
-| NPC notes | Names, motives, secrets, relationships, and recurring behavior. |
-| Location notes | Places, factions, dangers, clues, and local rumors. |
-| Quest notes | Goals, complications, rewards, unresolved hooks, and current status. |
-| Campaign lore | Gods, factions, history, politics, prophecies, and world truths. |
-| Session notes | Raw or cleaned table notes that should become searchable campaign context. |
+| Rules | Rules references you want cited in answers. |
+| Homebrew | Custom rules, table rulings, custom items, monsters, or mechanics. |
+| NPC notes | Names, motives, secrets, relationships, and hooks. |
+| Location notes | Places, clues, hazards, factions, rumors, and local details. |
+| Quest notes | Goals, status, complications, rewards, and unresolved hooks. |
+| Campaign lore | History, factions, gods, politics, prophecies, and world truths. |
+| Session notes | Raw or cleaned notes from a session. |
 
-### How to add an entry
+### Add an Entry
 
 1. Open **Campaign Knowledge** in the left sidebar.
-2. Give the entry a clear title, such as `Blackwater Mine Lore` or `House Rules - Resting`.
-3. Choose **Rules** if the text is a rules reference.
-4. Choose **Homebrew** if the text is custom rules or custom table mechanics.
-5. Download a template if you want a friendly starting shape.
-6. Choose a `.txt` or `.md` file, or paste text into the box.
-7. Click **Add to Campaign**.
-8. Wait until the entry shows as ready to use.
+2. Enter a clear title, such as `Blackwater Mine Lore` or `House Rules - Resting`.
+3. Choose the document type.
+4. Download a template if you want a starting shape.
+5. Upload a `.txt` or `.md` file, or paste text into the box.
+6. Click **Add to Campaign**.
+7. Wait until the entry is ready to use.
 
 Supported uploads are `.txt` and `.md` files up to 2 MB. Pasted notes work too.
 
-### Template guide
-
-| Template | Use it for |
-| --- | --- |
-| Rules | Rules references you want cited in answers. |
-| Session Notes | Raw notes from play that should become searchable context. |
-| NPC | Character details, secrets, relationships, and hooks. |
-| Location | Places, points of interest, hazards, and clues. |
-| Quest | Objectives, status, complications, and rewards. |
-| Campaign Lore | Factions, history, world facts, gods, rumors, and long-running truths. |
-
-### Reading the knowledge list
-
-Each saved entry shows its title, type, status, and note count.
+### Reading the Knowledge List
 
 - **Ready to use** means DNDMind can search that entry.
-- **Notes** are searchable chunks created from the text.
+- **Notes** are the searchable pieces created from your text.
 - **Delete** removes a regular rules or homebrew document from Campaign Knowledge.
-- Session memory documents may be protected because they come from saved campaign memory.
+- Some session memory documents may be protected because they come from saved campaign memory.
 
 ## Context Toggles
 
-Context toggles control what information DNDMind is allowed to use for the next answer. They do not change your saved data. They only affect the prompt you are about to send.
+Context toggles decide what DNDMind may use for the next answer. They do not erase or change saved information.
 
-| Toggle | Turn it on when... | Turn it off when... |
+| Toggle | Turn it on when | Turn it off when |
 | --- | --- | --- |
-| Rules | You want rules citations from ready-to-use rules entries. | You want freeform story, brainstorming, or a fast answer without rules lookup. |
-| Campaign Memory | You want DNDMind to remember saved NPCs, quests, locations, summaries, or notes. | You want a fresh idea that does not depend on the current campaign. |
-| Party Info | You want encounter balance, tactics, difficulty, or character-aware advice. | The party is not relevant to the answer. |
-| Homebrew | You want custom rules or house mechanics to affect the answer. | You want only standard rules or campaign story context. |
+| **Rules** | You want a rules answer with citations from ready rules entries. | You want story ideas, brainstorming, or a fast answer without rules lookup. |
+| **Campaign Memory** | Saved NPCs, quests, locations, summaries, hooks, or encounters should matter. | You want a fresh idea that does not depend on the current campaign. |
+| **Party Info** | You need encounter balance, tactics, difficulty, or character-aware advice. | The party is not relevant. |
+| **Homebrew** | Custom rules or house mechanics should affect the answer. | You want standard rules or campaign story only. |
 
-Good defaults:
+Simple defaults:
 
-- Session prep: **Campaign Memory** on, **Party Info** optional.
-- Rules question: **Rules** on, **Homebrew** on only if your table uses custom rules for that topic.
+- Rules question: **Rules** on.
+- Homebrew rules question: **Rules** and **Homebrew** on.
 - Encounter design: **Campaign Memory** and **Party Info** on.
-- NPC or story generation: **Campaign Memory** on.
-- Pure brainstorming: use **Auto** with only the context you truly need.
+- NPC or story work: **Campaign Memory** on.
+- Pure brainstorming: leave on only the context you truly need.
 
-If DNDMind gives an answer that feels too generic, check the toggles first.
+## Task Modes
 
-## Task Hints
+Task modes tell DNDMind what kind of answer you want.
 
-Task Hints are the mode buttons above the chat area. They tell DNDMind what kind of work your next prompt needs.
-
-| Task Hint | Use it when you want to... | Example |
+| Mode | Best for | Example prompt |
 | --- | --- | --- |
-| Auto | Let DNDMind choose the best approach. | `Prepare tonight's opening scene based on last session.` |
-| Rules | Ask a rules question with sources. | `How does advantage work?` |
-| Story | Create narration, atmosphere, or scene text. | `Describe the ruined temple entrance.` |
-| Encounter | Build or adjust combat and challenges. | `Create a hard ambush for my level 3 party.` |
-| NPC | Create characters and relationship hooks. | `Generate a suspicious tavern keeper.` |
-| Combat | Roll dice, plan tactics, or handle initiative. | `Roll initiative for the party and goblins.` |
-| Summarize | Turn session notes into useful memory. | `Summarize this session and extract unresolved hooks.` |
+| **Auto** | Mixed tasks, prep, and general help. | `Prepare tonight's opening scene based on last session.` |
+| **Rules** | Rules questions that need sources. | `How does advantage work?` |
+| **Encounter** | Combat, hazards, and challenge design. | `Create a hard ambush for my level 3 party.` |
+| **NPC** | Characters, motives, secrets, and hooks. | `Generate a suspicious tavern keeper.` |
+| **Character** | Player characters, backup characters, rivals, and hirelings. | `Generate a level 3 adventurer tied to this campaign.` |
+| **Recap** | Catching up on what has happened so far. | `Recap the last session and list the open hooks.` |
+| **Summarize** | Session notes, recaps, and extracted hooks. | `Summarize this session and extract unresolved hooks.` |
 
-Task Hints work best when paired with the right context toggles. For example, **Rules** mode with the **Rules** toggle on is best for cited rulings. **Encounter** mode with **Party Info** on is best for party-aware combat design.
+Mode plus toggles is the main habit to learn. For example, **Rules** mode with **Rules** on is best for cited rulings. **Encounter** mode with **Party Info** on is best for party-aware fights.
 
 ## Common Tasks
 
-### Create or choose a campaign
+### Ask a Rules Question
 
-1. Find **Campaign** in the left sidebar.
-2. Click **New** if you need a new campaign.
-3. Use the selector to choose an existing active campaign.
-4. If the campaign is under **Archived**, click **Restore** first.
-5. Confirm the campaign name at the top of the main workspace before sending a prompt.
-
-Expected result: DNDMind uses the selected campaign for memory, notes, sources, party context, and saved cards.
-
-### Ask a rules question
-
-1. Choose **Rules** in Task Hints.
+1. Choose **Rules** mode.
 2. Turn **Rules** on.
 3. Turn **Homebrew** on only if custom rules should apply.
-4. Type: `How does advantage work?`
+4. Type a question.
 5. Click **Send**.
 
-Expected result: DNDMind gives a short answer and cites the rules text it used.
+Example:
 
-### Start a fresh chat
+```text
+How does advantage work?
+```
 
-Use **Clear** when the current chat has become long, messy, or tied to an older scene and you want a clean place to ask the next question.
-
-1. Check that you have the right campaign selected.
-2. Click **Clear** near the context toggles.
-3. Confirm the message.
-4. Type your next prompt.
-
-Expected result: the visible chat clears, and DNDMind starts a new conversation for your next prompt.
-
-Clearing chat does not delete your campaign, party, Campaign Knowledge, session notes, saved NPCs, quests, locations, encounters, or summaries. It only clears the current chat view and conversation thread.
-
-### Add homebrew rules
-
-1. Open **Campaign Knowledge**.
-2. Enter a clear title, such as `Homebrew - Moon Blade Rules`.
-3. Set **Document Type** to **Homebrew**.
-4. Paste or upload the homebrew text.
-5. Click **Add to Campaign**.
-6. Turn **Homebrew** on before asking about those rules.
-
-Expected result: DNDMind can search your custom rules when the Homebrew toggle is enabled.
+Expected result: DNDMind gives a short answer and shows citations when it used a rules source.
 
 ### Create an NPC
 
-1. Choose **NPC** in Task Hints.
+1. Choose **NPC** mode.
 2. Turn **Campaign Memory** on if the NPC should connect to your story.
-3. Type: `Generate a suspicious NPC connected to Captain Vey.`
+3. Type a specific request.
 4. Click **Send**.
 5. Review the NPC card.
-6. Click **Save NPC** if you want to keep it.
+6. Click **Save NPC** if you want DNDMind to remember it.
+7. If image controls appear, choose a style and click **Generate Image** before saving when you want a visual reference.
 
-Expected result: DNDMind creates an NPC with role, personality, motivation, secret, and story hook.
+Example:
 
-### Create an encounter
+```text
+Generate a suspicious NPC connected to Captain Vey.
+```
 
-1. Choose **Encounter** in Task Hints.
+### Create an Encounter
+
+1. Choose **Encounter** mode.
 2. Turn **Campaign Memory** and **Party Info** on.
-3. Type: `Create a medium encounter for this party involving the Ashen Knives.`
+3. Type the encounter request.
 4. Click **Send**.
 5. Review the encounter card.
 6. Click **Save Encounter** if it fits your session.
+7. If image controls appear, choose a style and click **Generate Image** before saving when you want a visual reference.
 
-Expected result: DNDMind creates a party-aware encounter with tactics and story context. If you click **Save Encounter**, it appears later in Campaign Memory under saved encounters.
+Example:
 
-### Roll dice
+```text
+Create a medium encounter for this party involving the Ashen Knives.
+```
 
-1. Use the Dice Roller on the right, or choose **Combat** in Task Hints.
-2. Type a roll like `1d20+5`.
-3. Click **Roll**, or send a prompt like `Roll 1d20+5 for perception.`
+### Roll Dice
 
-Expected result: DNDMind shows the roll result and keeps the tool result visible.
+Use the dice roller on the right, or ask DNDMind to roll from the command console.
 
-### Summarize session notes
+Example:
 
-1. Paste table notes into **Session Notes**.
+```text
+Roll 1d20+5 for perception.
+```
+
+Expected result: DNDMind shows the roll and keeps the tool result visible.
+
+### Summarize Session Notes
+
+1. Paste raw notes into **Session Notes**.
 2. Click **Save**.
 3. Click **Summarize**.
 4. Review the summary and extracted details.
-5. Save useful cards or summaries.
+5. Save useful summaries or cards.
 
 Expected result: important NPCs, quests, locations, hooks, and events become easier to find later.
 
-### Search campaign memory
+### Search Campaign Memory
 
-1. Choose **Auto** in Task Hints.
+1. Choose **Auto** mode.
 2. Turn **Campaign Memory** on.
-3. Type: `Search campaign memory for Captain Vey.`
+3. Ask for the name, place, event, or hook you need.
 4. Click **Send**.
 
-Expected result: DNDMind returns matching campaign details or memory references.
+Example:
 
-### Manage saved campaign memory
+```text
+Search campaign memory for Captain Vey.
+```
 
-Use Campaign Memory to review the people, quests, places, hooks, and encounters you have saved for the selected campaign.
+### Draft a Prompt with Spark
+
+1. Choose the task mode that matches your goal.
+2. Turn on the context toggles you want DNDMind to consider.
+3. Click **Spark** in the command console or on a quick prompt.
+4. Edit the drafted prompt if needed.
+5. Click **Send**.
+
+Spark is useful when you know the kind of help you need but want DNDMind to shape a stronger table-ready request.
+
+### Start a Fresh Chat
+
+Use **Clear** when the chat is long, messy, or tied to an old scene.
+
+1. Check the active campaign.
+2. Click **Clear**.
+3. Confirm the message.
+4. Send your next prompt.
+
+Clearing chat does not delete your campaign, party, Campaign Knowledge, session notes, saved cards, or campaign memory. It only clears the current chat thread.
+
+### Manage Saved Campaign Memory
+
+Campaign Memory is where saved NPCs, quests, locations, hooks, encounters, and summaries live.
 
 1. Find the Campaign Memory area on the right.
-2. Open the group you want, such as **NPCs**, **Open Quests**, **Recent Locations**, **Hooks**, or **Saved Encounters**.
-3. Click a saved item to see more detail.
-4. If the item is no longer useful, click **Delete**.
-5. Click **Delete?** to confirm.
+2. Open a group, such as **NPCs**, **Open Quests**, **Recent Locations**, **Hooks**, or **Saved Encounters**.
+3. Select an item to review details.
+4. Delete an item only when you no longer want DNDMind to use it.
 
-Expected result: the item leaves Campaign Memory for the current campaign.
-
-Delete saved memory only when you are sure you do not want DNDMind to use that detail later. Deleting a saved encounter also removes its searchable encounter memory. If you only want a cleaner chat screen, use **Clear** instead.
+Deleting a saved encounter also removes its searchable encounter memory.
 
 ## Good Prompt Patterns
 
-Use names, goals, and constraints. These prompts work well:
+The best prompts include names, goals, limits, and what you want back.
+
+Try these:
 
 - `How should I open tonight's session?`
 - `What happened at Blackwater Mine?`
@@ -329,36 +305,48 @@ Use names, goals, and constraints. These prompts work well:
 - `Summarize these session notes and extract NPCs, quests, and hooks.`
 - `Search campaign memory for unresolved hooks involving Captain Vey.`
 - `Roll 1d20+5 for perception.`
+- `Recap the campaign so far and list the unresolved hooks.`
+
+Prompt recipe:
+
+```text
+Create [thing] for [situation], using [important names], with [tone or limits].
+```
+
+Example:
+
+```text
+Create three clues for the Blackwater Mine investigation, using Captain Vey as a hidden suspect, with a tense but table-ready tone.
+```
 
 ## Table Workflows
 
-### Before a session
+### Before a Session
 
 1. Review campaign memory for unresolved hooks, NPCs, and locations.
 2. Check that party details are current.
-3. Add any new lore, rules, or prep notes to **Campaign Knowledge**.
+3. Add new lore, rules, or prep notes to **Campaign Knowledge**.
 4. Turn on **Campaign Memory**.
-5. Ask for an opening scene or recap.
+5. Ask for an opening scene, recap, or prep list.
 6. Generate NPCs or encounters you may need.
 7. Save useful cards.
 
-### During a session
+### During a Session
 
 1. Use **Auto** for general help.
 2. Use **Rules** for rulings.
-3. Use **Combat** or the Dice Roller for rolls and initiative.
-4. Search memory when a name, location, or clue comes back.
-5. Add urgent lore or rules notes to **Campaign Knowledge** if the table needs them later.
-6. Save important new NPCs, hooks, or encounter results.
+3. Use the dice roller for rolls and initiative.
+4. Search memory when a name, location, or clue returns.
+5. Save important new NPCs, hooks, or encounter results.
 
-### After a session
+### After a Session
 
-1. Paste your raw notes into **Session Notes**.
+1. Paste raw notes into **Session Notes**.
 2. Click **Save**.
 3. Click **Summarize**.
-4. Review the extracted NPCs, quests, locations, and hooks.
+4. Review extracted NPCs, quests, locations, and hooks.
 5. Save the summary if it is accurate.
-6. Add cleaned notes or lore to **Campaign Knowledge** if you want them cited later.
+6. Add cleaned lore or rules to **Campaign Knowledge** if you want them cited later.
 
 ## Local Browser Profile
 
@@ -366,121 +354,99 @@ DNDMind does not require login. Your browser creates a local profile so your ses
 
 If you open DNDMind in a different browser, use incognito mode, or clear browser storage, you may not see the same saved sessions.
 
+Use the same browser profile during a campaign so your saved sessions are easier to find.
+
 ## Troubleshooting
 
 ### The answer has no citations
 
-Cause: **Rules** is off, the relevant knowledge entry is not ready to use, or you asked in a mode that does not need source lookup.
+Likely cause: **Rules** is off, the rules entry is not ready, or the prompt did not need a source lookup.
 
-Fix:
+Try this:
 
 1. Turn **Rules** on.
 2. Add a rules document to **Campaign Knowledge**.
-3. Confirm the entry shows as ready to use.
+3. Confirm the entry is ready to use.
 4. Ask again in **Rules** mode.
 
 ### Homebrew was ignored
 
-Cause: **Homebrew** is off, or the custom rule was added as the wrong document type.
+Likely cause: **Homebrew** is off, or the custom rule was added as the wrong document type.
 
-Fix:
+Try this:
 
 1. Turn **Homebrew** on.
 2. Check that the entry was added as **Homebrew**.
 3. Mention the rule name in your prompt.
-4. Ask again in **Auto** or **Rules** mode.
+4. Ask again.
 
 ### The answer forgot my story
 
-Cause: **Campaign Memory** is off, or the detail has not been saved yet.
+Likely cause: **Campaign Memory** is off, or the detail has not been saved yet.
 
-Fix:
+Try this:
 
 1. Turn **Campaign Memory** on.
-2. Save session notes, NPCs, quests, locations, or encounter cards.
-3. Ask again with the relevant name or event in the prompt.
+2. Save session notes, NPCs, quests, locations, summaries, or encounter cards.
+3. Ask again with the relevant name, place, or event.
 
 ### The encounter ignores the party
 
-Cause: **Party Info** is off, or the party details are missing.
+Likely cause: **Party Info** is off, or party details are missing.
 
-Fix:
+Try this:
 
 1. Turn **Party Info** on.
-2. Add or update each character's level, HP, AC, class, race, and notes.
-3. Ask again in **Encounter** or **Combat** mode.
+2. Add each character's level, HP, AC, class, race, and notes.
+3. Ask again in **Encounter** mode.
 
 ### My upload will not add
 
-Cause: the file is the wrong type, too large, empty, or the entry has no title.
+Likely cause: the file is the wrong type, too large, empty, or missing a title.
 
-Fix:
+Try this:
 
 1. Use a `.txt` or `.md` file.
 2. Keep the file under 2 MB.
 3. Add a clear document title.
-4. Paste text into the box if file upload is not convenient.
-
-### My session disappeared
-
-Cause: you may be in a different browser profile, incognito window, or your browser storage was cleared.
-
-Fix:
-
-1. Return to the same browser profile you used before.
-2. Avoid clearing browser storage during a campaign.
-
-### I cleared chat by mistake
-
-Cause: **Clear** starts a fresh conversation and removes the visible chat from the command center.
-
-Fix:
-
-1. Keep using the same campaign.
-2. Check Campaign Memory, Session Notes, Party, and Campaign Knowledge if you need saved details.
-3. Ask DNDMind for a recap or search memory for the name, place, or hook you need.
-
-Your saved campaign material is still there. Only the current chat thread was cleared.
+4. Paste the text instead of uploading if that is easier.
 
 ### I see "No active campaigns"
 
-Cause: all campaigns may be archived, or no campaign has been created yet.
+Likely cause: no campaign has been created yet, or all campaigns are archived.
 
-Fix:
+Try this:
 
 1. Click **New** to create a campaign.
-2. Or look under **Archived** and click **Restore** on the campaign you want.
-3. Confirm the restored or new campaign name appears at the top.
+2. Or look under **Archived** and click **Restore**.
+3. Confirm the campaign name appears at the top.
 
 ### DNDMind is using the wrong campaign
 
-Cause: the active campaign is not the one you intended.
+Likely cause: the active campaign is not the one you intended.
 
-Fix:
+Try this:
 
 1. Open the campaign selector.
 2. Choose the correct campaign.
-3. Confirm the active campaign name at the top before sending a prompt.
+3. Confirm the active campaign name before sending a prompt.
 
-### I archived a campaign by mistake
+### I cleared chat by mistake
 
-Cause: the campaign was moved out of the active list.
+Likely cause: **Clear** started a fresh conversation.
 
-Fix:
-
-1. Look under **Archived** in the Campaign menu.
-2. Click **Restore** on the campaign.
-3. Confirm it appears in the campaign selector again.
+Your saved campaign material is still there. Check Campaign Memory, Session Notes, Party, and Campaign Knowledge if you need saved details.
 
 ## Helpful Terms
 
 - **Active Campaign**: the campaign currently selected in the left sidebar.
 - **Archived Campaign**: a campaign moved out of the active list but still available to restore later.
 - **Campaign Knowledge**: source text added to a campaign so DNDMind can search and cite it.
-- **Citation**: the source DNDMind used for an answer.
-- **Context Toggle**: a switch that controls which saved information DNDMind may use for the next prompt.
-- **Task Hint**: the mode button that tells DNDMind what kind of answer to produce.
 - **Campaign Memory**: saved notes, NPCs, quests, locations, encounters, and summaries.
-- **Structured Card**: a generated NPC, encounter, quest, location, or summary that can be saved.
-- **Tool Result**: a visible result from an action such as a dice roll, rules search, homebrew search, or memory search.
+- **Citation**: a source DNDMind used for an answer.
+- **Context Toggle**: a switch that controls which saved information DNDMind may use for the next prompt.
 - **Local Browser Profile**: the browser-based identity used to keep sessions separate.
+- **Structured Card**: a generated NPC, encounter, quest, location, or summary that can be saved.
+- **Spark**: the prompt suggestion control that drafts a request for the current mode.
+- **Task Mode**: the button that tells DNDMind what kind of answer to produce.
+- **Tool Result**: a visible result from an action such as a dice roll, rules search, memory search, or encounter check.
