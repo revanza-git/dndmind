@@ -37,6 +37,7 @@ Real provider support is available behind explicit configuration. Chat currently
 - `apps/web/components/structured` owns structured card rendering and suggested-action controls.
 - `apps/ai-worker/main.py`, `apps/ai-worker/app/orchestration`, `apps/ai-worker/app/tools`, and `apps/ai-worker/rag` own mock/provider AI behavior, RAG, tools, structured outputs, citations, and retrieval.
 - Vertex AI chat mode depends on `google-auth`, `VERTEX_PROJECT_ID`, `VERTEX_LOCATION`, `VERTEX_MODEL`, and optional in-container `GOOGLE_APPLICATION_CREDENTIALS`; keep `.env.example`, `docker-compose.yml`, README, and deployment docs aligned when changing provider setup.
+- `apps/ai-worker/app/orchestration/image_generation.py` owns optional structured-card image generation for NPC, character, and encounter cards. Keep it mock-first and deterministic by default with `IMAGE_GENERATION_ENABLED=false` and `IMAGE_PROVIDER=mock`; real image providers require explicit opt-in through Gemini API-key or Vertex ADC configuration.
 
 ## Contract Hotspots
 
@@ -55,6 +56,8 @@ Campaign `systemTone` is a guarded style hint only. Keep it aligned across campa
 Campaigns support soft archive via `archivedAt` / `archived_at`. Default campaign reads should exclude archived campaigns unless explicitly using archive or restore flows.
 
 Campaign memory includes encounters. Structured encounter saves persist both an encounter row and a campaign-memory document tagged with `memoryType: "encounter"` and `clientOwnerId`; keep encounter contracts aligned across API, worker structured outputs, frontend types/renderers, and `db/init.sql`.
+
+Structured-card image fields such as `imageUrl`, image prompts, and image metadata must stay aligned across worker schemas, API save validation, frontend structured renderers, and persisted memory metadata.
 
 Suggested action names are consumed by the frontend and are case-sensitive. Current examples include `saveNPC`, `saveQuest`, `saveLocation`, `saveEncounter`, `saveSessionSummary`, and `prompt`.
 
