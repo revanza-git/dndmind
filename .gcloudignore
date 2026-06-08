@@ -1,0 +1,16 @@
+.git/
+.gcloud/
+.env
+.env.*
+!.env.example
+
+apps/web/node_modules/
+apps/web/.next/
+apps/api/bin/
+apps/api/obj/
+apps/ai-worker/__pycache__/
+apps/ai-worker/.pytest_cache/
+
+*.log
+tmp/
+temp/

@@ -108,4 +108,4 @@ This split is useful for a portfolio project because it demonstrates a realistic
 - `campaigns`, `sessions`, and `party_characters` hold campaign setup, archive state, and party context.
 - `knowledge_documents` and `knowledge_chunks` store rules, homebrew, and memory RAG content.
 - `ai_conversations`, `ai_messages`, and `ai_tool_calls` preserve AI interactions.
-- `npcs`, `quests`, `locations`, `encounters`, and `memory_events` turn session notes and structured outputs into reusable campaign memory.
+- `npcs`, `quests`, `locations`, `encounters`, `hooks`, and `memory_events` turn session notes and structured outputs into reusable campaign memory.

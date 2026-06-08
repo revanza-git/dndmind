@@ -405,7 +405,7 @@ def _system_instruction() -> str:
         "npc, character, quest, location, encounter, session_summary, initiative_order, dice_roll. "
         "For character data, include hpCurrent, hpMax, tempHp, armorClass, initiativeModifier, and passivePerception when they can be reasonably assigned. "
         "suggestedActions must use these case-sensitive action names when applicable: "
-        "saveNPC, saveCharacter, saveQuest, saveLocation, saveEncounter, saveSessionSummary, prompt."
+        "saveNPC, saveCharacter, saveQuest, saveLocation, saveEncounter, saveHook, saveSessionSummary, prompt."
     )
 
 

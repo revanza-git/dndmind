@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Text;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Npgsql;
 using NpgsqlTypes;
@@ -18,14 +19,31 @@ var connectionString =
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentClientService, CurrentClientService>();
+builder.Services.AddTransient<CloudRunIdentityTokenHandler>();
 builder.Services.AddHttpClient("ai-worker", client =>
 {
     var workerUrl = builder.Configuration["AI_WORKER_URL"] ?? "http://localhost:8001";
     client.BaseAddress = new Uri(workerUrl);
-});
+}).AddHttpMessageHandler<CloudRunIdentityTokenHandler>();
 builder.Services.AddCors(options =>
 {
-    options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
+    var allowedOrigins = DeploymentConfig.ReadCsv(builder.Configuration["CORS_ALLOWED_ORIGINS"]);
+    options.AddDefaultPolicy(policy =>
+    {
+        if (allowedOrigins.Length > 0)
+        {
+            policy.WithOrigins(allowedOrigins).AllowAnyMethod().AllowAnyHeader();
+            return;
+        }
+
+        if (builder.Environment.IsDevelopment())
+        {
+            policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader();
+            return;
+        }
+
+        policy.SetIsOriginAllowed(_ => false).AllowAnyMethod().AllowAnyHeader();
+    });
 });
 
 var app = builder.Build();
@@ -704,8 +722,12 @@ app.MapGet("/api/campaigns/{campaignId:guid}/memory", async (Guid campaignId, Np
         SELECT id, campaign_id, session_id, event_type, title, description, metadata, created_at
         FROM memory_events WHERE campaign_id = @campaignId AND client_owner_id = @clientOwnerId ORDER BY created_at DESC LIMIT 50
         """, campaignId, clientOwnerId, ReadMemoryEvent);
+    var hooks = await LoadMemoryRows<HookDto>(db, """
+        SELECT id, campaign_id, session_id, title, description, status, resolution, related_entity_type, related_entity_name, metadata, created_at, updated_at
+        FROM hooks WHERE campaign_id = @campaignId AND client_owner_id = @clientOwnerId ORDER BY updated_at DESC, created_at DESC, title
+        """, campaignId, clientOwnerId, ReadHook);
 
-    return Results.Ok(new CampaignMemoryDto(npcs, quests, locations, encounters, events));
+    return Results.Ok(new CampaignMemoryDto(npcs, quests, locations, encounters, events, hooks));
 });
 
 app.MapPost("/api/campaigns/{campaignId:guid}/npcs", async (Guid campaignId, SaveNpcRequest request, NpgsqlDataSource db, ICurrentClientService currentClient) =>
@@ -866,6 +888,278 @@ app.MapPost("/api/campaigns/{campaignId:guid}/locations", async (Guid campaignId
     return Results.Ok(new { id = location.Id, location });
 });
 
+app.MapPost("/api/campaigns/{campaignId:guid}/memory-events", async (Guid campaignId, SaveMemoryEventRequest request, NpgsqlDataSource db, ICurrentClientService currentClient) =>
+{
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
+    if (string.IsNullOrWhiteSpace(request.Title))
+    {
+        return Results.BadRequest(new { error = "Memory event title is required." });
+    }
+    if (await LoadCampaign(campaignId, db) is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
+    if (request.SessionId is Guid sessionId)
+    {
+        await using var sessionCmd = db.CreateCommand("""
+            SELECT EXISTS (
+                SELECT 1 FROM sessions
+                WHERE id = @sessionId
+                  AND campaign_id = @campaignId
+                  AND client_owner_id = @clientOwnerId
+            )
+            """);
+        sessionCmd.Parameters.AddWithValue("sessionId", sessionId);
+        sessionCmd.Parameters.AddWithValue("campaignId", campaignId);
+        sessionCmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
+        var sessionExists = (bool)(await sessionCmd.ExecuteScalarAsync() ?? false);
+        if (!sessionExists)
+        {
+            return Results.BadRequest(new { error = "sessionId must belong to this campaign and client." });
+        }
+    }
+
+    var eventType = string.IsNullOrWhiteSpace(request.EventType) ? "unresolved_hook" : request.EventType.Trim();
+    if (eventType is not "unresolved_hook" and not "important_event")
+    {
+        return Results.BadRequest(new { error = "eventType must be unresolved_hook or important_event." });
+    }
+
+    const string sql = """
+        INSERT INTO memory_events (campaign_id, client_owner_id, session_id, event_type, title, description, metadata)
+        VALUES (@campaignId, @clientOwnerId, @sessionId, @eventType, @title, @description, @metadata)
+        RETURNING id, campaign_id, session_id, event_type, title, description, metadata, created_at
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("campaignId", campaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
+    cmd.Parameters.AddWithValue("sessionId", (object?)request.SessionId ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("eventType", eventType);
+    cmd.Parameters.AddWithValue("title", request.Title.Trim());
+    cmd.Parameters.AddWithValue("description", (object?)request.Description?.Trim() ?? DBNull.Value);
+    cmd.Parameters.Add(new NpgsqlParameter("metadata", NpgsqlDbType.Jsonb)
+    {
+        Value = JsonSerializer.Serialize(new
+        {
+            source = "structured_output",
+            clientOwnerId,
+            request.RelatedEntityType,
+            request.RelatedEntityName
+        })
+    });
+
+    await using var reader = await cmd.ExecuteReaderAsync();
+    await reader.ReadAsync();
+    var memoryEvent = ReadMemoryEvent(reader);
+    return Results.Ok(new { id = memoryEvent.Id, memoryEvent });
+});
+
+app.MapGet("/api/campaigns/{campaignId:guid}/hooks", async (Guid campaignId, NpgsqlDataSource db, ICurrentClientService currentClient) =>
+{
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+    if (await LoadCampaign(campaignId, db) is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
+
+    var hooks = await LoadMemoryRows<HookDto>(db, """
+        SELECT id, campaign_id, session_id, title, description, status, resolution, related_entity_type, related_entity_name, metadata, created_at, updated_at
+        FROM hooks WHERE campaign_id = @campaignId AND client_owner_id = @clientOwnerId ORDER BY updated_at DESC, created_at DESC, title
+        """, campaignId, clientOwnerId, ReadHook);
+    return Results.Ok(hooks);
+});
+
+app.MapPost("/api/campaigns/{campaignId:guid}/hooks", async (Guid campaignId, SaveHookRequest request, NpgsqlDataSource db, ICurrentClientService currentClient) =>
+{
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
+    if (string.IsNullOrWhiteSpace(request.Title))
+    {
+        return Results.BadRequest(new { error = "Hook title is required." });
+    }
+    if (await LoadCampaign(campaignId, db) is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
+    if (request.SessionId is Guid sessionId && !await SessionBelongsToCampaignClient(sessionId, campaignId, clientOwnerId, db))
+    {
+        return Results.BadRequest(new { error = "sessionId must belong to this campaign and client." });
+    }
+
+    var status = NormalizeHookStatus(request.Status);
+    if (status is null)
+    {
+        return Results.BadRequest(new { error = HookStatusError() });
+    }
+
+    const string sql = """
+        INSERT INTO hooks (campaign_id, client_owner_id, session_id, title, description, status, resolution, related_entity_type, related_entity_name, metadata)
+        VALUES (@campaignId, @clientOwnerId, @sessionId, @title, @description, @status, @resolution, @relatedEntityType, @relatedEntityName, @metadata)
+        RETURNING id, campaign_id, session_id, title, description, status, resolution, related_entity_type, related_entity_name, metadata, created_at, updated_at
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("campaignId", campaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
+    cmd.Parameters.AddWithValue("sessionId", (object?)request.SessionId ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("title", request.Title.Trim());
+    cmd.Parameters.AddWithValue("description", (object?)request.Description?.Trim() ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("status", status);
+    cmd.Parameters.AddWithValue("resolution", (object?)request.Resolution?.Trim() ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("relatedEntityType", (object?)request.RelatedEntityType?.Trim() ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("relatedEntityName", (object?)request.RelatedEntityName?.Trim() ?? DBNull.Value);
+    cmd.Parameters.Add(new NpgsqlParameter("metadata", NpgsqlDbType.Jsonb)
+    {
+        Value = JsonSerializer.Serialize(new
+        {
+            source = "structured_output",
+            clientOwnerId
+        })
+    });
+
+    await using var reader = await cmd.ExecuteReaderAsync();
+    await reader.ReadAsync();
+    var hook = ReadHook(reader);
+    return Results.Ok(new { id = hook.Id, hook });
+});
+
+app.MapPatch("/api/campaigns/{campaignId:guid}/hooks/{hookId:guid}", async (Guid campaignId, Guid hookId, UpdateHookRequest request, NpgsqlDataSource db, ICurrentClientService currentClient) =>
+{
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+    if (await LoadCampaign(campaignId, db) is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
+    if (request.SessionId is Guid sessionId && !await SessionBelongsToCampaignClient(sessionId, campaignId, clientOwnerId, db))
+    {
+        return Results.BadRequest(new { error = "sessionId must belong to this campaign and client." });
+    }
+
+    var status = request.Status is null ? null : NormalizeHookStatus(request.Status);
+    if (request.Status is not null && status is null)
+    {
+        return Results.BadRequest(new { error = HookStatusError() });
+    }
+
+    const string sql = """
+        UPDATE hooks
+        SET title = COALESCE(NULLIF(@title, ''), title),
+            description = COALESCE(@description, description),
+            status = COALESCE(@status, status),
+            resolution = COALESCE(@resolution, resolution),
+            session_id = COALESCE(@sessionId, session_id),
+            related_entity_type = COALESCE(@relatedEntityType, related_entity_type),
+            related_entity_name = COALESCE(@relatedEntityName, related_entity_name)
+        WHERE id = @hookId
+          AND campaign_id = @campaignId
+          AND client_owner_id = @clientOwnerId
+        RETURNING id, campaign_id, session_id, title, description, status, resolution, related_entity_type, related_entity_name, metadata, created_at, updated_at
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("hookId", hookId);
+    cmd.Parameters.AddWithValue("campaignId", campaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
+    cmd.Parameters.AddWithValue("title", (object?)request.Title?.Trim() ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("description", (object?)request.Description?.Trim() ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("status", (object?)status ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("resolution", (object?)request.Resolution?.Trim() ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("sessionId", (object?)request.SessionId ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("relatedEntityType", (object?)request.RelatedEntityType?.Trim() ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("relatedEntityName", (object?)request.RelatedEntityName?.Trim() ?? DBNull.Value);
+
+    await using var reader = await cmd.ExecuteReaderAsync();
+    if (!await reader.ReadAsync())
+    {
+        return Results.NotFound(new { error = "Hook not found." });
+    }
+
+    var hook = ReadHook(reader);
+    return Results.Ok(new { id = hook.Id, hook });
+});
+
+app.MapPost("/api/campaigns/{campaignId:guid}/hooks/{hookId:guid}/resolve", async (Guid campaignId, Guid hookId, ResolveHookRequest request, NpgsqlDataSource db, ICurrentClientService currentClient) =>
+{
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+    if (await LoadCampaign(campaignId, db) is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
+
+    const string sql = """
+        UPDATE hooks
+        SET status = 'resolved',
+            resolution = COALESCE(NULLIF(@resolution, ''), resolution)
+        WHERE id = @hookId
+          AND campaign_id = @campaignId
+          AND client_owner_id = @clientOwnerId
+        RETURNING id, campaign_id, session_id, title, description, status, resolution, related_entity_type, related_entity_name, metadata, created_at, updated_at
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("hookId", hookId);
+    cmd.Parameters.AddWithValue("campaignId", campaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
+    cmd.Parameters.AddWithValue("resolution", (object?)request.Resolution?.Trim() ?? DBNull.Value);
+    await using var reader = await cmd.ExecuteReaderAsync();
+    if (!await reader.ReadAsync())
+    {
+        return Results.NotFound(new { error = "Hook not found." });
+    }
+    var hook = ReadHook(reader);
+    return Results.Ok(new { id = hook.Id, hook });
+});
+
+app.MapPost("/api/campaigns/{campaignId:guid}/hooks/{hookId:guid}/drop", async (Guid campaignId, Guid hookId, NpgsqlDataSource db, ICurrentClientService currentClient) =>
+{
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+    if (await LoadCampaign(campaignId, db) is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
+
+    const string sql = """
+        UPDATE hooks
+        SET status = 'dropped'
+        WHERE id = @hookId
+          AND campaign_id = @campaignId
+          AND client_owner_id = @clientOwnerId
+        RETURNING id, campaign_id, session_id, title, description, status, resolution, related_entity_type, related_entity_name, metadata, created_at, updated_at
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("hookId", hookId);
+    cmd.Parameters.AddWithValue("campaignId", campaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
+    await using var reader = await cmd.ExecuteReaderAsync();
+    if (!await reader.ReadAsync())
+    {
+        return Results.NotFound(new { error = "Hook not found." });
+    }
+    var hook = ReadHook(reader);
+    return Results.Ok(new { id = hook.Id, hook });
+});
+
 app.MapDelete("/api/campaigns/{campaignId:guid}/npcs/{npcId:guid}", async (Guid campaignId, Guid npcId, NpgsqlDataSource db, ICurrentClientService currentClient) =>
 {
     if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
@@ -968,6 +1262,32 @@ app.MapDelete("/api/campaigns/{campaignId:guid}/memory-events/{eventId:guid}", a
     cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
     var deleted = await cmd.ExecuteNonQueryAsync();
     return deleted > 0 ? Results.NoContent() : Results.NotFound(new { error = "Memory event not found." });
+});
+
+app.MapDelete("/api/campaigns/{campaignId:guid}/hooks/{hookId:guid}", async (Guid campaignId, Guid hookId, NpgsqlDataSource db, ICurrentClientService currentClient) =>
+{
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+    if (await LoadCampaign(campaignId, db) is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
+
+    const string sql = """
+        DELETE FROM hooks
+        WHERE id = @hookId
+          AND campaign_id = @campaignId
+          AND client_owner_id = @clientOwnerId
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("hookId", hookId);
+    cmd.Parameters.AddWithValue("campaignId", campaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
+    var deleted = await cmd.ExecuteNonQueryAsync();
+    return deleted > 0 ? Results.NoContent() : Results.NotFound(new { error = "Hook not found." });
 });
 
 app.MapPost("/api/campaigns/{campaignId:guid}/encounters", async (Guid campaignId, SaveEncounterRequest request, NpgsqlDataSource db, ICurrentClientService currentClient, IHttpClientFactory httpClientFactory) =>
@@ -1714,6 +2034,23 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
           created_at timestamptz NOT NULL DEFAULT now()
         );
 
+        CREATE TABLE IF NOT EXISTS hooks (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+          client_owner_id text NOT NULL DEFAULT 'dndmind-demo-client',
+          session_id uuid NULL REFERENCES sessions(id) ON DELETE SET NULL,
+          title text NOT NULL,
+          description text NULL,
+          status text NOT NULL DEFAULT 'open',
+          resolution text NULL,
+          related_entity_type text NULL,
+          related_entity_name text NULL,
+          metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now(),
+          CONSTRAINT hooks_status_check CHECK (status IN ('open', 'rumor', 'lead', 'active', 'resolved', 'dropped'))
+        );
+
         CREATE TABLE IF NOT EXISTS party_character_events (
           id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
           campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
@@ -1790,6 +2127,7 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
         CREATE INDEX IF NOT EXISTS idx_locations_campaign_id ON locations(campaign_id);
         CREATE INDEX IF NOT EXISTS idx_encounters_campaign_id ON encounters(campaign_id);
         CREATE INDEX IF NOT EXISTS idx_memory_events_campaign_id ON memory_events(campaign_id);
+        CREATE INDEX IF NOT EXISTS idx_hooks_campaign_id ON hooks(campaign_id);
         CREATE INDEX IF NOT EXISTS idx_party_characters_campaign_id ON party_characters(campaign_id);
         CREATE INDEX IF NOT EXISTS idx_party_character_events_campaign_id ON party_character_events(campaign_id);
         CREATE INDEX IF NOT EXISTS idx_party_character_events_character_id ON party_character_events(character_id);
@@ -1799,6 +2137,7 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
         CREATE INDEX IF NOT EXISTS idx_locations_campaign_client_owner ON locations(campaign_id, client_owner_id);
         CREATE INDEX IF NOT EXISTS idx_encounters_campaign_client_owner ON encounters(campaign_id, client_owner_id);
         CREATE INDEX IF NOT EXISTS idx_memory_events_campaign_client_owner ON memory_events(campaign_id, client_owner_id);
+        CREATE INDEX IF NOT EXISTS idx_hooks_campaign_client_owner ON hooks(campaign_id, client_owner_id, status);
 
         DO $$
         BEGIN
@@ -1817,7 +2156,30 @@ static async Task EnsureRagSchema(NpgsqlDataSource db)
           IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'locations_updated_at') THEN
             CREATE TRIGGER locations_updated_at BEFORE UPDATE ON locations FOR EACH ROW EXECUTE FUNCTION set_updated_at();
           END IF;
+          IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'hooks_updated_at') THEN
+            CREATE TRIGGER hooks_updated_at BEFORE UPDATE ON hooks FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+          END IF;
         END $$;
+
+        INSERT INTO hooks (campaign_id, client_owner_id, session_id, title, description, status, related_entity_type, related_entity_name, metadata, created_at)
+        SELECT memory_events.campaign_id,
+               memory_events.client_owner_id,
+               memory_events.session_id,
+               memory_events.title,
+               memory_events.description,
+               'open',
+               'memory_event',
+               memory_events.title,
+               memory_events.metadata || jsonb_build_object('source', 'memory_event_backfill', 'memoryEventId', memory_events.id),
+               memory_events.created_at
+        FROM memory_events
+        WHERE memory_events.event_type = 'unresolved_hook'
+          AND NOT EXISTS (
+            SELECT 1 FROM hooks
+            WHERE hooks.campaign_id = memory_events.campaign_id
+              AND hooks.client_owner_id = memory_events.client_owner_id
+              AND hooks.metadata->>'memoryEventId' = memory_events.id::text
+          );
         """;
 
     await using var cmd = db.CreateCommand(sql);
@@ -1918,6 +2280,23 @@ static async Task EnsureDemoSeedData(NpgsqlDataSource db, Guid demoCampaignId, s
           SELECT 1 FROM memory_events
           WHERE campaign_id = @campaignId AND client_owner_id = @clientOwnerId AND title = 'Who paid Captain Vey?'
         );
+
+        INSERT INTO hooks (campaign_id, client_owner_id, session_id, title, description, status, related_entity_type, related_entity_name, metadata)
+        SELECT @campaignId, @clientOwnerId, '22222222-2222-2222-2222-222222222222', seed.title, seed.description, seed.status, seed.related_entity_type, seed.related_entity_name, '{"source":"demo_seed"}'::jsonb
+        FROM (
+          VALUES
+            ('Who paid Captain Vey?', 'The party knows Vey sold the map, but not who funded the betrayal.', 'open', 'quest', 'Hunt Captain Vey'),
+            ('What does the bronze door under Blackwater Mine unlock?', 'The Dawn Shard pulsed near the sealed bronze door, but no one knows whether it opens a vault, prison, or old shrine.', 'lead', 'location', 'Blackwater Mine'),
+            ('Why did a masked agent leave a black feather at the Silver Lantern Inn?', 'Nyx recognizes the inn as a smuggling stop, and the black feather points toward Ashen Knives watchers inside Eldermire.', 'open', 'location', 'Silver Lantern Inn'),
+            ('Can Mayor Elowen protect Eldermire before the next new moon?', 'Mayor Elowen asked for help before the next new moon, but the town may already have Ashen Knives informants.', 'rumor', 'npc', 'Mayor Elowen'),
+            ('Track Captain Vey through the smuggler tunnel', 'Mira swore to find Vey, and the collapsed ore lift hides the route he used to escape Blackwater Mine.', 'active', 'npc', 'Captain Vey')
+        ) AS seed(title, description, status, related_entity_type, related_entity_name)
+        WHERE NOT EXISTS (
+          SELECT 1 FROM hooks
+          WHERE campaign_id = @campaignId
+            AND client_owner_id = @clientOwnerId
+            AND title = seed.title
+        );
         """;
 
     await using var cmd = db.CreateCommand(sql);
@@ -2014,6 +2393,51 @@ static async Task EnsureDemoClientSeed(NpgsqlDataSource db, Guid campaignId, str
           AND client_owner_id = @demoClientOwnerId
           AND NOT EXISTS (
             SELECT 1 FROM memory_events existing
+            WHERE existing.campaign_id = seed.campaign_id
+              AND existing.client_owner_id = @clientOwnerId
+              AND existing.title = seed.title
+          );
+
+        WITH target_session AS (
+          SELECT id
+          FROM sessions
+          WHERE campaign_id = @campaignId
+            AND client_owner_id = @clientOwnerId
+          ORDER BY session_number ASC, created_at ASC
+          LIMIT 1
+        )
+        INSERT INTO hooks (campaign_id, client_owner_id, session_id, title, description, status, related_entity_type, related_entity_name, metadata)
+        SELECT @campaignId, @clientOwnerId, (SELECT id FROM target_session), seed.title, seed.description, seed.status, seed.related_entity_type, seed.related_entity_name, '{"source":"demo_seed"}'::jsonb || jsonb_build_object('clientOwnerId', @clientOwnerId)
+        FROM (
+          VALUES
+            ('Who paid Captain Vey?', 'The party knows Vey sold the map, but not who funded the betrayal.', 'open', 'quest', 'Hunt Captain Vey'),
+            ('What does the bronze door under Blackwater Mine unlock?', 'The Dawn Shard pulsed near the sealed bronze door, but no one knows whether it opens a vault, prison, or old shrine.', 'lead', 'location', 'Blackwater Mine'),
+            ('Why did a masked agent leave a black feather at the Silver Lantern Inn?', 'Nyx recognizes the inn as a smuggling stop, and the black feather points toward Ashen Knives watchers inside Eldermire.', 'open', 'location', 'Silver Lantern Inn'),
+            ('Can Mayor Elowen protect Eldermire before the next new moon?', 'Mayor Elowen asked for help before the next new moon, but the town may already have Ashen Knives informants.', 'rumor', 'npc', 'Mayor Elowen'),
+            ('Track Captain Vey through the smuggler tunnel', 'Mira swore to find Vey, and the collapsed ore lift hides the route he used to escape Blackwater Mine.', 'active', 'npc', 'Captain Vey')
+        ) AS seed(title, description, status, related_entity_type, related_entity_name)
+        WHERE NOT EXISTS (
+          SELECT 1 FROM hooks existing
+          WHERE existing.campaign_id = @campaignId
+            AND existing.client_owner_id = @clientOwnerId
+            AND existing.title = seed.title
+        );
+
+        WITH target_session AS (
+          SELECT id
+          FROM sessions
+          WHERE campaign_id = @campaignId
+            AND client_owner_id = @clientOwnerId
+          ORDER BY session_number ASC, created_at ASC
+          LIMIT 1
+        )
+        INSERT INTO hooks (campaign_id, client_owner_id, session_id, title, description, status, resolution, related_entity_type, related_entity_name, metadata)
+        SELECT campaign_id, @clientOwnerId, (SELECT id FROM target_session), title, description, status, resolution, related_entity_type, related_entity_name, metadata || jsonb_build_object('clientOwnerId', @clientOwnerId)
+        FROM hooks seed
+        WHERE campaign_id = @campaignId
+          AND client_owner_id = @demoClientOwnerId
+          AND NOT EXISTS (
+            SELECT 1 FROM hooks existing
             WHERE existing.campaign_id = seed.campaign_id
               AND existing.client_owner_id = @clientOwnerId
               AND existing.title = seed.title
@@ -2157,8 +2581,12 @@ static async Task<CampaignMemoryDto> LoadCampaignMemory(Guid campaignId, string 
         SELECT id, campaign_id, session_id, event_type, title, description, metadata, created_at
         FROM memory_events WHERE campaign_id = @campaignId AND client_owner_id = @clientOwnerId ORDER BY created_at DESC LIMIT 50
         """, campaignId, clientOwnerId, ReadMemoryEvent);
+    var hooks = await LoadMemoryRows<HookDto>(db, """
+        SELECT id, campaign_id, session_id, title, description, status, resolution, related_entity_type, related_entity_name, metadata, created_at, updated_at
+        FROM hooks WHERE campaign_id = @campaignId AND client_owner_id = @clientOwnerId ORDER BY updated_at DESC, created_at DESC, title
+        """, campaignId, clientOwnerId, ReadHook);
 
-    return new CampaignMemoryDto(npcs, quests, locations, encounters, events);
+    return new CampaignMemoryDto(npcs, quests, locations, encounters, events, hooks);
 }
 
 static async Task<PartyCharacterDto?> LoadPartyCharacter(Guid characterId, NpgsqlDataSource db)
@@ -2523,6 +2951,36 @@ static async Task<SessionDto?> LoadSession(Guid sessionId, string clientOwnerId,
     return await reader.ReadAsync() ? ReadSession(reader) : null;
 }
 
+static async Task<bool> SessionBelongsToCampaignClient(Guid sessionId, Guid campaignId, string clientOwnerId, NpgsqlDataSource db)
+{
+    const string sql = """
+        SELECT EXISTS (
+          SELECT 1 FROM sessions
+          WHERE id = @sessionId
+            AND campaign_id = @campaignId
+            AND client_owner_id = @clientOwnerId
+        )
+        """;
+
+    await using var cmd = db.CreateCommand(sql);
+    cmd.Parameters.AddWithValue("sessionId", sessionId);
+    cmd.Parameters.AddWithValue("campaignId", campaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
+    var result = await cmd.ExecuteScalarAsync();
+    return result is bool value && value;
+}
+
+static string? NormalizeHookStatus(string? status)
+{
+    var normalized = string.IsNullOrWhiteSpace(status) ? "open" : status.Trim().ToLowerInvariant();
+    return normalized is "open" or "rumor" or "lead" or "active" or "resolved" or "dropped" ? normalized : null;
+}
+
+static string HookStatusError()
+{
+    return "status must be open, rumor, lead, active, resolved, or dropped.";
+}
+
 static async Task SaveSessionMemory(SessionDto session, SessionSummaryResponse summary, string clientOwnerId, NpgsqlDataSource db)
 {
     await using var connection = await db.OpenConnectionAsync();
@@ -2540,6 +2998,9 @@ static async Task SaveSessionMemory(SessionDto session, SessionSummaryResponse s
         DELETE FROM encounters
         WHERE session_id = @sessionId
           AND COALESCE(metadata->>'source', 'session_summary') <> 'structured_output';
+        DELETE FROM hooks
+        WHERE session_id = @sessionId
+          AND COALESCE(metadata->>'source', 'session_summary') = 'session_summary';
         DELETE FROM memory_events WHERE session_id = @sessionId;
         DELETE FROM npcs WHERE last_seen_session_id = @sessionId;
         DELETE FROM quests WHERE last_seen_session_id = @sessionId;
@@ -2644,6 +3105,7 @@ static async Task SaveSessionMemory(SessionDto session, SessionSummaryResponse s
     foreach (var hook in summary.UnresolvedHooks)
     {
         await InsertMemoryEvent(connection, transaction, session, clientOwnerId, "unresolved_hook", hook, hook);
+        await InsertHook(connection, transaction, session, clientOwnerId, hook, hook, "open", null, "session_summary", session.Title, "session_summary");
     }
 
     await transaction.CommitAsync();
@@ -2662,6 +3124,39 @@ static async Task InsertMemoryEvent(NpgsqlConnection connection, NpgsqlTransacti
     cmd.Parameters.AddWithValue("title", title.Length > 120 ? title[..120] : title);
     cmd.Parameters.AddWithValue("description", description);
     cmd.Parameters.Add(new NpgsqlParameter("metadata", NpgsqlDbType.Jsonb) { Value = "{}" });
+    await cmd.ExecuteNonQueryAsync();
+}
+
+static async Task InsertHook(
+    NpgsqlConnection connection,
+    NpgsqlTransaction transaction,
+    SessionDto session,
+    string clientOwnerId,
+    string title,
+    string description,
+    string status,
+    string? resolution,
+    string? relatedEntityType,
+    string? relatedEntityName,
+    string source)
+{
+    await using var cmd = new NpgsqlCommand("""
+        INSERT INTO hooks (campaign_id, client_owner_id, session_id, title, description, status, resolution, related_entity_type, related_entity_name, metadata)
+        VALUES (@campaignId, @clientOwnerId, @sessionId, @title, @description, @status, @resolution, @relatedEntityType, @relatedEntityName, @metadata)
+        """, connection, transaction);
+    cmd.Parameters.AddWithValue("campaignId", session.CampaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
+    cmd.Parameters.AddWithValue("sessionId", session.Id);
+    cmd.Parameters.AddWithValue("title", title.Length > 160 ? title[..160] : title);
+    cmd.Parameters.AddWithValue("description", description);
+    cmd.Parameters.AddWithValue("status", status);
+    cmd.Parameters.AddWithValue("resolution", (object?)resolution ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("relatedEntityType", (object?)relatedEntityType ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("relatedEntityName", (object?)relatedEntityName ?? DBNull.Value);
+    cmd.Parameters.Add(new NpgsqlParameter("metadata", NpgsqlDbType.Jsonb)
+    {
+        Value = JsonSerializer.Serialize(new { source, clientOwnerId })
+    });
     await cmd.ExecuteNonQueryAsync();
 }
 
@@ -2925,6 +3420,19 @@ static MemoryEventDto ReadMemoryEvent(NpgsqlDataReader reader) => new(
     reader.IsDBNull(5) ? null : reader.GetString(5),
     JsonDocument.Parse(reader.GetString(6)).RootElement.Clone(),
     reader.GetDateTime(7));
+
+static HookDto ReadHook(NpgsqlDataReader reader) => new(
+    reader.GetGuid(0), reader.GetGuid(1),
+    reader.IsDBNull(2) ? null : reader.GetGuid(2),
+    reader.GetString(3),
+    reader.IsDBNull(4) ? null : reader.GetString(4),
+    reader.GetString(5),
+    reader.IsDBNull(6) ? null : reader.GetString(6),
+    reader.IsDBNull(7) ? null : reader.GetString(7),
+    reader.IsDBNull(8) ? null : reader.GetString(8),
+    JsonDocument.Parse(reader.GetString(9)).RootElement.Clone(),
+    reader.GetDateTime(10),
+    reader.GetDateTime(11));
 
 static async Task<Guid> CreateConversation(Guid campaignId, string firstMessage, NpgsqlDataSource db)
 {
@@ -3233,7 +3741,8 @@ public record CampaignMemoryDto(
     IReadOnlyList<QuestDto> Quests,
     IReadOnlyList<LocationDto> Locations,
     IReadOnlyList<EncounterDto> Encounters,
-    IReadOnlyList<MemoryEventDto> Events);
+    IReadOnlyList<MemoryEventDto> Events,
+    IReadOnlyList<HookDto> Hooks);
 
 public record NpcDto(
     Guid Id,
@@ -3288,6 +3797,20 @@ public record MemoryEventDto(
     string? Description,
     JsonElement Metadata,
     DateTime CreatedAt);
+
+public record HookDto(
+    Guid Id,
+    Guid CampaignId,
+    Guid? SessionId,
+    string Title,
+    string? Description,
+    string Status,
+    string? Resolution,
+    string? RelatedEntityType,
+    string? RelatedEntityName,
+    JsonElement Metadata,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
 
 public record ChatRequest(
     Guid CampaignId,
@@ -3369,6 +3892,34 @@ public record SaveLocationRequest(
     string[]? Secrets,
     string[]? NotableNpcs,
     string[]? QuestHooks);
+
+public record SaveMemoryEventRequest(
+    string? EventType,
+    string Title,
+    string? Description,
+    Guid? SessionId,
+    string? RelatedEntityType,
+    string? RelatedEntityName);
+
+public record SaveHookRequest(
+    string Title,
+    string? Description,
+    string? Status,
+    string? Resolution,
+    Guid? SessionId,
+    string? RelatedEntityType,
+    string? RelatedEntityName);
+
+public record UpdateHookRequest(
+    string? Title,
+    string? Description,
+    string? Status,
+    string? Resolution,
+    Guid? SessionId,
+    string? RelatedEntityType,
+    string? RelatedEntityName);
+
+public record ResolveHookRequest(string? Resolution);
 
 public record SaveEncounterRequest(
     string Title,
@@ -3536,5 +4087,78 @@ public sealed class CurrentClientService(IHttpContextAccessor httpContextAccesso
 
         clientId = value;
         return true;
+    }
+}
+
+public sealed class CloudRunIdentityTokenHandler(IConfiguration configuration) : DelegatingHandler
+{
+    private static readonly HttpClient MetadataClient = new();
+    private static readonly SemaphoreSlim TokenLock = new(1, 1);
+    private static string? CachedToken;
+    private static DateTimeOffset CachedTokenExpiresAt = DateTimeOffset.MinValue;
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        if (IsEnabled())
+        {
+            var audience = configuration["AI_WORKER_AUTH_AUDIENCE"] ?? configuration["AI_WORKER_URL"];
+            if (string.IsNullOrWhiteSpace(audience))
+            {
+                throw new InvalidOperationException("AI_WORKER_AUTH_AUDIENCE or AI_WORKER_URL is required when AI_WORKER_AUTH_ENABLED=true.");
+            }
+
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await GetIdentityToken(audience.Trim(), cancellationToken));
+        }
+
+        return await base.SendAsync(request, cancellationToken);
+    }
+
+    private bool IsEnabled()
+    {
+        return string.Equals(configuration["AI_WORKER_AUTH_ENABLED"], "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<string> GetIdentityToken(string audience, CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (!string.IsNullOrWhiteSpace(CachedToken) && CachedTokenExpiresAt > now.AddMinutes(5))
+        {
+            return CachedToken;
+        }
+
+        await TokenLock.WaitAsync(cancellationToken);
+        try
+        {
+            now = DateTimeOffset.UtcNow;
+            if (!string.IsNullOrWhiteSpace(CachedToken) && CachedTokenExpiresAt > now.AddMinutes(5))
+            {
+                return CachedToken;
+            }
+
+            using var request = new HttpRequestMessage(
+                HttpMethod.Get,
+                $"http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience={Uri.EscapeDataString(audience)}");
+            request.Headers.Add("Metadata-Flavor", "Google");
+
+            using var token = await MetadataClient.SendAsync(request, cancellationToken);
+            token.EnsureSuccessStatusCode();
+            CachedToken = (await token.Content.ReadAsStringAsync(cancellationToken)).Trim();
+            CachedTokenExpiresAt = now.AddMinutes(50);
+            return CachedToken;
+        }
+        finally
+        {
+            TokenLock.Release();
+        }
+    }
+}
+
+public static class DeploymentConfig
+{
+    public static string[] ReadCsv(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? []
+            : value.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 }

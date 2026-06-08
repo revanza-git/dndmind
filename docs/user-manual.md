@@ -16,7 +16,7 @@ Use this short checklist the first time you open DNDMind.
 6. Choose a task mode, such as **Auto**, **Rules**, **Encounter**, **NPC**, **Character**, **Recap**, or **Summarize**.
 7. Turn on the context toggles you want DNDMind to use.
 8. Type a request in the command console and click **Send**.
-9. Save useful NPCs, quests, locations, encounters, or summaries when DNDMind offers a save button.
+9. Save useful results when DNDMind offers a save button. Character cards go to the party list. NPCs, quests, locations, encounters, hooks, and summaries become campaign memory.
 
 Good first prompt:
 
@@ -58,7 +58,7 @@ Expected result: DNDMind creates a party-aware encounter and saves it as campaig
 | Context Toggles | Choose which saved information DNDMind may use for the next answer. |
 | Command Console | Type your request, send it, or clear the current chat. |
 | Spark | Drafts a prompt for the selected task mode using the current campaign context. |
-| Notes Area | Manage dice, session notes, party details, citations, tool traces, and campaign memory. On wide screens this is the right panel; on phones it is the **Notes** tab. |
+| Notes Area | Manage saved encounters, dice, tonight's prep, session notes, party details, and campaign memory. On wide screens this is the right panel; on phones it is the **Notes** tab. |
 
 ## Campaigns
 
@@ -156,6 +156,8 @@ Simple defaults:
 - Homebrew rules question: **Rules** and **Homebrew** on.
 - Encounter design: **Campaign Memory** and **Party Info** on.
 - NPC or story work: **Campaign Memory** on.
+- Character generation: **Campaign Memory** on when the character should fit the campaign.
+- Campaign recap: **Campaign Memory** on.
 - Pure brainstorming: leave on only the context you truly need.
 
 ## Task Modes
@@ -167,10 +169,10 @@ Task modes tell DNDMind what kind of answer you want.
 | **Auto** | Mixed tasks, prep, and general help. | `Prepare tonight's opening scene based on last session.` |
 | **Rules** | Rules questions that need sources. | `How does advantage work?` |
 | **Encounter** | Combat, hazards, and challenge design. | `Create a hard ambush for my level 3 party.` |
-| **NPC** | Characters, motives, secrets, and hooks. | `Generate a suspicious tavern keeper.` |
+| **NPC** | Non-player characters, motives, secrets, and hooks. | `Generate a suspicious tavern keeper.` |
 | **Character** | Player characters, backup characters, rivals, and hirelings. | `Generate a level 3 adventurer tied to this campaign.` |
-| **Recap** | Catching up on what has happened so far. | `Recap the last session and list the open hooks.` |
-| **Summarize** | Session notes, recaps, and extracted hooks. | `Summarize this session and extract unresolved hooks.` |
+| **Recap** | Catching up on the campaign from saved memory. | `Recap the campaign so far and list the open hooks.` |
+| **Summarize** | Turning current session notes into a saved summary and hooks. | `Summarize this session and extract unresolved hooks.` |
 
 Mode plus toggles is the main habit to learn. For example, **Rules** mode with **Rules** on is best for cited rulings. **Encounter** mode with **Party Info** on is best for party-aware fights.
 
@@ -208,6 +210,24 @@ Example:
 Generate a suspicious NPC connected to Captain Vey.
 ```
 
+### Create a Character
+
+Use **Character** mode for backup player characters, rivals, hirelings, or named allies who may join the party list.
+
+1. Choose **Character** mode.
+2. Turn **Campaign Memory** on if the character should connect to existing story threads.
+3. Add a level, role, or purpose in your request.
+4. Click **Send**.
+5. Review the character card.
+6. Click **Save Character** if you want to add the character to the party list.
+7. If image controls appear, choose a style and click **Generate Image** before saving when you want a visual reference.
+
+Example:
+
+```text
+Generate a level 3 adventurer tied to this campaign who could work as a backup PC, rival, or hireling.
+```
+
 ### Create an Encounter
 
 1. Choose **Encounter** mode.
@@ -226,7 +246,7 @@ Create a medium encounter for this party involving the Ashen Knives.
 
 ### Roll Dice
 
-Use the dice roller on the right, or ask DNDMind to roll from the command console.
+Use the dice roller in the **Notes** area, or ask DNDMind to roll from the command console. Dice rolls do not need campaign context.
 
 Example:
 
@@ -235,6 +255,24 @@ Roll 1d20+5 for perception.
 ```
 
 Expected result: DNDMind shows the roll and keeps the tool result visible.
+
+### Recap the Campaign So Far
+
+Use **Recap** when you want a table-ready "previously in this campaign" narration from saved memory.
+
+1. Choose **Recap** mode.
+2. Turn **Campaign Memory** on.
+3. Ask for the kind of recap you need.
+4. Click **Send**.
+5. Check citations or memory references before reading it at the table.
+
+Example:
+
+```text
+Recap the campaign so far and list the unresolved hooks.
+```
+
+Recap is best for saved campaign history. **Summarize** is best for turning the current session notes into a new summary.
 
 ### Summarize Session Notes
 
@@ -285,9 +323,10 @@ Clearing chat does not delete your campaign, party, Campaign Knowledge, session 
 Campaign Memory is where saved NPCs, quests, locations, hooks, encounters, and summaries live.
 
 1. Find the Campaign Memory area on the right.
-2. Open a group, such as **NPCs**, **Open Quests**, **Recent Locations**, **Hooks**, or **Saved Encounters**.
+2. Open a group, such as **Saved Encounters**, **NPCs**, **Open Quests**, **Recent Locations**, or **Story Hooks**.
 3. Select an item to review details.
-4. Delete an item only when you no longer want DNDMind to use it.
+4. Use Story Hooks to promote open threads to active, resolve them with a note, drop them, or delete them when you no longer want DNDMind to use them.
+5. Delete saved encounters, NPCs, quests, or locations only when you no longer want them used as campaign memory.
 
 Deleting a saved encounter also removes its searchable encounter memory.
 
@@ -300,6 +339,7 @@ Try these:
 - `How should I open tonight's session?`
 - `What happened at Blackwater Mine?`
 - `Generate a suspicious NPC connected to Captain Vey.`
+- `Generate a level 3 adventurer tied to this campaign who could work as a backup PC, rival, or hireling.`
 - `Create a medium encounter for this party involving the Ashen Knives.`
 - `Make this encounter harder but keep it fair.`
 - `Summarize these session notes and extract NPCs, quests, and hooks.`
@@ -335,9 +375,10 @@ Create three clues for the Blackwater Mine investigation, using Captain Vey as a
 
 1. Use **Auto** for general help.
 2. Use **Rules** for rulings.
-3. Use the dice roller for rolls and initiative.
-4. Search memory when a name, location, or clue returns.
-5. Save important new NPCs, hooks, or encounter results.
+3. Use **Encounter** for combat design and tactical moments.
+4. Use the dice roller for rolls and initiative.
+5. Search memory when a name, location, or clue returns.
+6. Save important new characters, NPCs, hooks, or encounter results.
 
 ### After a Session
 
@@ -446,7 +487,7 @@ Your saved campaign material is still there. Check Campaign Memory, Session Note
 - **Citation**: a source DNDMind used for an answer.
 - **Context Toggle**: a switch that controls which saved information DNDMind may use for the next prompt.
 - **Local Browser Profile**: the browser-based identity used to keep sessions separate.
-- **Structured Card**: a generated NPC, encounter, quest, location, or summary that can be saved.
+- **Structured Card**: a generated character, NPC, encounter, quest, location, or summary that can be saved.
 - **Spark**: the prompt suggestion control that drafts a request for the current mode.
 - **Task Mode**: the button that tells DNDMind what kind of answer to produce.
 - **Tool Result**: a visible result from an action such as a dice roll, rules search, memory search, or encounter check.

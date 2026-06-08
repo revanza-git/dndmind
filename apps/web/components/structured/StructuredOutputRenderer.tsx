@@ -569,8 +569,22 @@ function defaultActionsFor(output: StructuredOutput): SuggestedAction[] {
   if (output.type === "encounter") {
     const title = text(output.data.title);
     const encounterSubject = title ? (/\bencounter\b/i.test(title) ? title : `${title} encounter`) : "this encounter";
-    return [
-      { label: "Save Encounter", action: "saveEncounter", payload: output.data },
+    const hook = strings(output.data.campaignHooks)[0];
+    const actions: SuggestedAction[] = [{ label: "Save Encounter", action: "saveEncounter", payload: output.data }];
+    if (hook) {
+      actions.push({
+        label: "Save Hook",
+        action: "saveHook",
+        payload: {
+          status: "open",
+          title: hook,
+          description: title ? `${title}: ${hook}` : hook,
+          relatedEntityType: "encounter",
+          relatedEntityName: title
+        }
+      });
+    }
+    actions.push(
       {
         label: "Roll Initiative",
         action: "prompt",
@@ -586,13 +600,28 @@ function defaultActionsFor(output: StructuredOutput): SuggestedAction[] {
         action: "prompt",
         payload: { message: `Make ${encounterSubject} easier without losing the Captain Vey and Ashen Knives tension.` }
       }
-    ];
+    );
+    return actions;
   }
 
   if (output.type === "npc") {
     const name = text(output.data.name) || "this NPC";
-    return [
-      { label: "Save NPC", action: "saveNPC", payload: output.data },
+    const questHook = text(output.data.questHook);
+    const actions: SuggestedAction[] = [{ label: "Save NPC", action: "saveNPC", payload: output.data }];
+    if (questHook) {
+      actions.push({
+        label: "Save Hook",
+        action: "saveHook",
+        payload: {
+          status: "open",
+          title: questHook,
+          description: `${name}: ${questHook}`,
+          relatedEntityType: "npc",
+          relatedEntityName: name
+        }
+      });
+    }
+    actions.push(
       {
         label: "Generate Quest Hook",
         action: "prompt",
@@ -603,7 +632,8 @@ function defaultActionsFor(output: StructuredOutput): SuggestedAction[] {
         action: "prompt",
         payload: { message: `Add a relationship between ${name} and one existing party member or campaign NPC.` }
       }
-    ];
+    );
+    return actions;
   }
 
   if (output.type === "character") {
@@ -625,8 +655,20 @@ function defaultActionsFor(output: StructuredOutput): SuggestedAction[] {
 
   if (output.type === "quest") {
     const title = text(output.data.title) || "this quest";
+    const hook = strings(output.data.unresolvedHooks)[0] || text(output.data.description) || title;
     return [
       { label: "Save Quest", action: "saveQuest", payload: output.data },
+      {
+        label: "Save Hook",
+        action: "saveHook",
+        payload: {
+          status: "open",
+          title,
+          description: hook,
+          relatedEntityType: "quest",
+          relatedEntityName: title
+        }
+      },
       {
         label: "Add NPC",
         action: "prompt",
@@ -638,6 +680,26 @@ function defaultActionsFor(output: StructuredOutput): SuggestedAction[] {
         payload: { message: `Keep ${title} open and suggest the next unresolved step for the party.` }
       }
     ];
+  }
+
+  if (output.type === "location") {
+    const name = text(output.data.name) || "this location";
+    const hook = strings(output.data.questHooks)[0];
+    const actions: SuggestedAction[] = [{ label: "Save Location", action: "saveLocation", payload: output.data }];
+    if (hook) {
+      actions.push({
+        label: "Save Hook",
+        action: "saveHook",
+        payload: {
+          status: "open",
+          title: hook,
+          description: `${name}: ${hook}`,
+          relatedEntityType: "location",
+          relatedEntityName: name
+        }
+      });
+    }
+    return actions;
   }
 
   if (output.type === "session_summary") {

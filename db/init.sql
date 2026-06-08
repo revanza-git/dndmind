@@ -184,6 +184,23 @@ CREATE TABLE memory_events (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE hooks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  client_owner_id text NOT NULL DEFAULT 'dndmind-demo-client',
+  session_id uuid NULL REFERENCES sessions(id) ON DELETE SET NULL,
+  title text NOT NULL,
+  description text NULL,
+  status text NOT NULL DEFAULT 'open',
+  resolution text NULL,
+  related_entity_type text NULL,
+  related_entity_name text NULL,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT hooks_status_check CHECK (status IN ('open', 'rumor', 'lead', 'active', 'resolved', 'dropped'))
+);
+
 CREATE INDEX idx_sessions_campaign_id ON sessions(campaign_id);
 CREATE INDEX idx_campaigns_archived_at ON campaigns(archived_at);
 CREATE INDEX idx_sessions_campaign_client_owner ON sessions(campaign_id, client_owner_id);
@@ -205,11 +222,13 @@ CREATE INDEX idx_quests_campaign_id ON quests(campaign_id);
 CREATE INDEX idx_locations_campaign_id ON locations(campaign_id);
 CREATE INDEX idx_encounters_campaign_id ON encounters(campaign_id);
 CREATE INDEX idx_memory_events_campaign_id ON memory_events(campaign_id);
+CREATE INDEX idx_hooks_campaign_id ON hooks(campaign_id);
 CREATE INDEX idx_npcs_campaign_client_owner ON npcs(campaign_id, client_owner_id);
 CREATE INDEX idx_quests_campaign_client_owner ON quests(campaign_id, client_owner_id);
 CREATE INDEX idx_locations_campaign_client_owner ON locations(campaign_id, client_owner_id);
 CREATE INDEX idx_encounters_campaign_client_owner ON encounters(campaign_id, client_owner_id);
 CREATE INDEX idx_memory_events_campaign_client_owner ON memory_events(campaign_id, client_owner_id);
+CREATE INDEX idx_hooks_campaign_client_owner ON hooks(campaign_id, client_owner_id, status);
 
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS trigger AS $$
@@ -246,6 +265,11 @@ EXECUTE FUNCTION set_updated_at();
 
 CREATE TRIGGER locations_updated_at
 BEFORE UPDATE ON locations
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER hooks_updated_at
+BEFORE UPDATE ON hooks
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
@@ -355,5 +379,58 @@ VALUES
     'unresolved_hook',
     'Who paid Captain Vey?',
     'The party knows Vey sold the map, but not who funded the betrayal.',
+    '{"source":"demo_seed"}'
+  );
+
+INSERT INTO hooks (campaign_id, session_id, title, description, status, related_entity_type, related_entity_name, metadata)
+VALUES
+  (
+    '11111111-1111-1111-1111-111111111111',
+    '22222222-2222-2222-2222-222222222222',
+    'Who paid Captain Vey?',
+    'The party knows Vey sold the map, but not who funded the betrayal.',
+    'open',
+    'quest',
+    'Hunt Captain Vey',
+    '{"source":"demo_seed"}'
+  ),
+  (
+    '11111111-1111-1111-1111-111111111111',
+    '22222222-2222-2222-2222-222222222222',
+    'What does the bronze door under Blackwater Mine unlock?',
+    'The Dawn Shard pulsed near the sealed bronze door, but no one knows whether it opens a vault, prison, or old shrine.',
+    'lead',
+    'location',
+    'Blackwater Mine',
+    '{"source":"demo_seed"}'
+  ),
+  (
+    '11111111-1111-1111-1111-111111111111',
+    '22222222-2222-2222-2222-222222222222',
+    'Why did a masked agent leave a black feather at the Silver Lantern Inn?',
+    'Nyx recognizes the inn as a smuggling stop, and the black feather points toward Ashen Knives watchers inside Eldermire.',
+    'open',
+    'location',
+    'Silver Lantern Inn',
+    '{"source":"demo_seed"}'
+  ),
+  (
+    '11111111-1111-1111-1111-111111111111',
+    '22222222-2222-2222-2222-222222222222',
+    'Can Mayor Elowen protect Eldermire before the next new moon?',
+    'Mayor Elowen asked for help before the next new moon, but the town may already have Ashen Knives informants.',
+    'rumor',
+    'npc',
+    'Mayor Elowen',
+    '{"source":"demo_seed"}'
+  ),
+  (
+    '11111111-1111-1111-1111-111111111111',
+    '22222222-2222-2222-2222-222222222222',
+    'Track Captain Vey through the smuggler tunnel',
+    'Mira swore to find Vey, and the collapsed ore lift hides the route he used to escape Blackwater Mine.',
+    'active',
+    'npc',
+    'Captain Vey',
     '{"source":"demo_seed"}'
   );

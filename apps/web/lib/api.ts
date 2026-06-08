@@ -254,12 +254,30 @@ export type MemoryEvent = {
   description: string | null;
 };
 
+export type HookStatus = "open" | "rumor" | "lead" | "active" | "resolved" | "dropped";
+
+export type MemoryHook = {
+  id: string;
+  campaignId: string;
+  sessionId: string | null;
+  title: string;
+  description: string | null;
+  status: HookStatus;
+  resolution: string | null;
+  relatedEntityType: string | null;
+  relatedEntityName: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type CampaignMemory = {
   npcs: MemoryNpc[];
   quests: MemoryQuest[];
   locations: MemoryLocation[];
   encounters: MemoryEncounter[];
   events: MemoryEvent[];
+  hooks: MemoryHook[];
 };
 
 export type SessionSummaryResponse = {
@@ -602,7 +620,8 @@ function normalizeCampaignMemory(value: unknown): CampaignMemory {
     quests: Array.isArray(memory.quests) ? memory.quests : [],
     locations: Array.isArray(memory.locations) ? memory.locations : [],
     encounters: Array.isArray(memory.encounters) ? memory.encounters : [],
-    events: Array.isArray(memory.events) ? memory.events : []
+    events: Array.isArray(memory.events) ? memory.events : [],
+    hooks: Array.isArray(memory.hooks) ? memory.hooks : []
   };
 }
 
@@ -767,6 +786,64 @@ export async function saveLocation(campaignId: string, payload: Record<string, u
   return response.json();
 }
 
+export async function saveMemoryEvent(campaignId: string, payload: Record<string, unknown>): Promise<{ id: string; memoryEvent: MemoryEvent }> {
+  const response = await apiFetch(`/api/campaigns/${campaignId}/memory-events`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "DNDMind could not save that hook. Please try again."));
+  }
+  return response.json();
+}
+
+export async function saveHook(campaignId: string, payload: Record<string, unknown>): Promise<{ id: string; hook: MemoryHook }> {
+  const response = await apiFetch(`/api/campaigns/${campaignId}/hooks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "DNDMind could not save that hook. Please try again."));
+  }
+  return response.json();
+}
+
+export async function updateHook(campaignId: string, hookId: string, payload: Record<string, unknown>): Promise<{ id: string; hook: MemoryHook }> {
+  const response = await apiFetch(`/api/campaigns/${campaignId}/hooks/${hookId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "DNDMind could not update that hook. Please try again."));
+  }
+  return response.json();
+}
+
+export async function resolveHook(campaignId: string, hookId: string, resolution?: string): Promise<{ id: string; hook: MemoryHook }> {
+  const response = await apiFetch(`/api/campaigns/${campaignId}/hooks/${hookId}/resolve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ resolution: resolution ?? null })
+  });
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "DNDMind could not resolve that hook. Please try again."));
+  }
+  return response.json();
+}
+
+export async function dropHook(campaignId: string, hookId: string): Promise<{ id: string; hook: MemoryHook }> {
+  const response = await apiFetch(`/api/campaigns/${campaignId}/hooks/${hookId}/drop`, {
+    method: "POST"
+  });
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "DNDMind could not drop that hook. Please try again."));
+  }
+  return response.json();
+}
+
 export async function saveEncounter(campaignId: string, payload: Record<string, unknown>): Promise<{ id: string; encounter: MemoryEncounter; memoryDocumentId: string }> {
   const response = await apiFetch(`/api/campaigns/${campaignId}/encounters`, {
     method: "POST",
@@ -808,6 +885,15 @@ export async function deleteLocation(campaignId: string, locationId: string): Pr
 
 export async function deleteMemoryEvent(campaignId: string, eventId: string): Promise<void> {
   const response = await apiFetch(`/api/campaigns/${campaignId}/memory-events/${eventId}`, {
+    method: "DELETE"
+  });
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "DNDMind could not delete that hook. Please try again."));
+  }
+}
+
+export async function deleteHook(campaignId: string, hookId: string): Promise<void> {
+  const response = await apiFetch(`/api/campaigns/${campaignId}/hooks/${hookId}`, {
     method: "DELETE"
   });
   if (!response.ok) {

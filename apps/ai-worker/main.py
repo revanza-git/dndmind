@@ -220,6 +220,7 @@ class PromptSuggestionMemory(BaseModel):
     locations: list[dict[str, Any]] = Field(default_factory=list)
     encounters: list[dict[str, Any]] = Field(default_factory=list)
     events: list[dict[str, Any]] = Field(default_factory=list)
+    hooks: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class PromptSuggestionRequest(BaseModel):
@@ -659,7 +660,7 @@ def _resolve_prompt_suggestion_mode(request: PromptSuggestionRequest) -> tuple[R
     )
     if request.session and request.session.rawNotes and not request.session.summary:
         return "summarize", "The active session has notes that are not summarized yet."
-    if request.party and (_memory_count(request.memory, "events") or _memory_count(request.memory, "quests") or _memory_count(request.memory, "locations")):
+    if request.party and (_memory_count(request.memory, "hooks") or _memory_count(request.memory, "events") or _memory_count(request.memory, "quests") or _memory_count(request.memory, "locations")):
         return "encounter", "Party details and campaign hooks are available for a table-ready encounter."
     if _memory_count(request.memory, "npcs") == 0:
         return "npc", "No saved NPCs are available yet, so an NPC draft is useful."
@@ -732,7 +733,7 @@ def _prompt_session_summary(session: PromptSuggestionSession | None) -> str:
 
 def _prompt_memory_summary(memory: PromptSuggestionMemory) -> str:
     parts = []
-    for label, key in [("NPCs", "npcs"), ("quests", "quests"), ("locations", "locations"), ("encounters", "encounters"), ("hooks", "events")]:
+    for label, key in [("NPCs", "npcs"), ("quests", "quests"), ("locations", "locations"), ("encounters", "encounters"), ("hooks", "hooks"), ("events", "events")]:
         names = [_memory_label(item) for item in getattr(memory, key)[:3]]
         if names:
             parts.append(f"{label}: {', '.join(names)}")

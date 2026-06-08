@@ -82,7 +82,7 @@ The frontend renders the DM command center, Campaign menu, Campaign Knowledge li
 | AI Worker | Python, FastAPI, Pydantic |
 | Database | PostgreSQL 16, pgvector |
 | LLM | Mock LLM mode by default, Gemini API-key and Vertex AI Gemini provider support |
-| Deployment | Docker Compose |
+| Deployment | Docker Compose locally, Google Cloud Run + Cloud SQL for production |
 
 ## Screenshots
 
@@ -133,15 +133,21 @@ Open:
 | `VERTEX_MODEL` | Vertex Gemini model, defaulting to `gemini-2.5-flash`. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Optional in-container ADC credential path for local Docker Vertex mode. |
 | `CHAT_MODEL` | Backward-compatible chat model fallback when `GEMINI_MODEL` is not set. |
-| `EMBEDDING_PROVIDER` | Real embedding provider when `MOCK_EMBEDDINGS=false`; supports `gemini` or `openai`. |
-| `GEMINI_EMBEDDING_MODEL` | Gemini embedding model, defaulting to `gemini-embedding-001`. |
-| `GEMINI_EMBEDDING_DIMENSIONS` | Gemini embedding output size. Keep `1536` unless the pgvector schema changes. |
+| `EMBEDDING_PROVIDER` | Real embedding provider when `MOCK_EMBEDDINGS=false`; supports `gemini`, `vertex`, or `openai`. |
+| `GEMINI_EMBEDDING_MODEL` | Gemini API-key embedding model, defaulting to `gemini-embedding-001`. |
+| `GEMINI_EMBEDDING_DIMENSIONS` | Gemini API-key embedding output size. Keep `1536` unless the pgvector schema changes. |
+| `VERTEX_EMBEDDING_MODEL` | Vertex AI embedding model, defaulting to `gemini-embedding-001`. |
+| `VERTEX_EMBEDDING_DIMENSIONS` | Vertex AI embedding output size. Keep `1536` unless the pgvector schema changes. |
 | `OPENAI_API_KEY` | Optional OpenAI embedding key if `EMBEDDING_PROVIDER=openai`. |
 | `EMBEDDING_MODEL` | OpenAI embedding model name, or readable alias for the active embedding model. |
 | `DATABASE_URL` | Worker PostgreSQL connection string. |
 | `AI_WORKER_URL` | API-to-worker URL, defaulting to `http://ai-worker:8001`. |
+| `AI_WORKER_AUTH_ENABLED` | Adds Cloud Run identity-token auth to API-to-worker calls when set to `true`. Keep `false` locally. |
+| `AI_WORKER_AUTH_AUDIENCE` | Cloud Run worker service URL used as the identity-token audience. Usually matches `AI_WORKER_URL` in production. |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated browser origins allowed to call the API. Leave empty for permissive local Development CORS; set exact web origin in production. |
 | `NEXT_PUBLIC_API_URL` | Browser-visible API URL alias. |
 | `NEXT_PUBLIC_API_BASE_URL` | Browser-visible API base URL used by the current frontend. |
+| `API_PROXY_BASE_URL` | Optional server-side Next.js proxy target. In Cloud Run, use `NEXT_PUBLIC_API_BASE_URL=/api/backend` and set this to the API service URL. |
 
 To use Gemini API-key mode instead of mock responses, copy `.env.example` to `.env`, set `MOCK_LLM=false`, set `LLM_PROVIDER=gemini`, and put your key in `GEMINI_API_KEY`.
 
@@ -149,7 +155,13 @@ To enable real Gemini image generation for NPC, character, and encounter structu
 
 To use Vertex AI Gemini through Application Default Credentials, set `MOCK_LLM=false`, `LLM_PROVIDER=vertex`, `VERTEX_PROJECT_ID=project-de842900-cb0b-4155-b9c`, `VERTEX_LOCATION=global`, and `VERTEX_MODEL=gemini-2.5-flash`. For local Docker usage, make ADC available inside the `ai-worker` container by mounting your gcloud ADC JSON file and setting `GOOGLE_APPLICATION_CREDENTIALS` to the mounted path, such as `/gcloud/application_default_credentials.json`. Keep `MOCK_EMBEDDINGS=true` for the first Vertex chat pass unless you intentionally wire a real embedding provider.
 
-To make RAG use Gemini embeddings too, set `MOCK_EMBEDDINGS=false` and `EMBEDDING_PROVIDER=gemini`. Gemini embeddings are requested at 1536 dimensions to match the current `knowledge_chunks.embedding vector(1536)` schema.
+To make RAG use Gemini embeddings through API-key mode, set `MOCK_EMBEDDINGS=false` and `EMBEDDING_PROVIDER=gemini`. To use Vertex AI embeddings instead, set `MOCK_EMBEDDINGS=false`, `EMBEDDING_PROVIDER=vertex`, `VERTEX_EMBEDDING_MODEL=gemini-embedding-001`, and `VERTEX_EMBEDDING_DIMENSIONS=1536`. Embeddings are requested at 1536 dimensions to match the current `knowledge_chunks.embedding vector(1536)` schema.
+
+## Deployment
+
+The safest GCP path is three Cloud Run services, Cloud SQL PostgreSQL with `pgvector`, Secret Manager, and Artifact Registry. Keep the first public deployment mock-first with `MOCK_LLM=true`, `MOCK_EMBEDDINGS=true`, and `IMAGE_GENERATION_ENABLED=false`; then enable Gemini or Vertex AI after the hosting path is healthy.
+
+See `docs/deployment.md` for the Cloud Run runbook, Cloud SQL setup, Secret Manager mapping, commit-tagged image builds via `cloudbuild.yaml`, CORS hardening, private worker auth, smoke tests, and rollback notes.
 
 ## Demo Flow
 
@@ -235,4 +247,4 @@ npm run build
 - Campaign memory graph
 - LLM-as-judge evals
 - Fine-tuning dataset exporter
-- VPS deployment
+- Production auth for real multi-user campaigns

@@ -8,7 +8,9 @@ import {
   ChatContext,
   ChatResponse,
   Citation,
+  HookStatus,
   KnowledgeDocument,
+  MemoryHook,
   PartyCharacter,
   PartyCharacterEvent,
   PartyCharacterInput,
@@ -25,7 +27,7 @@ import {
   deleteDocument,
   deleteEncounter,
   deleteLocation,
-  deleteMemoryEvent,
+  deleteHook,
   deleteNpc,
   deletePartyCharacter,
   deleteQuest,
@@ -41,6 +43,7 @@ import {
   generatePromptSuggestion,
   ingestDocument,
   saveEncounter,
+  saveHook,
   saveLocation,
   saveNpc,
   saveQuest,
@@ -51,6 +54,7 @@ import {
   updatePartyCharacterHp,
   updatePartyCharacterLevel,
   updateCampaign,
+  updateHook,
   updateSession,
   uploadDocument
 } from "../lib/api";
@@ -110,7 +114,7 @@ const acceptedDocumentExtensions = [".txt", ".md"];
 const maxDocumentUploadBytes = 2 * 1024 * 1024;
 const diceExpressionPattern = /^\s*(\d{1,2})d(\d{1,4})([+-]\d{1,4})?\s*$/i;
 const diceExamples = ["1d20", "2d6+3", "4d8-1"];
-const emptyCampaignMemory: CampaignMemory = { npcs: [], quests: [], locations: [], encounters: [], events: [] };
+const emptyCampaignMemory: CampaignMemory = { npcs: [], quests: [], locations: [], encounters: [], events: [], hooks: [] };
 
 function D20MindSparkLogo() {
   return (
@@ -277,6 +281,7 @@ export default function Home() {
   const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
   const [deletingEncounterId, setDeletingEncounterId] = useState<string | null>(null);
   const [deletingMemoryItemKey, setDeletingMemoryItemKey] = useState<string | null>(null);
+  const [updatingHookId, setUpdatingHookId] = useState<string | null>(null);
   const [isRolling, setIsRolling] = useState(false);
   const [isSavingSession, setIsSavingSession] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
@@ -305,11 +310,11 @@ export default function Home() {
     [activeSessionId, sessions]
   );
   const prepSummary = useMemo(() => {
-    const openHooks = memory.events.filter((event) => event.eventType === "unresolved_hook");
+    const openHooks = memory.hooks.filter((hook) => !["resolved", "dropped"].includes(hook.status));
     const openQuests = memory.quests.filter((quest) => quest.status !== "closed");
     const ruleNotes = documents.reduce((sum, item) => sum + item.chunkCount, 0);
     const latestHook = openHooks[0];
-    const latestHookDisplay = latestHook ? formatMemoryHook(latestHook) : null;
+    const latestHookDisplay = latestHook ? formatStoryHook(latestHook) : null;
 
     return {
       openHooks,
@@ -320,7 +325,7 @@ export default function Home() {
       sessionLabel: activeSession ? `Session ${activeSession.sessionNumber}` : "New session",
       sessionDetail: activeSession?.summary ? "Summary saved" : sessionNotes.trim() ? "Notes in progress" : "No notes yet"
     };
-  }, [activeSession, documents, memory.events, memory.quests, sessionNotes]);
+  }, [activeSession, documents, memory.hooks, memory.quests, sessionNotes]);
 
   useEffect(() => {
     const localClientId = getClientId();
@@ -891,10 +896,10 @@ export default function Home() {
           locations: currentMemory.locations.filter((location) => location.id !== itemId)
         }));
       } else {
-        await deleteMemoryEvent(campaignId, itemId);
+        await deleteHook(campaignId, itemId);
         setMemory((currentMemory) => ({
           ...currentMemory,
-          events: currentMemory.events.filter((event) => event.id !== itemId)
+          hooks: currentMemory.hooks.filter((hook) => hook.id !== itemId)
         }));
       }
     } catch (err) {
@@ -902,6 +907,25 @@ export default function Home() {
       throw err;
     } finally {
       setDeletingMemoryItemKey(null);
+    }
+  }
+
+  async function handleUpdateHookStatus(hookId: string, status: HookStatus, resolution?: string) {
+    if (!campaignId) {
+      return;
+    }
+
+    setUpdatingHookId(hookId);
+    setError(null);
+    try {
+      const response = await updateHook(campaignId, hookId, { status, resolution: resolution ?? null });
+      setMemory((currentMemory) => mergeUpdatedHook(currentMemory, response.hook));
+      setActionStatus(status === "resolved" ? "Hook resolved" : status === "dropped" ? "Hook dropped" : "Hook updated");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "DNDMind could not update that hook. Please try again.");
+      throw err;
+    } finally {
+      setUpdatingHookId(null);
     }
   }
 
@@ -1213,6 +1237,13 @@ export default function Home() {
       } else if (action.action === "saveQuest") {
         await saveQuest(campaignId, action.payload);
         setActionStatus("Quest saved");
+      } else if (action.action === "saveHook") {
+        await saveHook(campaignId, {
+          ...action.payload,
+          status: action.payload.status ?? "open",
+          sessionId: activeSessionId
+        });
+        setActionStatus("Hook saved");
       } else if (action.action === "saveLocation") {
         await saveLocation(campaignId, action.payload);
         setActionStatus("Location saved");
@@ -2216,7 +2247,7 @@ export default function Home() {
                       {prepSummary.latestHookDisplay.detail && <p className="line-clamp-2 text-moss/70">{prepSummary.latestHookDisplay.detail}</p>}
                     </>
                   ) : (
-                    <p className="mt-1 text-moss/70">No unresolved hooks saved yet.</p>
+                    <p className="mt-1 text-moss/70">No open story hooks yet.</p>
                   )}
                 </div>
               </div>
@@ -2388,30 +2419,12 @@ export default function Home() {
                   ]
                 }))}
               />
-              <MemoryAccordionGroup
-                title="Hooks"
-                badge={`${memory.events.filter((event) => event.eventType === "unresolved_hook").length}`}
-                emptyLabel="No unresolved hooks yet."
-                deleteLabel="Delete Hook"
+              <StoryHooksPanel
+                hooks={memory.hooks}
                 deletingItemKey={deletingMemoryItemKey}
+                updatingHookId={updatingHookId}
                 onDelete={(itemId) => handleDeleteMemoryItem("hook", itemId)}
-                items={memory.events
-                  .filter((event) => event.eventType === "unresolved_hook")
-                  .slice(0, 6)
-                  .map((event) => {
-                    const display = formatMemoryHook(event);
-                    return {
-                      id: event.id,
-                      deleteKey: `hook:${event.id}`,
-                      title: display.title,
-                      summary: compactEncounterPreview(display.detail || "Unresolved hook"),
-                      pills: ["Hook"],
-                      details: [
-                        { label: "Type", value: splitCamelCase(event.eventType) },
-                        { label: "Detail", value: display.detail }
-                      ]
-                    };
-                  })}
+                onStatusChange={handleUpdateHookStatus}
               />
             </div>
           </section>
@@ -2971,12 +2984,12 @@ function MobileEmptyChatState({
   );
 }
 
-function formatMemoryHook(event: CampaignMemory["events"][number]) {
-  const rawTitle = event.title ?? "";
-  const rawDescription = event.description ?? "";
+function formatStoryHook(hook: MemoryHook) {
+  const rawTitle = hook.title ?? "";
+  const rawDescription = hook.description ?? "";
   const title = extractStoredField(rawTitle, "hook") || extractStoredField(rawDescription, "hook") || cleanStoredMemoryText(rawTitle);
   const detail = extractStoredField(rawTitle, "details") || extractStoredField(rawDescription, "details") || cleanStoredMemoryText(rawDescription);
-  const cleanTitle = title || "Unresolved story thread";
+  const cleanTitle = title || "Open story thread";
   const cleanDetail = detail && detail !== cleanTitle ? detail : "";
 
   return {
@@ -3061,6 +3074,236 @@ function mergeSavedEncounter(memory: CampaignMemory, encounter: CampaignMemory["
     ...memory,
     encounters: [encounter, ...encounters]
   };
+}
+
+function mergeUpdatedHook(memory: CampaignMemory, hook: MemoryHook): CampaignMemory {
+  const hooks = memory.hooks.filter((item) => item.id !== hook.id);
+  return {
+    ...memory,
+    hooks: [hook, ...hooks]
+  };
+}
+
+const storyHookViews: Array<{ key: "open" | "active" | "resolved" | "dropped"; label: string; statuses: HookStatus[] }> = [
+  { key: "open", label: "Open", statuses: ["open", "rumor", "lead"] },
+  { key: "active", label: "Active", statuses: ["active"] },
+  { key: "resolved", label: "Resolved", statuses: ["resolved"] },
+  { key: "dropped", label: "Dropped", statuses: ["dropped"] }
+];
+
+function StoryHooksPanel({
+  hooks,
+  deletingItemKey,
+  updatingHookId,
+  onDelete,
+  onStatusChange
+}: {
+  hooks: MemoryHook[];
+  deletingItemKey: string | null;
+  updatingHookId: string | null;
+  onDelete: (itemId: string) => Promise<void>;
+  onStatusChange: (hookId: string, status: HookStatus, resolution?: string) => Promise<void>;
+}) {
+  const [activeView, setActiveView] = useState<(typeof storyHookViews)[number]["key"]>("open");
+  const [expandedHookId, setExpandedHookId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [resolvingHookId, setResolvingHookId] = useState<string | null>(null);
+  const [resolutionDraft, setResolutionDraft] = useState("");
+  const activeDefinition = storyHookViews.find((view) => view.key === activeView) ?? storyHookViews[0];
+  const visibleHooks = hooks.filter((hook) => activeDefinition.statuses.includes(hook.status));
+
+  useEffect(() => {
+    if (expandedHookId && !hooks.some((hook) => hook.id === expandedHookId)) {
+      setExpandedHookId(null);
+    }
+    if (confirmDeleteId && !hooks.some((hook) => hook.id === confirmDeleteId)) {
+      setConfirmDeleteId(null);
+    }
+    if (resolvingHookId && !hooks.some((hook) => hook.id === resolvingHookId)) {
+      setResolvingHookId(null);
+      setResolutionDraft("");
+    }
+  }, [confirmDeleteId, expandedHookId, hooks, resolvingHookId]);
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-moss/15 bg-white shadow-sm">
+      <div className="flex items-center justify-between gap-3 border-b border-moss/10 bg-parchment/35 px-3 py-2.5">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-copper">Story Hooks</p>
+        <span className="rounded-full bg-mist px-2.5 py-1 text-xs font-semibold text-moss">{hooks.length}</span>
+      </div>
+      <div className="flex flex-wrap gap-1 border-b border-moss/10 bg-white px-3 py-2">
+        {storyHookViews.map((view) => {
+          const count = hooks.filter((hook) => view.statuses.includes(hook.status)).length;
+          const isActive = activeView === view.key;
+          return (
+            <button
+              key={view.key}
+              type="button"
+              onClick={() => setActiveView(view.key)}
+              className={`rounded-md border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.1em] transition ${
+                isActive ? "border-copper bg-copper text-white" : "border-moss/15 bg-parchment/40 text-moss hover:border-copper/40"
+              }`}
+            >
+              {view.label} {count}
+            </button>
+          );
+        })}
+      </div>
+      {visibleHooks.length === 0 && <p className="px-3 py-3 text-sm leading-6 text-moss/60">No {activeDefinition.label.toLowerCase()} hooks.</p>}
+      {visibleHooks.slice(0, 8).map((hook) => {
+        const display = formatStoryHook(hook);
+        const isExpanded = expandedHookId === hook.id;
+        const detailsId = `hook-details-${hook.id}`;
+        const isDeleting = deletingItemKey === `hook:${hook.id}`;
+        const isUpdating = updatingHookId === hook.id;
+        const isConfirmingDelete = confirmDeleteId === hook.id;
+        const related = [hook.relatedEntityType ? splitCamelCase(hook.relatedEntityType) : "", hook.relatedEntityName].filter(Boolean).join(": ");
+
+        return (
+          <article key={hook.id} className="border-b border-moss/10 last:border-b-0">
+            <button
+              type="button"
+              aria-expanded={isExpanded}
+              aria-controls={detailsId}
+              onClick={() => {
+                setExpandedHookId(isExpanded ? null : hook.id);
+                setConfirmDeleteId(null);
+                setResolvingHookId(null);
+              }}
+              className={`block w-full px-3 py-3 text-left transition ${isExpanded ? "bg-parchment/55" : "bg-white hover:bg-parchment/35"}`}
+            >
+              <div className="flex min-w-0 items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="min-w-0 break-words text-sm font-semibold leading-5 text-ink">{display.title}</h3>
+                  {display.detail && <p className="mt-1 line-clamp-2 text-xs leading-5 text-moss/75">{display.detail}</p>}
+                  <div className="mt-2 flex min-w-0 flex-wrap gap-1.5">
+                    <EncounterMetaPill value={hookStatusLabel(hook.status)} className="px-2 py-0.5 text-[10px] tracking-[0.08em]" />
+                    {related && <EncounterMetaPill value={compactEncounterPreview(related, 36)} className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap px-2 py-0.5 text-[10px] tracking-[0.08em]" />}
+                  </div>
+                </div>
+                <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.12em] text-moss/55">{isExpanded ? "Collapse" : "Expand"}</span>
+              </div>
+            </button>
+            {isExpanded && (
+              <div id={detailsId} className="space-y-3 border-t border-moss/10 bg-white p-3 text-sm">
+                <div className="grid gap-3">
+                  <EncounterDetail label="Status" value={hookStatusLabel(hook.status)} />
+                  <EncounterDetail label="Detail" value={display.detail} />
+                  <EncounterDetail label="Related" value={related} />
+                  <EncounterDetail label="Resolution" value={hook.resolution ?? ""} />
+                </div>
+                {resolvingHookId === hook.id && (
+                  <div className="rounded-lg border border-copper/20 bg-parchment/55 p-3">
+                    <label className="block text-xs font-semibold uppercase tracking-[0.14em] text-copper">
+                      Resolution Note
+                      <textarea
+                        value={resolutionDraft}
+                        onChange={(event) => setResolutionDraft(event.target.value)}
+                        rows={4}
+                        placeholder="What did the party learn, change, close, or decide?"
+                        className="mt-2 w-full resize-none rounded-md border border-moss/20 bg-white px-3 py-2 text-sm normal-case leading-6 tracking-normal text-ink outline-none transition placeholder:text-moss/45 focus:border-copper focus:ring-2 focus:ring-copper/15"
+                      />
+                    </label>
+                    <div className="mt-3 flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        disabled={isUpdating}
+                        onClick={() => {
+                          setResolvingHookId(null);
+                          setResolutionDraft("");
+                        }}
+                        className="rounded-md border border-moss/20 bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-moss/75 transition hover:border-moss/40 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isUpdating}
+                        onClick={async () => {
+                          await onStatusChange(hook.id, "resolved", resolutionDraft.trim());
+                          setResolvingHookId(null);
+                          setResolutionDraft("");
+                        }}
+                        className="rounded-md border border-moss/25 bg-moss px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isUpdating ? "Saving" : "Save Resolution"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <div className="flex flex-wrap justify-end gap-2 border-t border-moss/10 pt-3">
+                  {hook.status !== "active" && hook.status !== "resolved" && hook.status !== "dropped" && (
+                    <button
+                      type="button"
+                      disabled={isUpdating}
+                      onClick={() => onStatusChange(hook.id, "active")}
+                      className="rounded-md border border-copper/30 bg-copper/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-copper transition hover:bg-copper/15 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Active
+                    </button>
+                  )}
+                  {hook.status !== "resolved" && (
+                    <button
+                      type="button"
+                      disabled={isUpdating}
+                      onClick={() => {
+                        setConfirmDeleteId(null);
+                        setResolvingHookId(hook.id);
+                        setResolutionDraft(hook.resolution ?? "");
+                      }}
+                      className="rounded-md border border-moss/25 bg-moss/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-moss transition hover:bg-moss/15 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Resolve
+                    </button>
+                  )}
+                  {hook.status !== "dropped" && hook.status !== "resolved" && (
+                    <button
+                      type="button"
+                      disabled={isUpdating}
+                      onClick={() => onStatusChange(hook.id, "dropped")}
+                      className="rounded-md border border-moss/20 bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-moss/75 transition hover:border-moss/40 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Drop
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    aria-label={`${isConfirmingDelete ? "Confirm " : ""}Delete Hook ${display.title}`}
+                    aria-pressed={isConfirmingDelete}
+                    disabled={isDeleting}
+                    onClick={async () => {
+                      if (!isConfirmingDelete) {
+                        setConfirmDeleteId(hook.id);
+                        return;
+                      }
+                      try {
+                        await onDelete(hook.id);
+                        setConfirmDeleteId(null);
+                        setExpandedHookId(null);
+                      } catch {
+                        // The parent page owns the visible error message.
+                      }
+                    }}
+                    className={`rounded-md border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                      isConfirmingDelete
+                        ? "border-ember/40 bg-ember text-white hover:bg-ember/90"
+                        : "border-ember/25 bg-ember/10 text-ember hover:bg-ember/15"
+                    }`}
+                  >
+                    {isDeleting ? "Deleting" : isConfirmingDelete ? "Delete?" : "Delete"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function hookStatusLabel(status: HookStatus) {
+  return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
 type MemoryAccordionItem = {

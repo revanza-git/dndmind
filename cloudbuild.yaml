@@ -1,0 +1,37 @@
+substitutions:
+  _REGION: asia-southeast1
+  _REPOSITORY: dndmind
+  _IMAGE_TAG: manual
+  _NEXT_PUBLIC_API_BASE_URL: https://api.example.com
+
+steps:
+  - id: build-api
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/dndmind-api:${_IMAGE_TAG}
+      - apps/api
+
+  - id: build-ai-worker
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/dndmind-ai-worker:${_IMAGE_TAG}
+      - apps/ai-worker
+
+  - id: build-web
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg
+      - NEXT_PUBLIC_API_BASE_URL=${_NEXT_PUBLIC_API_BASE_URL}
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/dndmind-web:${_IMAGE_TAG}
+      - apps/web
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/dndmind-api:${_IMAGE_TAG}
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/dndmind-ai-worker:${_IMAGE_TAG}
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/dndmind-web:${_IMAGE_TAG}

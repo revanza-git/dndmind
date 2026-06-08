@@ -35,25 +35,25 @@ const quickStart = [
     title: "Choose campaign",
     detail: "Open the campaign selector and choose the campaign you want DNDMind to use. If it says No active campaigns, click New or restore one from Archived.",
     result: "The active campaign appears at the top.",
-    area: "Left Sidebar"
+    area: "Campaign area"
   },
   {
     title: "Check party",
     detail: "Review or update character level, HP, AC, class, and notes.",
     result: "Encounter prompts can account for party strength.",
-    area: "Right Panel"
+    area: "Notes area"
   },
   {
     title: "Add campaign knowledge",
     detail: "Upload or paste rules, lore, or notes, then click Add to Campaign.",
     result: "Rules questions can return citations.",
-    area: "Campaign Knowledge"
+    area: "Campaign area"
   },
   {
     title: "Add session notes",
     detail: "Paste raw notes, save them, then summarize.",
     result: "NPCs, quests, locations, and hooks become campaign memory.",
-    area: "Session Notes"
+    area: "Notes area"
   },
   {
     title: "Ask AI",
@@ -63,15 +63,15 @@ const quickStart = [
   },
   {
     title: "Save output",
-    detail: "Use suggested actions on NPC, quest, location, encounter, or session cards.",
-    result: "Useful generated content becomes reusable memory.",
-    area: "Center Workspace"
+    detail: "Use suggested actions on character, NPC, quest, location, encounter, hook, or session cards.",
+    result: "Characters can join the party list. Other useful cards become campaign memory.",
+    area: "Chat workspace"
   },
   {
     title: "Review results",
     detail: "Check citations, tool results, and saved cards before using them at the table.",
     result: "You can see what DNDMind used and decide what to keep.",
-    area: "Center Workspace"
+    area: "Chat workspace"
   }
 ];
 
@@ -87,17 +87,17 @@ const firstRunSteps = [
 ];
 
 const layoutAreas = [
-  ["Left Sidebar", "Choose, create, edit, archive, or restore campaigns; open Campaign Knowledge; navigate app areas; and return to this manual."],
-  ["Center Workspace", "Read the chat timeline, generated encounter briefings, citations, tool results, and structured cards."],
-  ["Right Panel", "Use dice, session notes, party details, memory, citations, and tool traces."],
-  ["Command Console", "Type your request, choose a mode, set context toggles, and send."]
+  ["Campaign area", "Choose, create, edit, archive, or restore campaigns; open Campaign Knowledge; navigate app areas; and return to this manual. On phones, use the Campaign tab."],
+  ["Chat workspace", "Read the chat timeline, generated cards, citations, tool results, and save actions. On phones, use the Chat tab."],
+  ["Notes area", "Use saved encounters, dice, tonight's prep, session notes, party details, and campaign memory. On phones, use the Notes tab."],
+  ["Command Console", "Type your request, choose a mode, set context toggles, use Spark, and send."]
 ];
 
 const commandCenter = [
-  ["Mode buttons", "Decide the kind of AI task. Use Rules for sourced rules answers, Encounter for combat design, NPC for characters, Summarize for notes, and Auto when the task mixes categories."],
+  ["Mode buttons", "Decide the kind of AI task. Use Rules for sourced rules answers, Encounter for combat design, NPC for non-player characters, Character for party-ready characters, Recap for campaign history, Summarize for notes, and Auto when the task mixes categories."],
   ["Context toggles", "Decide what information the AI can use. Turn on Campaign Memory for saved story context, Party Info for party-aware answers, and Rules for citations from ready-to-use documents."],
   ["Command Console", "Type the instruction you want DNDMind to perform, then click Send. Specific prompts produce better cards and fewer follow-up questions."],
-  ["Structured cards", "Reusable campaign objects such as NPCs, quests, locations, encounters, and summaries. Save useful cards so they can become campaign memory."],
+  ["Structured cards", "Reusable results such as characters, NPCs, quests, locations, encounters, and summaries. Save character cards to the party list and save other useful cards as campaign memory."],
   ["Tool results", "Calculations or app actions performed by the system, such as dice rolls, rules search, memory search, and encounter checks."],
   ["Citations", "Source references showing which knowledge entry or campaign memory DNDMind used for the answer."]
 ];
@@ -108,7 +108,8 @@ const knowledgeGuide = [
   ["NPC notes", "Names, motives, secrets, relationships, recurring behavior, and hooks tied to campaign characters."],
   ["Location notes", "Places, factions, dangers, clues, rumors, and details the party may return to later."],
   ["Quest notes", "Objectives, status, complications, rewards, unresolved hooks, and what changed during play."],
-  ["Campaign lore", "Factions, history, gods, politics, prophecies, and world truths that should stay consistent."]
+  ["Campaign lore", "Factions, history, gods, politics, prophecies, and world truths that should stay consistent."],
+  ["Session notes", "Raw or cleaned notes from play that should become searchable campaign context."]
 ];
 
 const knowledgeSteps = [
@@ -123,7 +124,7 @@ const knowledgeSteps = [
 const templateGuide = [
   ["Rules", "Rules references you want cited in answers."],
   ["Session Notes", "Raw notes from play that should become searchable context."],
-  ["NPC", "Character details, secrets, relationships, and hooks."],
+  ["NPC", "Non-player character details, secrets, relationships, and hooks."],
   ["Location", "Places, points of interest, hazards, and clues."],
   ["Quest", "Objectives, status, complications, and rewards."],
   ["Campaign Lore", "Factions, history, world facts, rumors, and long-running truths."]
@@ -171,7 +172,7 @@ const campaignMenuSteps = [
 const steps: GuideStep[] = [
   {
     title: "Create Campaign",
-    where: "Left Sidebar -> Campaign",
+    where: "Campaign area -> Campaign",
     do: [
       "Open the campaign selector to choose an active campaign.",
       "Click New if the selector says No active campaigns or you want a fresh campaign.",
@@ -184,7 +185,7 @@ const steps: GuideStep[] = [
   },
   {
     title: "Add Party",
-    where: "Right Panel -> Party",
+    where: "Notes area -> Party",
     do: [
       "Open the party area.",
       "Use Add Character to enter name, class, race, level, HP, AC, initiative, passive perception, and notes.",
@@ -198,7 +199,7 @@ const steps: GuideStep[] = [
   },
   {
     title: "Add Campaign Knowledge",
-    where: "Left Sidebar -> Campaign Knowledge",
+    where: "Campaign area -> Campaign Knowledge",
     do: [
       "Open the Campaign Knowledge area.",
       "Upload or paste rules, lore, notes, or NPC details.",
@@ -210,7 +211,7 @@ const steps: GuideStep[] = [
   },
   {
     title: "Add Session Notes",
-    where: "Right Panel -> Session Notes",
+    where: "Notes area -> My Local Sessions",
     do: [
       "Paste raw table notes into the notes field.",
       "Save the notes.",
@@ -233,7 +234,7 @@ const steps: GuideStep[] = [
   },
   {
     title: "Use Tools",
-    where: "Command Console or Right Panel -> Dice",
+    where: "Command Console or Notes area -> Dice",
     do: [
       "Ask for an action such as rolling dice, searching memory, searching rules, or checking encounter difficulty.",
       "Use prompts like: Roll 1d20+5 for perception.",
@@ -244,18 +245,18 @@ const steps: GuideStep[] = [
   },
   {
     title: "Save Cards",
-    where: "Center Workspace -> Structured Card",
+    where: "Chat workspace -> Structured Card",
     do: [
-      "Review a generated NPC, quest, location, encounter, or session summary card.",
+      "Review a generated character, NPC, quest, location, encounter, or session summary card.",
       "Confirm it is useful for the campaign.",
-      "Click the matching save action, such as Save NPC or Save Encounter."
+      "Click the matching save action, such as Save Character, Save NPC, or Save Encounter."
     ],
-    expected: "The saved item becomes reusable campaign memory for future prompts.",
-    why: "Saving is what turns a one-off AI answer into campaign material DNDMind can recall later."
+    expected: "Saved characters join the party list. Other saved cards become reusable campaign memory.",
+    why: "Saving is what turns a one-off AI answer into campaign material DNDMind can reuse later."
   },
   {
     title: "Review Answers",
-    where: "Center Workspace",
+    where: "Chat workspace",
     do: [
       "Read the answer before using it at the table.",
       "Check citations when the answer is based on rules or memory.",
@@ -270,8 +271,9 @@ const modes = [
   ["Auto", "Mixed tasks and session prep.", "Prepare tonight's opening scene based on last session."],
   ["Rules", "Rules questions that need citations.", "How does advantage work?"],
   ["Encounter", "Combat and challenge design.", "Create a hard ambush for my level 3 party."],
-  ["NPC", "Character creation and relationship hooks.", "Generate a suspicious tavern keeper."],
-  ["Combat", "Dice, initiative, tactics, and table actions.", "Roll initiative for the party and goblins."],
+  ["NPC", "Non-player characters, motives, secrets, and relationship hooks.", "Generate a suspicious tavern keeper."],
+  ["Character", "Backup player characters, rivals, hirelings, and party-ready allies.", "Generate a level 3 adventurer tied to this campaign."],
+  ["Recap", "A table-ready recap from saved campaign memory.", "Recap the campaign so far and list the open hooks."],
   ["Summarize", "Session notes and extracted hooks.", "Summarize this session and extract unresolved hooks."]
 ];
 
@@ -291,6 +293,13 @@ const tryCards: TryCard[] = [
     expected: "DNDMind returns an NPC card with role, personality, motivation, secret, and quest hook."
   },
   {
+    title: "Generate a Character",
+    mode: "Character",
+    toggles: "Campaign Memory ON, Party Info optional",
+    prompt: "Generate a level 3 adventurer tied to this campaign who could work as a backup PC, rival, or hireling.",
+    expected: "DNDMind returns a character card. Save Character adds it to the party list."
+  },
+  {
     title: "Create an Encounter",
     mode: "Encounter",
     toggles: "Campaign Memory ON, Party Info ON",
@@ -306,10 +315,17 @@ const tryCards: TryCard[] = [
   },
   {
     title: "Roll Dice",
-    mode: "Combat",
+    mode: "Auto",
     toggles: "No context required",
     prompt: "Roll 1d20+5 for perception.",
     expected: "DNDMind shows the roll result and tool trace in the response."
+  },
+  {
+    title: "Recap the Campaign",
+    mode: "Recap",
+    toggles: "Campaign Memory ON",
+    prompt: "Recap the campaign so far and list the unresolved hooks.",
+    expected: "DNDMind returns a table-ready recap based on saved campaign memory."
   },
   {
     title: "Search Campaign Memory",
@@ -324,7 +340,9 @@ const prompts = [
   "How should I open tonight's session?",
   "What happened at Blackwater Mine?",
   "Generate a suspicious NPC connected to Captain Vey.",
+  "Generate a level 3 adventurer tied to this campaign who could work as a backup PC, rival, or hireling.",
   "Create a medium encounter for this party involving the Ashen Knives.",
+  "Recap the campaign so far and list the unresolved hooks.",
   "Roll 1d20+5 for perception.",
   "Summarize these session notes and extract NPCs, quests, and hooks.",
   "Search campaign memory for Captain Vey.",
@@ -345,11 +363,11 @@ const workflows: Workflow[] = [
   {
     title: "Live Play",
     steps: [
-      "Use Auto mode for mixed table help or Combat mode for tactical moments.",
+      "Use Auto mode for mixed table help or Encounter mode for tactical moments.",
       "Roll dice from the command console or dice roller.",
       "Ask quick rules questions in Rules mode when a ruling needs support.",
       "Search campaign memory for names, places, and unresolved hooks.",
-      "Save important NPCs, hooks, or encounter results before moving on. Saved encounters appear later in Campaign Memory."
+      "Save important characters, NPCs, hooks, or encounter results before moving on. Saved encounters appear later in Campaign Memory."
     ]
   },
   {
@@ -397,7 +415,7 @@ const troubleshooting: TroubleshootingItem[] = [
   {
     problem: "Encounter does not use party info.",
     cause: "Party Info is off or party members are missing details.",
-    fix: ["Enable Party Info.", "Add level, HP, AC, class, and notes for each character.", "Ask again in Encounter or Combat mode."]
+    fix: ["Enable Party Info.", "Add level, HP, AC, class, and notes for each character.", "Ask again in Encounter mode."]
   },
   {
     problem: "DNDMind answers from the wrong campaign.",
@@ -421,15 +439,16 @@ const troubleshooting: TroubleshootingItem[] = [
 ];
 
 const glossary = [
-  ["Active Campaign", "The campaign currently selected in the left sidebar."],
+  ["Active Campaign", "The campaign currently selected in the Campaign area."],
   ["Archived Campaign", "A campaign moved out of the active list but still available to restore later."],
   ["Campaign Knowledge", "Source text added to a campaign so DNDMind can search and cite it."],
   ["Campaign Memory", "Saved notes, NPCs, quests, locations, encounters, and summaries DNDMind can use later."],
   ["Context Toggle", "A switch that controls which saved information DNDMind may use for the next prompt."],
-  ["Task Hint", "A mode button that tells DNDMind what kind of answer to produce."],
-  ["Structured Card", "A generated NPC, quest, location, encounter, or summary that you can save."],
+  ["Task Mode", "A mode button that tells DNDMind what kind of answer to produce."],
+  ["Structured Card", "A generated character, NPC, quest, location, encounter, or summary that you can save."],
   ["Tool Result", "A visible result from an action such as a dice roll, rules search, homebrew search, or memory search."],
-  ["Citation", "A source reference attached to an answer so the user can see where context came from."],
+  ["Citation", "A source reference attached to an answer so you can see where context came from."],
+  ["Spark", "The prompt helper that drafts a request for the current mode and context."],
   ["Local Browser Profile", "The browser-based identity used to keep sessions separate."]
 ];
 
@@ -702,6 +721,8 @@ export default function ManualPage() {
                   <InfoCard title="Rules questions" detail="Use Rules mode with Rules on. Add Homebrew only when custom rules should affect the ruling." tone="definition" />
                   <InfoCard title="Encounter design" detail="Use Encounter mode with Campaign Memory and Party Info on." tone="definition" />
                   <InfoCard title="NPC or story work" detail="Use NPC or Auto mode with Campaign Memory on when the answer should fit your campaign." tone="definition" />
+                  <InfoCard title="Character generation" detail="Use Character mode with Campaign Memory on when a backup PC, rival, or hireling should fit the campaign." tone="definition" />
+                  <InfoCard title="Campaign recap" detail="Use Recap mode with Campaign Memory on when you want a table-ready summary of what happened so far." tone="definition" />
                   <InfoCard title="Pure brainstorming" detail="Use Auto with only the context you need so the answer stays flexible." tone="definition" />
                 </div>
               </ManualSection>
