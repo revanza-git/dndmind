@@ -295,6 +295,17 @@ export type SessionSummaryResponse = {
   memoryDocumentId: string;
 };
 
+export type ClearSessionMemoryResponse = {
+  session: Session | null;
+  deletedMemoryEvents: number;
+  deletedHooks: number;
+  deletedNpcs: number;
+  deletedQuests: number;
+  deletedLocations: number;
+  deletedEncounters: number;
+  deletedMemoryDocuments: number;
+};
+
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
@@ -593,6 +604,16 @@ export async function updateSession(input: {
   return response.json();
 }
 
+export async function deleteSession(sessionId: string): Promise<void> {
+  const response = await apiFetch(`/api/sessions/${sessionId}`, {
+    method: "DELETE"
+  });
+
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "DNDMind could not delete that session. Please try again."));
+  }
+}
+
 export async function summarizeSession(sessionId: string): Promise<SessionSummaryResponse> {
   const response = await apiFetch(`/api/sessions/${sessionId}/summarize`, {
     method: "POST"
@@ -600,6 +621,18 @@ export async function summarizeSession(sessionId: string): Promise<SessionSummar
 
   if (!response.ok) {
     throw new Error(await apiErrorMessage(response, "DNDMind could not summarize that session. Please try again."));
+  }
+
+  return response.json();
+}
+
+export async function clearSessionMemory(sessionId: string): Promise<ClearSessionMemoryResponse> {
+  const response = await apiFetch(`/api/sessions/${sessionId}/clear-memory`, {
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "DNDMind could not clear that session memory. Please try again."));
   }
 
   return response.json();

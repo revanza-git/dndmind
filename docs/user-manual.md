@@ -11,8 +11,8 @@ Use this short checklist the first time you open DNDMind.
 1. Open the app in your browser.
 2. Choose a campaign from the Campaign area. On phones, use the **Campaign** tab.
 3. If there are no active campaigns, click **New** or restore one from **Archived**.
-4. Check the party list on the right.
-5. Add rules, lore, NPC notes, or session notes in **Campaign Knowledge** if you want DNDMind to use them.
+4. Check the party list on the right. On phones, use the **Notes** tab.
+5. Add rules, lore, NPC notes, or session notes in **Campaign Knowledge** if you want DNDMind to cite or search them.
 6. Choose a task mode, such as **Auto**, **Rules**, **Encounter**, **NPC**, **Character**, **Recap**, or **Summarize**.
 7. Turn on the context toggles you want DNDMind to use.
 8. Type a request in the command console and click **Send**.
@@ -58,7 +58,7 @@ Expected result: DNDMind creates a party-aware encounter and saves it as campaig
 | Context Toggles | Choose which saved information DNDMind may use for the next answer. |
 | Command Console | Type your request, send it, or clear the current chat. |
 | Spark | Drafts a prompt for the selected task mode using the current campaign context. |
-| Notes Area | Manage saved encounters, dice, tonight's prep, session notes, party details, and campaign memory. On wide screens this is the right panel; on phones it is the **Notes** tab. |
+| Notes Area | Manage saved encounters, dice, tonight's prep, local session notes, party details, and campaign memory. On wide screens this is the right panel; on phones it is the **Notes** tab. |
 
 ## Campaigns
 
@@ -138,6 +138,72 @@ Supported uploads are `.txt` and `.md` files up to 2 MB. Pasted notes work too.
 - **Notes** are the searchable pieces created from your text.
 - **Delete** removes a regular rules or homebrew document from Campaign Knowledge.
 - Some session memory documents may be protected because they come from saved campaign memory.
+
+## Party
+
+The party list helps DNDMind understand who is at the table. Use it before asking for encounter balance, tactical advice, character-aware scenes, or party-specific recaps.
+
+### Add or Update a Character
+
+1. Open **Party** in the Notes area.
+2. Click **Add Character**.
+3. Enter the character's name.
+4. Add class, race, level, HP, AC, initiative modifier, passive perception, and notes when you know them.
+5. Click **Add Character**.
+
+To update a character later, expand the character card and use:
+
+- **Edit** to change details such as level, AC, class, race, and notes.
+- **HP** to update current HP or temporary HP during play.
+- **History** to review character progress and add notes.
+- **Level +1** for a quick level increase.
+- **Archive** when a character leaves the active party list.
+
+The **Recent Progress** area shows recent level, HP, and note changes.
+
+### Good Party Habits
+
+- Keep each character's level and AC current before using **Encounter** mode.
+- Update HP during a session if you want DNDMind to understand current danger.
+- Add short notes for important relationships, goals, magic items, or weaknesses.
+- Turn **Party Info** on when the answer should account for the party.
+
+## My Local Sessions
+
+**My Local Sessions** is where you write and save notes for the current browser profile. It is useful before, during, and after play.
+
+Session notes are different from Campaign Knowledge. Session notes are your running table record. Campaign Knowledge is source material you intentionally add for lookup and citations.
+
+### Save Session Notes
+
+1. Open **My Local Sessions** in the Notes area.
+2. Choose an existing session, or leave the selector on **New session**.
+3. Enter a session title.
+4. Paste or write notes in the notes box.
+5. Click **Save**.
+
+DNDMind also keeps a local draft while you type. If the app says **Draft saved locally**, your browser has a temporary copy even before you click **Save**.
+
+### Summarize a Session
+
+1. Add or review your session notes.
+2. Click **Summarize**.
+3. Review the summary and extracted details.
+4. Save useful cards or summaries when they are accurate.
+
+Expected result: important NPCs, quests, locations, hooks, events, and encounters become easier to find later.
+
+### Clear or Delete Session Material
+
+Use these buttons carefully:
+
+| Control | What it does | Use it when |
+| --- | --- | --- |
+| **Clear Session Memory** | Removes generated memory tied to the selected session, while keeping the session notes. | The summary or extracted memory was wrong, but you want to keep the raw notes. |
+| **Clear Notes + Memory** | Clears the selected session notes and generated memory. | You want to restart that session record. |
+| **Delete Session** | Deletes the selected saved session and generated memory tied to it. | The session record is no longer needed. |
+
+Structured cards saved separately, such as a saved NPC or saved encounter, can remain in campaign memory even if you delete a session.
 
 ## Context Toggles
 
@@ -276,13 +342,27 @@ Recap is best for saved campaign history. **Summarize** is best for turning the 
 
 ### Summarize Session Notes
 
-1. Paste raw notes into **Session Notes**.
+1. Paste raw notes into **My Local Sessions**.
 2. Click **Save**.
 3. Click **Summarize**.
 4. Review the summary and extracted details.
 5. Save useful summaries or cards.
 
 Expected result: important NPCs, quests, locations, hooks, and events become easier to find later.
+
+### Generate a Card Image
+
+Some NPC, character, and encounter cards can include a generated image.
+
+1. Create an NPC, character, or encounter.
+2. Find the image panel on the structured card.
+3. Choose a style, such as **Cinematic**, **Parchment Sketch**, **Combat Stance**, or **Anime**.
+4. Click **Generate Image**.
+5. Review the image.
+6. Click **Regenerate Image** if you want another version.
+7. Save the card after the image looks useful.
+
+If image generation is not available, you can still save and use the card without an image.
 
 ### Search Campaign Memory
 
@@ -329,6 +409,15 @@ Campaign Memory is where saved NPCs, quests, locations, hooks, encounters, and s
 5. Delete saved encounters, NPCs, quests, or locations only when you no longer want them used as campaign memory.
 
 Deleting a saved encounter also removes its searchable encounter memory.
+
+Story hook statuses help you track what still matters:
+
+- **Open** means the hook is available but not currently urgent.
+- **Rumor** means the party may have heard about it, but it is not confirmed.
+- **Lead** means the party has a usable next step.
+- **Active** means it is important right now.
+- **Resolved** means it has been answered or completed.
+- **Dropped** means you no longer plan to use it.
 
 ## Good Prompt Patterns
 
@@ -382,7 +471,7 @@ Create three clues for the Blackwater Mine investigation, using Captain Vey as a
 
 ### After a Session
 
-1. Paste raw notes into **Session Notes**.
+1. Paste raw notes into **My Local Sessions**.
 2. Click **Save**.
 3. Click **Summarize**.
 4. Review extracted NPCs, quests, locations, and hooks.
@@ -452,6 +541,22 @@ Try this:
 3. Add a clear document title.
 4. Paste the text instead of uploading if that is easier.
 
+### My generated image will not appear
+
+Likely cause: image generation is not enabled, the image service is busy, or the card type does not support images.
+
+Try this:
+
+1. Save the card without an image if you need it right away.
+2. Try **Generate Image** again later.
+3. Ask the person running the app whether image generation is enabled.
+
+### I cleared session memory by mistake
+
+Likely cause: **Clear Session Memory** removed generated memory tied to the selected session.
+
+Your raw session notes may still be there. Click **Summarize** again to rebuild session memory, then review the extracted details before saving.
+
 ### I see "No active campaigns"
 
 Likely cause: no campaign has been created yet, or all campaigns are archived.
@@ -486,8 +591,10 @@ Your saved campaign material is still there. Check Campaign Memory, Session Note
 - **Campaign Memory**: saved notes, NPCs, quests, locations, encounters, and summaries.
 - **Citation**: a source DNDMind used for an answer.
 - **Context Toggle**: a switch that controls which saved information DNDMind may use for the next prompt.
+- **Draft**: a local browser copy of session notes while you type.
 - **Local Browser Profile**: the browser-based identity used to keep sessions separate.
 - **Structured Card**: a generated character, NPC, encounter, quest, location, or summary that can be saved.
+- **Story Hook**: an unresolved thread, rumor, lead, or active plot point saved in campaign memory.
 - **Spark**: the prompt suggestion control that drafts a request for the current mode.
 - **Task Mode**: the button that tells DNDMind what kind of answer to produce.
 - **Tool Result**: a visible result from an action such as a dice roll, rules search, memory search, or encounter check.

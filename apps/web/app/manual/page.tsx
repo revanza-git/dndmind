@@ -169,6 +169,47 @@ const campaignMenuSteps = [
   }
 ];
 
+const partyGuide = [
+  ["Add Character", "Add a player character with name, class, race, level, HP, AC, initiative, passive perception, and notes."],
+  ["Edit", "Update character details when levels, AC, class, race, or table notes change."],
+  ["HP", "Track current HP and temporary HP during play so encounter advice can reflect current danger."],
+  ["History", "Review character progress and add short progress notes tied to the active session."],
+  ["Level +1", "Quickly increase a character's level after advancement."],
+  ["Archive", "Move a character out of the active party list when they leave the table."]
+];
+
+const partyHabits = [
+  "Keep level and AC current before using Encounter mode.",
+  "Update HP during a session when danger level matters.",
+  "Add notes for relationships, goals, magic items, or weaknesses.",
+  "Turn on Party Info when the answer should account for the party."
+];
+
+const sessionGuide = [
+  ["Save", "Stores the selected session notes for this browser profile."],
+  ["Summarize", "Turns session notes into a recap and extracted campaign memory."],
+  ["Clear Session Memory", "Removes generated memory tied to the selected session, while keeping the session notes."],
+  ["Clear Notes + Memory", "Clears both the selected session notes and generated memory."],
+  ["Delete Session", "Deletes the selected saved session and generated memory tied to it."]
+];
+
+const imageGuide = [
+  "Create an NPC, character, or encounter card.",
+  "Choose an image style when the image panel appears.",
+  "Click Generate Image.",
+  "Review the image, or click Regenerate Image for another version.",
+  "Save the card after the image looks useful."
+];
+
+const storyHookStatuses = [
+  ["Open", "Available, but not currently urgent."],
+  ["Rumor", "Heard about, but not confirmed."],
+  ["Lead", "The party has a usable next step."],
+  ["Active", "Important right now."],
+  ["Resolved", "Answered or completed."],
+  ["Dropped", "No longer planned for play."]
+];
+
 const steps: GuideStep[] = [
   {
     title: "Create Campaign",
@@ -428,6 +469,16 @@ const troubleshooting: TroubleshootingItem[] = [
     fix: ["Find the campaign under Archived.", "Click Restore.", "Choose it in the campaign selector if it is not already selected."]
   },
   {
+    problem: "A generated image will not appear.",
+    cause: "Image generation may be off, busy, or unavailable for that card type.",
+    fix: ["Save the card without an image if you need it right away.", "Try Generate Image again later.", "Ask the person running the app whether image generation is enabled."]
+  },
+  {
+    problem: "I cleared session memory by mistake.",
+    cause: "Clear Session Memory removed generated memory tied to the selected session.",
+    fix: ["Check whether the raw session notes are still there.", "Click Summarize again to rebuild session memory.", "Review the extracted details before saving them."]
+  },
+  {
     problem: "The app says an API key is missing.",
     cause: "The app may need an AI provider setting changed by the person running it.",
     fix: [
@@ -444,8 +495,10 @@ const glossary = [
   ["Campaign Knowledge", "Source text added to a campaign so DNDMind can search and cite it."],
   ["Campaign Memory", "Saved notes, NPCs, quests, locations, encounters, and summaries DNDMind can use later."],
   ["Context Toggle", "A switch that controls which saved information DNDMind may use for the next prompt."],
+  ["Draft", "A local browser copy of session notes while you type."],
   ["Task Mode", "A mode button that tells DNDMind what kind of answer to produce."],
   ["Structured Card", "A generated character, NPC, quest, location, encounter, or summary that you can save."],
+  ["Story Hook", "An unresolved thread, rumor, lead, or active plot point saved in campaign memory."],
   ["Tool Result", "A visible result from an action such as a dice roll, rules search, homebrew search, or memory search."],
   ["Citation", "A source reference attached to an answer so you can see where context came from."],
   ["Spark", "The prompt helper that drafts a request for the current mode and context."],
@@ -459,9 +512,13 @@ const toc = [
   ["Campaign Menu", "campaign-menu"],
   ["Knowledge", "campaign-knowledge"],
   ["Context", "context-toggles"],
+  ["Party", "party"],
+  ["Sessions", "sessions"],
   ["Guide", "guide"],
   ["Try Now", "try-now"],
   ["Modes", "modes"],
+  ["Images", "images"],
+  ["Memory", "memory"],
   ["Prompts", "prompts"],
   ["Local Profile", "local-profile"],
   ["Workflows", "workflows"],
@@ -727,6 +784,68 @@ export default function ManualPage() {
                 </div>
               </ManualSection>
 
+              <ManualSection id="party" eyebrow="Notes Area" title="Party">
+                <p className="max-w-4xl text-sm leading-6 text-moss/75">
+                  The party list helps DNDMind understand who is at the table. Keep it current before asking for encounter balance, tactical advice, character-aware scenes, or party-specific recaps.
+                </p>
+                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                  {partyGuide.map(([title, detail]) => (
+                    <InfoCard key={title} title={title} detail={detail} tone="definition" />
+                  ))}
+                </div>
+                <article className="mt-5 rounded-lg border border-moss/15 bg-white p-4 shadow-sm">
+                  <h4 className="text-base font-semibold text-ink">Good party habits</h4>
+                  <ol className="mt-4 space-y-3 text-sm leading-6 text-moss/75">
+                    {partyHabits.map((habit, index) => (
+                      <li key={habit} className="flex gap-2">
+                        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-copper/10 text-xs font-semibold text-copper">
+                          {index + 1}
+                        </span>
+                        <span>{habit}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </article>
+              </ManualSection>
+
+              <ManualSection id="sessions" eyebrow="Notes Area" title="My Local Sessions">
+                <p className="max-w-4xl text-sm leading-6 text-moss/75">
+                  My Local Sessions is where you write and save notes for the current browser profile. Session notes are your running table record; Campaign Knowledge is source material you intentionally add for lookup and citations.
+                </p>
+                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                  {sessionGuide.map(([control, detail]) => (
+                    <InfoCard key={control} title={control} detail={detail} tone={control.includes("Clear") || control.includes("Delete") ? "warning" : "definition"} />
+                  ))}
+                </div>
+                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                  <article className="rounded-lg border border-moss/15 bg-white p-4 shadow-sm">
+                    <h4 className="text-base font-semibold text-ink">Save notes</h4>
+                    <ol className="mt-4 space-y-2 text-sm leading-6 text-moss/75">
+                      {["Choose an existing session, or leave the selector on New session.", "Enter a session title.", "Paste or write notes in the notes box.", "Click Save."].map((step, index) => (
+                        <li key={step} className="flex gap-2">
+                          <span className="text-copper">{index + 1}.</span>
+                          <span>{step}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </article>
+                  <article className="rounded-lg border border-moss/15 bg-white p-4 shadow-sm">
+                    <h4 className="text-base font-semibold text-ink">Summarize notes</h4>
+                    <ol className="mt-4 space-y-2 text-sm leading-6 text-moss/75">
+                      {["Review your session notes.", "Click Summarize.", "Check the recap and extracted details.", "Save useful cards or summaries when they are accurate."].map((step, index) => (
+                        <li key={step} className="flex gap-2">
+                          <span className="text-copper">{index + 1}.</span>
+                          <span>{step}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </article>
+                </div>
+                <div className="mt-5">
+                  <InfoCard title="Draft saved locally" detail="If the app shows this message, your browser has a temporary copy of the notes you are typing. Click Save when you want them stored as a session." tone="definition" />
+                </div>
+              </ManualSection>
+
               <ManualSection id="guide" eyebrow="Beginner Workflow" title="Step-by-Step Guide">
                 <div className="grid gap-4">
                   {steps.map((step, index) => (
@@ -756,6 +875,41 @@ export default function ManualPage() {
                       <p className="mt-4 text-sm font-semibold text-moss">Example prompt</p>
                       <p className="mt-1 rounded-md border border-moss/10 bg-parchment px-3 py-2 text-sm leading-6 text-moss">{example}</p>
                     </article>
+                  ))}
+                </div>
+              </ManualSection>
+
+              <ManualSection id="images" eyebrow="Structured Cards" title="Generated Images">
+                <p className="max-w-4xl text-sm leading-6 text-moss/75">
+                  Some NPC, character, and encounter cards can include a generated image. Images are optional; you can still save and use the card without one.
+                </p>
+                <article className="mt-5 rounded-lg border border-moss/15 bg-white p-4 shadow-sm">
+                  <ol className="space-y-3 text-sm leading-6 text-moss/75">
+                    {imageGuide.map((step, index) => (
+                      <li key={step} className="flex gap-2">
+                        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-copper/10 text-xs font-semibold text-copper">
+                          {index + 1}
+                        </span>
+                        <span>{step}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </article>
+              </ManualSection>
+
+              <ManualSection id="memory" eyebrow="Saved Material" title="Campaign Memory">
+                <p className="max-w-4xl text-sm leading-6 text-moss/75">
+                  Campaign Memory is where saved NPCs, quests, locations, hooks, encounters, and summaries live. Delete saved memory only when you no longer want DNDMind to use it.
+                </p>
+                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                  <InfoCard title="Saved Encounters" detail="Saved encounters appear in their own section and can be deleted when they are no longer useful." tone="definition" />
+                  <InfoCard title="NPCs, Quests, Locations" detail="Saved cards become reusable memory that DNDMind can search when Campaign Memory is on." tone="definition" />
+                  <InfoCard title="Story Hooks" detail="Hooks can be marked open, rumor, lead, active, resolved, or dropped as the campaign changes." tone="definition" />
+                  <InfoCard title="Session Memory" detail="Summaries and extracted session details can become campaign memory after you summarize notes." tone="definition" />
+                </div>
+                <div className="mt-5 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {storyHookStatuses.map(([status, detail]) => (
+                    <InfoCard key={status} title={status} detail={detail} tone="plain" />
                   ))}
                 </div>
               </ManualSection>

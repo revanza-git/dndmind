@@ -20,6 +20,7 @@ import {
   SuggestedAction,
   ToolCall,
   archiveCampaign,
+  clearSessionMemory,
   createCampaign,
   createPartyCharacter,
   createPartyCharacterEvent,
@@ -31,6 +32,7 @@ import {
   deleteNpc,
   deletePartyCharacter,
   deleteQuest,
+  deleteSession,
   executeTool,
   getCampaignMemory,
   getArchivedCampaigns,
@@ -115,6 +117,8 @@ const maxDocumentUploadBytes = 2 * 1024 * 1024;
 const diceExpressionPattern = /^\s*(\d{1,2})d(\d{1,4})([+-]\d{1,4})?\s*$/i;
 const diceExamples = ["1d20", "2d6+3", "4d8-1"];
 const emptyCampaignMemory: CampaignMemory = { npcs: [], quests: [], locations: [], encounters: [], events: [], hooks: [] };
+const preparedScenePrompt =
+  "Create a table-ready next scene for this campaign. Use saved campaign memory, active session notes, party details, unresolved hooks, and the campaign tone. Include scene premise, opening narration, NPCs or factions involved, conflict, clues, encounter beats, scaling options, rewards, and suggested follow-up actions. Do not invent over saved facts; cite campaign memory when used.";
 
 function D20MindSparkLogo() {
   return (
@@ -253,9 +257,7 @@ export default function Home() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessionTitle, setSessionTitle] = useState("Session Notes");
-  const [sessionNotes, setSessionNotes] = useState(
-    "Captain Vey betrayed the party last session at Blackwater Mine. He sold the map to the Ashen Knives and escaped through the old smuggler tunnel. Mira swore to track him down. The party recovered the Dawn Shard but still does not know who paid Vey."
-  );
+  const [sessionNotes, setSessionNotes] = useState("");
   const [memory, setMemory] = useState<CampaignMemory>(emptyCampaignMemory);
   const [isLoadingMemory, setIsLoadingMemory] = useState(false);
   const [memoryError, setMemoryError] = useState<string | null>(null);
@@ -285,6 +287,9 @@ export default function Home() {
   const [isRolling, setIsRolling] = useState(false);
   const [isSavingSession, setIsSavingSession] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
+  const [isClearingSessionMemory, setIsClearingSessionMemory] = useState(false);
+  const [isClearingSessionNotes, setIsClearingSessionNotes] = useState(false);
+  const [isDeletingSession, setIsDeletingSession] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isGeneratingPromptSuggestion, setIsGeneratingPromptSuggestion] = useState(false);
   const [promptSuggestionError, setPromptSuggestionError] = useState<string | null>(null);
@@ -739,39 +744,32 @@ export default function Home() {
     await handlePromptSuggestion(prompt.suggestionMode as PromptSuggestionMode);
   }
 
-  function handleLoadPreparedScene() {
-    const prompt = "Create a medium encounter for this party involving Captain Vey and the Ashen Knives.";
-    const response: ChatResponse = {
-      conversationId: conversationId ?? "prepared-encounter",
-      answer: "",
-      mode: "Encounter",
-      citations: [],
-      toolCalls: [],
-      structuredOutput: null,
-      suggestedActions: []
+  async function handleLoadPreparedScene() {
+    if (!campaignId || isSending) {
+      return;
+    }
+
+    const preparedContext = {
+      ...context,
+      useCampaignMemory: true,
+      usePartyInfo: true
     };
-    const enhanced = enhanceChatResultForPreparedContent(prompt, response, "Encounter");
+
     setMode("Encounter");
+    setContext(preparedContext);
     setInput("");
-    setLastResponse({
-      ...response,
-      answer: enhanced.content,
-      citations: enhanced.citations,
-      toolCalls: enhanced.toolCalls,
-      structuredOutput: enhanced.structuredOutput,
-      suggestedActions: enhanced.suggestedActions
-    });
-    setMessages([
-      { role: "user", content: prompt },
+
+    await sendChatRequest(
       {
-        role: "assistant",
-        content: enhanced.content,
-        citations: enhanced.citations,
-        toolCalls: enhanced.toolCalls,
-        structuredOutput: enhanced.structuredOutput,
-        suggestedActions: enhanced.suggestedActions
-      }
-    ]);
+        campaignId,
+        conversationId,
+        sessionId: activeSessionId,
+        message: preparedScenePrompt,
+        mode: "Encounter",
+        context: preparedContext
+      },
+      { appendUserMessage: true }
+    );
   }
 
   function handleNavigationClick(item: (typeof navigationItems)[number]) {
@@ -1054,6 +1052,153 @@ export default function Home() {
       setError(err instanceof Error ? err.message : "DNDMind could not summarize that session. Please try again.");
     } finally {
       setIsSummarizing(false);
+    }
+  }
+
+  async function handleClearSessionMemory() {
+    if (!campaignId || !activeSessionId) {
+      return;
+    }
+
+    const active = sessions.find((session) => session.id === activeSessionId);
+    const label = active ? `Session ${active.sessionNumber}: ${active.title}` : "this session";
+    const confirmed = window.confirm(
+      `Clear memory generated from ${label}? The session notes stay saved, but its summary, extracted memory, and campaign-memory document will be removed.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setIsClearingSessionMemory(true);
+    setSessionSaveStatus(null);
+    setError(null);
+    try {
+      const response = await clearSessionMemory(activeSessionId);
+      const [updatedSessions, updatedMemory, updatedDocuments] = await Promise.all([
+        getSessions(campaignId),
+        getCampaignMemory(campaignId),
+        getDocuments(campaignId)
+      ]);
+      setSessions(updatedSessions);
+      setMemory(updatedMemory);
+      setMemoryError(null);
+      setDocuments(updatedDocuments);
+      if (response.session) {
+        setSessionTitle(response.session.title);
+        setSessionNotes(response.session.rawNotes ?? "");
+      }
+      setSessionSaveStatus("Session memory cleared");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "DNDMind could not clear that session memory. Please try again.");
+      setSessionSaveStatus("Could not clear memory");
+    } finally {
+      setIsClearingSessionMemory(false);
+    }
+  }
+
+  async function handleClearSessionNotes() {
+    if (!campaignId || !activeSessionId) {
+      return;
+    }
+
+    const active = sessions.find((session) => session.id === activeSessionId);
+    const label = active ? `Session ${active.sessionNumber}: ${active.title}` : "this session";
+    const confirmed = window.confirm(
+      `Clear notes and generated memory for ${label}? This empties the active session notes so DNDMind will stop using them as live context.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setIsClearingSessionNotes(true);
+    setSessionSaveStatus(null);
+    setError(null);
+    try {
+      const updated = await updateSession({
+        sessionId: activeSessionId,
+        sessionNumber: active?.sessionNumber ?? 1,
+        title: (sessionTitle.trim() || active?.title || "Session Notes").trim(),
+        rawNotes: "",
+        summary: null,
+        status: "active"
+      });
+      await clearSessionMemory(activeSessionId);
+      const [updatedSessions, updatedMemory, updatedDocuments] = await Promise.all([
+        getSessions(campaignId),
+        getCampaignMemory(campaignId),
+        getDocuments(campaignId)
+      ]);
+      setSessions(updatedSessions);
+      setMemory(updatedMemory);
+      setMemoryError(null);
+      setDocuments(updatedDocuments);
+      const refreshed = updatedSessions.find((session) => session.id === updated.id) ?? updated;
+      setSessionTitle(refreshed.title);
+      setSessionNotes("");
+      if (clientId) {
+        window.localStorage.removeItem(sessionDraftKey(clientId, campaignId, activeSessionId));
+      }
+      setDraftStatus(null);
+      setSessionSaveStatus("Session notes and memory cleared");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "DNDMind could not clear that session. Please try again.");
+      setSessionSaveStatus("Could not clear session");
+    } finally {
+      setIsClearingSessionNotes(false);
+    }
+  }
+
+  async function handleDeleteSession() {
+    if (!campaignId || !activeSessionId) {
+      return;
+    }
+
+    const active = sessions.find((session) => session.id === activeSessionId);
+    const label = active ? `Session ${active.sessionNumber}: ${active.title}` : "this session";
+    const confirmed = window.confirm(
+      `Delete ${label}? This removes the saved session and generated memory tied to it. Structured cards saved separately stay in campaign memory.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setIsDeletingSession(true);
+    setSessionSaveStatus(null);
+    setError(null);
+    try {
+      await deleteSession(activeSessionId);
+      if (clientId) {
+        window.localStorage.removeItem(sessionDraftKey(clientId, campaignId, activeSessionId));
+      }
+      const [updatedSessions, updatedMemory, updatedDocuments] = await Promise.all([
+        getSessions(campaignId),
+        getCampaignMemory(campaignId),
+        getDocuments(campaignId)
+      ]);
+      setSessions(updatedSessions);
+      setMemory(updatedMemory);
+      setMemoryError(null);
+      setDocuments(updatedDocuments);
+      const nextSession = updatedSessions[0] ?? null;
+      if (nextSession) {
+        const draft = clientId ? window.localStorage.getItem(sessionDraftKey(clientId, campaignId, nextSession.id)) : null;
+        setActiveSessionId(nextSession.id);
+        setSessionTitle(nextSession.title);
+        setSessionNotes(draft ?? nextSession.rawNotes ?? "");
+        setDraftStatus(draft ? "Draft restored locally" : null);
+      } else {
+        const draft = clientId ? window.localStorage.getItem(sessionDraftKey(clientId, campaignId, null)) : null;
+        setActiveSessionId(null);
+        setSessionTitle("Session Notes");
+        setSessionNotes(draft ?? "");
+        setDraftStatus(draft ? "Draft restored locally" : null);
+      }
+      setSessionSaveStatus("Session deleted");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "DNDMind could not delete that session. Please try again.");
+      setSessionSaveStatus("Could not delete session");
+    } finally {
+      setIsDeletingSession(false);
     }
   }
 
@@ -2063,6 +2208,8 @@ export default function Home() {
                   isGeneratingPromptSuggestion={isGeneratingPromptSuggestion}
                   onPromptSuggestion={handlePromptSuggestion}
                   onPreparedScene={handleLoadPreparedScene}
+                  canPrepareScene={Boolean(campaignId)}
+                  isPreparingScene={isSending}
                 />
                 <div className="hidden xl:block">
                   <EmptyChatState
@@ -2070,6 +2217,8 @@ export default function Home() {
                     onPromptSuggestion={handleQuickPromptSuggestion}
                     isGeneratingPromptSuggestion={isGeneratingPromptSuggestion}
                     onPreparedScene={handleLoadPreparedScene}
+                    canPrepareScene={Boolean(campaignId)}
+                    isPreparingScene={isSending}
                   />
                 </div>
               </>
@@ -2306,7 +2455,15 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={handleSaveSession}
-                  disabled={isSavingSession || isSummarizing || !campaignId || !sessionTitle.trim()}
+                  disabled={
+                    isSavingSession ||
+                    isSummarizing ||
+                    isClearingSessionMemory ||
+                    isClearingSessionNotes ||
+                    isDeletingSession ||
+                    !campaignId ||
+                    !sessionTitle.trim()
+                  }
                   className="rounded-md border border-moss/20 px-3 py-2 text-sm font-semibold text-moss hover:border-copper disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isSavingSession ? "Saving" : sessionSaveStatus === "Saved" ? "Saved" : "Save"}
@@ -2314,14 +2471,74 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={handleSummarizeSession}
-                  disabled={isSummarizing || isSavingSession || !campaignId || !sessionNotes.trim()}
+                  disabled={
+                    isSummarizing ||
+                    isSavingSession ||
+                    isClearingSessionMemory ||
+                    isClearingSessionNotes ||
+                    isDeletingSession ||
+                    !campaignId ||
+                    !sessionNotes.trim()
+                  }
                   className="rounded-md bg-copper px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isSummarizing ? "Summarizing" : "Summarize"}
                 </button>
               </div>
+              <button
+                type="button"
+                onClick={handleClearSessionMemory}
+                disabled={
+                  isClearingSessionMemory ||
+                  isClearingSessionNotes ||
+                  isDeletingSession ||
+                  isSavingSession ||
+                  isSummarizing ||
+                  !campaignId ||
+                  !activeSessionId
+                }
+                className="w-full rounded-md border border-ember/30 px-3 py-2 text-sm font-semibold text-ember transition hover:border-ember hover:bg-ember hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isClearingSessionMemory ? "Clearing Memory" : "Clear Session Memory"}
+              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={handleClearSessionNotes}
+                  disabled={
+                    isClearingSessionNotes ||
+                    isClearingSessionMemory ||
+                    isDeletingSession ||
+                    isSavingSession ||
+                    isSummarizing ||
+                    !campaignId ||
+                    !activeSessionId
+                  }
+                  className="rounded-md border border-ember/30 px-3 py-2 text-xs font-semibold text-ember transition hover:border-ember hover:bg-ember hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isClearingSessionNotes ? "Clearing Notes" : "Clear Notes + Memory"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteSession}
+                  disabled={
+                    isDeletingSession ||
+                    isClearingSessionNotes ||
+                    isClearingSessionMemory ||
+                    isSavingSession ||
+                    isSummarizing ||
+                    !campaignId ||
+                    !activeSessionId
+                  }
+                  className="rounded-md border border-ember/30 px-3 py-2 text-xs font-semibold text-ember transition hover:border-ember hover:bg-ember hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isDeletingSession ? "Deleting" : "Delete Session"}
+                </button>
+              </div>
               {sessionSaveStatus && sessionSaveStatus !== "Saved" && (
-                <p className="text-xs font-semibold text-ember">{sessionSaveStatus}</p>
+                <p className={`text-xs font-semibold ${sessionSaveStatus.startsWith("Could not") ? "text-ember" : "text-moss/70"}`}>
+                  {sessionSaveStatus}
+                </p>
               )}
               {draftStatus && <p className="text-xs font-semibold text-moss/70">{draftStatus}</p>}
               {sessions.find((session) => session.id === activeSessionId)?.summary && (
@@ -2881,12 +3098,16 @@ function EmptyChatState({
   onPrompt,
   onPromptSuggestion,
   isGeneratingPromptSuggestion,
-  onPreparedScene
+  onPreparedScene,
+  canPrepareScene,
+  isPreparingScene
 }: {
   onPrompt: (prompt: (typeof quickPrompts)[number]) => void;
   onPromptSuggestion: (prompt: (typeof quickPrompts)[number]) => void;
   isGeneratingPromptSuggestion: boolean;
   onPreparedScene: () => void;
+  canPrepareScene: boolean;
+  isPreparingScene: boolean;
 }) {
   return (
     <section className="mx-auto flex min-h-[18rem] w-full max-w-5xl items-center">
@@ -2923,13 +3144,14 @@ function EmptyChatState({
           ))}
         </div>
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-moss/10 bg-parchment/60 px-4 py-2">
-          <p className="text-sm leading-6 text-moss/75">Want a quick starting point? Load a prepared Captain Vey encounter briefing.</p>
+          <p className="text-sm leading-6 text-moss/75">Need a quick starting point? Let DNDMind prepare a scene for the selected campaign.</p>
           <button
             type="button"
             onClick={onPreparedScene}
-            className="rounded-md border border-copper bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-copper shadow-sm transition hover:bg-copper hover:text-white"
+            disabled={!canPrepareScene || isPreparingScene}
+            className="rounded-md border border-copper bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-copper shadow-sm transition hover:bg-copper hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Load Prepared Scene
+            {isPreparingScene ? "Preparing" : "Prepare Scene"}
           </button>
         </div>
       </div>
@@ -2941,12 +3163,16 @@ function MobileEmptyChatState({
   onPrompt,
   onPromptSuggestion,
   isGeneratingPromptSuggestion,
-  onPreparedScene
+  onPreparedScene,
+  canPrepareScene,
+  isPreparingScene
 }: {
   onPrompt: (prompt: (typeof quickPrompts)[number]) => void;
   onPromptSuggestion: () => void;
   isGeneratingPromptSuggestion: boolean;
   onPreparedScene: () => void;
+  canPrepareScene: boolean;
+  isPreparingScene: boolean;
 }) {
   return (
     <section className="rounded-md border border-moss/15 bg-white/90 p-3 shadow-sm xl:hidden">
@@ -2975,9 +3201,10 @@ function MobileEmptyChatState({
         <button
           type="button"
           onClick={onPreparedScene}
-          className="rounded-md bg-copper px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-white"
+          disabled={!canPrepareScene || isPreparingScene}
+          className="rounded-md bg-copper px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Prepared Scene
+          {isPreparingScene ? "Preparing" : "Prepare Scene"}
         </button>
       </div>
     </section>

@@ -349,14 +349,29 @@ function acceptedImageStylePreset(outputType: StructuredImageOutputType, preset:
 }
 
 function SessionSummaryCard({ data }: { data: Record<string, unknown> }) {
+  const importantEvents = recapItems(data.importantEvents, "Event");
+  const npcs = recapItems(data.npcs, "NPC", "name");
+  const quests = recapItems(data.quests, "Quest", "title");
+  const unresolvedHooks = recapItems(data.unresolvedHooks, "Hook");
+  const hasSupportingDetails = Boolean(importantEvents.length || npcs.length || quests.length || unresolvedHooks.length);
+
   return (
     <div>
       <CardTitle title="Session Summary" detail={text(data.nextSessionSetup)} badge="Recap" />
-      <p className="mt-3 text-base leading-7 text-moss">{text(data.summary)}</p>
-      <ListBlock title="Important Events" items={strings(data.importantEvents)} />
-      <ListBlock title="NPCs" items={displayItems(data.npcs, "name")} />
-      <ListBlock title="Quests" items={displayItems(data.quests, "title")} />
-      <ListBlock title="Unresolved Hooks" items={strings(data.unresolvedHooks)} />
+      <div className="mt-4 rounded-xl border border-moss/10 bg-parchment px-4 py-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-copper">At the table</p>
+        <p className="mt-2 text-base leading-7 text-ink">{text(data.summary) || "No session summary was generated."}</p>
+      </div>
+      {hasSupportingDetails && (
+        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.65fr)]">
+          <RecapList title="Important Events" items={importantEvents} />
+          <div className="grid gap-4">
+            <RecapList title="Unresolved Hooks" items={unresolvedHooks} tone="hook" />
+            <RecapList title="NPCs" items={npcs} compact />
+            <RecapList title="Quests" items={quests} compact />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -458,6 +473,51 @@ function ListBlock({ title, items }: { title: string; items: string[] }) {
   );
 }
 
+type RecapItem = {
+  title: string;
+  detail: string;
+};
+
+function RecapList({
+  title,
+  items,
+  compact = false,
+  tone = "event"
+}: {
+  title: string;
+  items: RecapItem[];
+  compact?: boolean;
+  tone?: "event" | "hook";
+}) {
+  if (!items.length) {
+    return null;
+  }
+
+  const markerClassName = tone === "hook" ? "border-ember/25 bg-ember/10 text-ember" : "border-copper/25 bg-copper/10 text-copper";
+
+  return (
+    <section className="min-w-0">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-copper">{title}</p>
+        <span className="rounded-full bg-mist px-2.5 py-1 text-[11px] font-semibold text-moss">{items.length}</span>
+      </div>
+      <ol className={compact ? "space-y-2" : "space-y-3"}>
+        {items.map((item, index) => (
+          <li key={`${title}-${index}`} className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)] gap-3 rounded-xl border border-moss/10 bg-white px-3 py-3 shadow-sm shadow-moss/5">
+            <span className={`flex h-8 w-8 items-center justify-center rounded-full border text-xs font-semibold ${markerClassName}`}>
+              {index + 1}
+            </span>
+            <div className="min-w-0">
+              <p className="break-words text-sm font-semibold leading-6 text-ink">{item.title}</p>
+              {item.detail && <p className="mt-1 break-words text-sm leading-6 text-moss">{item.detail}</p>}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 function Metric({ label, value, emphasis = false }: { label: string; value: string; emphasis?: boolean }) {
   return (
     <div className="rounded-xl border border-moss/10 bg-parchment px-4 py-3">
@@ -505,6 +565,54 @@ function displayItems(value: unknown, preferredKey: string): string[] {
       return text(item);
     })
     .filter(Boolean);
+}
+
+function recapItems(value: unknown, fallbackTitle: string, preferredKey = "event"): RecapItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => recapItem(item, fallbackTitle, preferredKey))
+    .filter((item): item is RecapItem => Boolean(item?.title || item?.detail));
+}
+
+function recapItem(value: unknown, fallbackTitle: string, preferredKey: string): RecapItem | null {
+  const data = object(value);
+  if (Object.keys(data).length) {
+    const title = text(data[preferredKey]) || text(data.name) || text(data.title) || text(data.event) || fallbackTitle;
+    const detail = text(data.details) || text(data.description) || text(data.summary) || text(data.note);
+    return { title, detail };
+  }
+
+  const raw = text(value).trim();
+  if (!raw) {
+    return null;
+  }
+
+  const parsedTitle = quotedField(raw, preferredKey) || quotedField(raw, "name") || quotedField(raw, "title") || quotedField(raw, "event");
+  const parsedDetail = quotedField(raw, "details") || quotedField(raw, "description") || quotedField(raw, "summary") || quotedField(raw, "note");
+
+  if (parsedTitle || parsedDetail) {
+    return { title: parsedTitle || fallbackTitle, detail: parsedDetail };
+  }
+
+  return { title: raw, detail: "" };
+}
+
+function quotedField(value: string, field: string): string {
+  const escapedField = field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const fieldMatch = new RegExp(`["']${escapedField}["']\\s*:\\s*["']`, "i").exec(value);
+  if (!fieldMatch) {
+    return "";
+  }
+
+  const start = fieldMatch.index + fieldMatch[0].length;
+  const remainder = value.slice(start);
+  const nextFieldMatch = /["']\s*,\s*["'][A-Za-z0-9_ -]+["']\s*:/i.exec(remainder);
+  const end = nextFieldMatch?.index ?? remainder.search(/["']\s*}$/);
+  const raw = end >= 0 ? remainder.slice(0, end) : remainder;
+  return raw.trim().replace(/["']$/, "").trim();
 }
 
 function formatModifier(value: unknown) {

@@ -609,6 +609,18 @@ app.MapDelete("/api/sessions/{sessionId:guid}", async (Guid sessionId, NpgsqlDat
         return Results.BadRequest(new { error = clientError });
     }
 
+    var session = await LoadSession(sessionId, clientOwnerId, db);
+    if (session is null)
+    {
+        return Results.NotFound(new { error = "Session not found." });
+    }
+    if (await LoadCampaign(session.CampaignId, db) is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
+
+    await ClearSessionMemory(session, clientOwnerId, db);
+
     const string sql = """
         DELETE FROM sessions
         WHERE id = @sessionId
@@ -690,6 +702,38 @@ app.MapPost("/api/sessions/{sessionId:guid}/summarize", async (Guid sessionId, N
         session = refreshedSession,
         summary,
         memoryDocumentId = document.Id
+    });
+});
+
+app.MapPost("/api/sessions/{sessionId:guid}/clear-memory", async (Guid sessionId, NpgsqlDataSource db, ICurrentClientService currentClient) =>
+{
+    if (!currentClient.TryGetClientId(out var clientOwnerId, out var clientError))
+    {
+        return Results.BadRequest(new { error = clientError });
+    }
+
+    var session = await LoadSession(sessionId, clientOwnerId, db);
+    if (session is null)
+    {
+        return Results.NotFound(new { error = "Session not found." });
+    }
+    if (await LoadCampaign(session.CampaignId, db) is null)
+    {
+        return Results.NotFound(new { error = "Campaign not found." });
+    }
+
+    var result = await ClearSessionMemory(session, clientOwnerId, db);
+    var refreshedSession = await LoadSession(sessionId, clientOwnerId, db);
+    return Results.Ok(new
+    {
+        session = refreshedSession,
+        deletedMemoryEvents = result.DeletedMemoryEvents,
+        deletedHooks = result.DeletedHooks,
+        deletedNpcs = result.DeletedNpcs,
+        deletedQuests = result.DeletedQuests,
+        deletedLocations = result.DeletedLocations,
+        deletedEncounters = result.DeletedEncounters,
+        deletedMemoryDocuments = result.DeletedMemoryDocuments
     });
 });
 
@@ -3111,6 +3155,111 @@ static async Task SaveSessionMemory(SessionDto session, SessionSummaryResponse s
     await transaction.CommitAsync();
 }
 
+static async Task<ClearSessionMemoryResult> ClearSessionMemory(SessionDto session, string clientOwnerId, NpgsqlDataSource db)
+{
+    await using var connection = await db.OpenConnectionAsync();
+    await using var transaction = await connection.BeginTransactionAsync();
+
+    await using var cmd = new NpgsqlCommand("""
+        WITH updated_session AS (
+          UPDATE sessions
+          SET summary = NULL,
+              status = 'active',
+              updated_at = now()
+          WHERE id = @sessionId
+            AND campaign_id = @campaignId
+            AND client_owner_id = @clientOwnerId
+          RETURNING 1
+        ),
+        deleted_documents AS (
+          DELETE FROM knowledge_documents
+          WHERE campaign_id = @campaignId
+            AND source_type = 'campaign_memory'
+            AND metadata->>'sessionId' = @sessionIdText
+            AND metadata->>'clientOwnerId' = @clientOwnerId
+            AND COALESCE(metadata->>'memoryType', 'session') = 'session'
+          RETURNING 1
+        ),
+        deleted_encounters AS (
+          DELETE FROM encounters
+          WHERE campaign_id = @campaignId
+            AND client_owner_id = @clientOwnerId
+            AND session_id = @sessionId
+            AND COALESCE(metadata->>'source', 'session_summary') <> 'structured_output'
+          RETURNING 1
+        ),
+        deleted_hooks AS (
+          DELETE FROM hooks
+          WHERE campaign_id = @campaignId
+            AND client_owner_id = @clientOwnerId
+            AND session_id = @sessionId
+            AND COALESCE(metadata->>'source', 'session_summary') = 'session_summary'
+          RETURNING 1
+        ),
+        deleted_events AS (
+          DELETE FROM memory_events
+          WHERE campaign_id = @campaignId
+            AND client_owner_id = @clientOwnerId
+            AND session_id = @sessionId
+            AND COALESCE(metadata->>'source', 'session_summary') <> 'structured_output'
+          RETURNING 1
+        ),
+        deleted_npcs AS (
+          DELETE FROM npcs
+          WHERE campaign_id = @campaignId
+            AND client_owner_id = @clientOwnerId
+            AND last_seen_session_id = @sessionId
+            AND COALESCE(metadata->>'source', 'session_summary') <> 'structured_output'
+          RETURNING 1
+        ),
+        deleted_quests AS (
+          DELETE FROM quests
+          WHERE campaign_id = @campaignId
+            AND client_owner_id = @clientOwnerId
+            AND last_seen_session_id = @sessionId
+            AND COALESCE(metadata->>'source', 'session_summary') <> 'structured_output'
+          RETURNING 1
+        ),
+        deleted_locations AS (
+          DELETE FROM locations
+          WHERE campaign_id = @campaignId
+            AND client_owner_id = @clientOwnerId
+            AND last_seen_session_id = @sessionId
+            AND COALESCE(metadata->>'source', 'session_summary') <> 'structured_output'
+          RETURNING 1
+        )
+        SELECT
+          (SELECT count(*)::int FROM deleted_events),
+          (SELECT count(*)::int FROM deleted_hooks),
+          (SELECT count(*)::int FROM deleted_npcs),
+          (SELECT count(*)::int FROM deleted_quests),
+          (SELECT count(*)::int FROM deleted_locations),
+          (SELECT count(*)::int FROM deleted_encounters),
+          (SELECT count(*)::int FROM deleted_documents)
+        """, connection, transaction);
+
+    cmd.Parameters.AddWithValue("sessionId", session.Id);
+    cmd.Parameters.AddWithValue("sessionIdText", session.Id.ToString());
+    cmd.Parameters.AddWithValue("campaignId", session.CampaignId);
+    cmd.Parameters.AddWithValue("clientOwnerId", clientOwnerId);
+
+    ClearSessionMemoryResult result;
+    await using (var reader = await cmd.ExecuteReaderAsync())
+    {
+        await reader.ReadAsync();
+        result = new ClearSessionMemoryResult(
+            reader.GetInt32(0),
+            reader.GetInt32(1),
+            reader.GetInt32(2),
+            reader.GetInt32(3),
+            reader.GetInt32(4),
+            reader.GetInt32(5),
+            reader.GetInt32(6));
+    }
+    await transaction.CommitAsync();
+    return result;
+}
+
 static async Task InsertMemoryEvent(NpgsqlConnection connection, NpgsqlTransaction transaction, SessionDto session, string clientOwnerId, string type, string title, string description)
 {
     await using var cmd = new NpgsqlCommand("""
@@ -3652,6 +3801,15 @@ public record SessionDto(
     string Status,
     DateTime CreatedAt,
     DateTime UpdatedAt);
+
+public record ClearSessionMemoryResult(
+    int DeletedMemoryEvents,
+    int DeletedHooks,
+    int DeletedNpcs,
+    int DeletedQuests,
+    int DeletedLocations,
+    int DeletedEncounters,
+    int DeletedMemoryDocuments);
 
 public record CreateCampaignRequest(string Name, string? Description, string? SystemTone);
 public record UpdateCampaignRequest(string? Name, string? Description, string? SystemTone);
