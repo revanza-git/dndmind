@@ -84,6 +84,7 @@ _INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
         r"\bquest giver\b",
     ),
     "character": (
+        r"\b(?:create|generate|make|draft|build)\s+(?:an?\s+)?(?:character|hero)\b",
         r"\bplayable character\b",
         r"\bplayer character\b",
         r"\bbackup character\b",
@@ -145,6 +146,17 @@ _INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+_NEGATED_INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
+    "npc": (
+        r"\bnot\s+(?:an?\s+)?npcs?\b",
+        r"\bnot\s+(?:an?\s+)?non[- ]player character\b",
+    ),
+    "character": (
+        r"\bnot\s+(?:an?\s+)?(?:playable\s+|player\s+)?characters?\b",
+        r"\bnot\s+(?:a\s+)?(?:pc|backup pc)\b",
+    ),
+}
+
 _INTENT_PRIORITY = ("rules", "recap", "summarize", "encounter", "combat", "character", "npc", "quest", "location", "memory", "story")
 
 
@@ -198,6 +210,10 @@ def detect_prompt_intent(message: str) -> PromptIntent:
         score = sum(1 for pattern in patterns if re.search(pattern, lower))
         if score:
             scores[intent] = score
+
+    for intent, patterns in _NEGATED_INTENT_PATTERNS.items():
+        if intent in scores and any(re.search(pattern, lower) for pattern in patterns):
+            del scores[intent]
 
     if not scores:
         return PromptIntent(primary=None, detected=(), is_strong=False)

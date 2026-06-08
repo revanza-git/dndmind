@@ -155,6 +155,27 @@ class ImageGenerationTests(unittest.TestCase):
         self.assertIn("dynamic fantasy combat character art", prompt)
         self.assertNotIn("Captain Vey", prompt)
 
+    def test_character_prompt_with_gauntlets_rejects_extra_held_weapons(self):
+        prompt = image_generation.build_image_prompt(
+            "character",
+            {
+                "name": "Teowulf",
+                "ancestryOrSpecies": "Human",
+                "classAndSubclass": "Fighter, Battle Master",
+                "level": 3,
+                "role": "Gauntlet brawler",
+                "equipment": ["reinforced gauntlets", "traveler's clothes"],
+                "statSummary": "Built for armored unarmed strikes.",
+                "campaignTieIn": "A mercenary tied to the next arena bout.",
+            },
+            "combat stance",
+        )
+
+        self.assertIn("reinforced gauntlets", prompt)
+        self.assertIn("empty hands or armored fists", prompt)
+        self.assertIn("do not add swords, axes, polearms, bows, or other held weapons", prompt)
+        self.assertNotIn("weapon or spell prepared", prompt)
+
     def test_character_mock_image_uses_character_label(self):
         request = image_request("character", {"name": "Lethariel Moonglen"})
 

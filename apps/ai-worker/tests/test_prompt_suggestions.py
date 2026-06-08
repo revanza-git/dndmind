@@ -91,6 +91,19 @@ class PromptSuggestionTests(unittest.TestCase):
         self.assertIn("playable or near-playable character", response.reason)
         self.assertIn("Generate a playable or near-playable character", response.prompt)
 
+    def test_auto_mode_treats_character_not_npc_draft_as_character(self):
+        response = worker_main.mock_prompt_suggestion(
+            prompt_request(
+                mode="auto",
+                current_input="Generate a character named teowulf not npc, he fights with two handed, he uses gauntlet",
+                with_memory=True,
+            )
+        )
+
+        self.assertEqual(response.resolvedMode, "character")
+        self.assertIn("playable or near-playable character", response.reason)
+        self.assertIn("not npc", response.prompt)
+
     def test_auto_mode_uses_current_rules_draft(self):
         response = worker_main.mock_prompt_suggestion(
             prompt_request(mode="auto", current_input="How does advantage work with help actions?", with_session=True)

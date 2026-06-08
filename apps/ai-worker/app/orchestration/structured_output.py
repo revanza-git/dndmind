@@ -141,22 +141,29 @@ def _mock_character(request: Any) -> CharacterOutput:
     rival = "rival" in lower
     hireling = "hireling" in lower
     ranger = "ranger" in lower
-    ability_scores = {"str": 10, "dex": 16, "con": 13, "int": 11, "wis": 15, "cha": 9} if ranger else {"str": 8, "dex": 13, "con": 14, "int": 10, "wis": 16, "cha": 12}
+    gauntlet = re.search(r"\bgauntlets?\b|\bunarmed\b|\bfists?\b|\bhand[- ]to[- ]hand\b", lower)
+    if gauntlet:
+        ability_scores = {"str": 16, "dex": 12, "con": 15, "int": 10, "wis": 13, "cha": 11}
+    else:
+        ability_scores = {"str": 10, "dex": 16, "con": 13, "int": 11, "wis": 15, "cha": 9} if ranger else {"str": 8, "dex": 13, "con": 14, "int": 10, "wis": 16, "cha": 12}
     hp_max = _estimated_hp_max(level, 10 if ranger else 8, ability_scores["con"])
     initiative_modifier = _ability_modifier(ability_scores["dex"])
+    equipment = ["well-used class gear", "traveler's clothes", "healer's kit" if healer else "marked map case", "one clue tied to an unresolved hook"]
+    if gauntlet:
+        equipment = ["reinforced gauntlets", "traveler's clothes", "one clue tied to an unresolved hook"]
     return CharacterOutput(
-        name="Elaris Thornwhisper" if ranger else "Tamsin Vale",
+        name=_requested_name(request.message) or ("Elaris Thornwhisper" if ranger else "Tamsin Vale"),
         ancestryOrSpecies="Elf" if "elven" in lower or "elf" in lower or ranger else "Human",
-        classAndSubclass="Ranger, Gloom Stalker" if ranger else ("Cleric, Life Domain" if healer else "Rogue, Scout"),
+        classAndSubclass="Fighter, Battle Master" if gauntlet else ("Ranger, Gloom Stalker" if ranger else ("Cleric, Life Domain" if healer else "Rogue, Scout")),
         level=level,
         background="Outlander" if ranger else "Faction Agent",
         role="Rival adventurer" if rival else ("Hireling healer" if hireling or healer else "Backup adventurer"),
         abilityScores=ability_scores,
-        statSummary="Built for scouting, ranged pressure, and survival checks." if ranger else "Built for support, field medicine, and steady Wisdom checks.",
+        statSummary="Built for close-quarters pressure, grapples, and armored unarmed strikes." if gauntlet else ("Built for scouting, ranged pressure, and survival checks." if ranger else "Built for support, field medicine, and steady Wisdom checks."),
         hpCurrent=hp_max,
         hpMax=hp_max,
         tempHp=0,
-        armorClass=16 if ranger else (18 if healer else 14),
+        armorClass=16 if gauntlet or ranger else (18 if healer else 14),
         initiativeModifier=initiative_modifier,
         passivePerception=10 + _ability_modifier(ability_scores["wis"]),
         personalityTraits=["Quietly observant", "Keeps promises even when they become inconvenient"],
@@ -165,7 +172,7 @@ def _mock_character(request: Any) -> CharacterOutput:
             "bond": "They carry a token from someone tied to the campaign's current trouble.",
             "flaw": "They hide bad news until they have a plan to fix it.",
         },
-        equipment=["well-used class gear", "traveler's clothes", "healer's kit" if healer else "marked map case", "one clue tied to an unresolved hook"],
+        equipment=equipment,
         campaignTieIn="They are tracking the same faction pressure currently brushing against the party.",
         secretOrHook="They know a name connected to the next campaign lead, but revealing it would expose an old debt.",
     )
@@ -202,6 +209,15 @@ def _requested_level(lower: str) -> int:
         return 0
     parsed = int(match.group(1))
     return parsed if parsed > 0 else 0
+
+
+def _requested_name(message: str) -> str:
+    match = re.search(r"\bnamed\s+([A-Za-z][A-Za-z' -]{1,39})", str(message or ""), flags=re.IGNORECASE)
+    if not match:
+        return ""
+    cleaned = re.split(r"\b(?:not|he|she|they|with|uses?|has|is)\b", match.group(1), maxsplit=1, flags=re.IGNORECASE)[0]
+    cleaned = cleaned.strip(" .,:;-")
+    return cleaned.title() if cleaned else ""
 
 
 def _mock_location(request: Any) -> LocationOutput:

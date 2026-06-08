@@ -11,7 +11,7 @@ import psycopg
 from app.orchestration.gemini_provider import real_campaign_recap, real_chat_response, real_prompt_suggestion, real_session_summary
 from app.orchestration.image_generation import generate_image, image_generation_enabled, image_provider
 from app.orchestration.scope_guard import is_in_scope_prompt, out_of_scope_answer, out_of_scope_suggested_actions
-from app.orchestration.tool_loop import execute_manual_tool, run_mock_tool_loop
+from app.orchestration.tool_loop import detect_prompt_intent, execute_manual_tool, run_mock_tool_loop
 from app.orchestration.structured_output import build_mock_structured_output, build_suggested_actions
 from rag.chunker import chunk_text
 from rag.embeddings import (
@@ -636,11 +636,12 @@ def _resolve_prompt_suggestion_mode(request: PromptSuggestionRequest) -> tuple[R
         return request.mode, f"Using the selected {request.mode} hint."
 
     current = str(request.currentInput or "").lower()
+    current_intent = detect_prompt_intent(current)
     if re.search(r"\b(rule|ruling|spell|advantage|check|action|bonus action|reaction|saving throw)\b", current):
         return "rules", "The current draft looks like a rules or ruling question."
-    if re.search(r"\b(playable character|player character|backup character|backup pc|hireling|retainer|rival adventurer|level \d+ .*(?:ranger|cleric|fighter|wizard|rogue|bard|paladin|druid|barbarian|monk|warlock|sorcerer|artificer))\b", current):
+    if "character" in current_intent.detected or re.search(r"\b(playable character|player character|backup character|backup pc|hireling|retainer|rival adventurer|level \d+ .*(?:ranger|cleric|fighter|wizard|rogue|bard|paladin|druid|barbarian|monk|warlock|sorcerer|artificer))\b", current):
         return "character", "The current draft asks for a playable or near-playable character."
-    if re.search(r"\b(npc|villain|ally|informant|shopkeeper|patron)\b", current):
+    if "npc" in current_intent.detected or re.search(r"\b(npc|villain|ally|informant|shopkeeper|patron)\b", current):
         return "npc", "The current draft asks for a character."
     if re.search(r"\b(encounter|combat|monster|ambush|fight|battle)\b", current):
         return "encounter", "The current draft points toward an encounter."

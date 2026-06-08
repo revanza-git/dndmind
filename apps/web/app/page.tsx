@@ -1673,17 +1673,17 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-parchment text-ink xl:h-screen xl:overflow-hidden">
       <nav
-        className="sticky top-0 z-40 border-b border-moss/15 bg-parchment/95 px-3 py-2 shadow-sm backdrop-blur xl:hidden"
+        className="sticky top-0 z-40 border-b border-moss/15 bg-parchment/95 px-3 py-1 shadow-sm backdrop-blur xl:hidden"
         aria-label="Mobile workspace"
       >
-        <div className="grid grid-cols-3 gap-2 rounded-md border border-moss/15 bg-white p-1">
+        <div className="grid grid-cols-3 gap-1 rounded-md border border-moss/15 bg-white p-1">
           {mobileWorkspaceTabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
               onClick={() => setActiveMobileWorkspaceTab(tab.id)}
               aria-pressed={activeMobileWorkspaceTab === tab.id}
-              className={`rounded px-3 py-2 text-sm font-semibold transition ${
+              className={`rounded px-2 py-1.5 text-sm font-semibold transition ${
                 activeMobileWorkspaceTab === tab.id ? "bg-ink text-white shadow-sm" : "text-moss hover:bg-parchment"
               }`}
             >
@@ -1692,7 +1692,7 @@ export default function Home() {
           ))}
         </div>
       </nav>
-      <div className="grid min-h-[calc(100dvh-4rem)] grid-cols-1 xl:h-screen xl:min-h-0 xl:grid-cols-[270px_minmax(0,1fr)_350px] xl:overflow-hidden">
+      <div className="grid min-h-[calc(100dvh-3.25rem)] grid-cols-1 xl:h-screen xl:min-h-0 xl:grid-cols-[270px_minmax(0,1fr)_350px] xl:overflow-hidden">
         <aside
           className={`border-b border-white/10 bg-moss px-5 py-5 text-white shadow-2xl shadow-moss/20 xl:block xl:h-screen xl:overflow-y-auto xl:border-b-0 xl:border-r ${
             activeMobileWorkspaceTab === "campaign" ? "block" : "hidden"
@@ -1997,15 +1997,15 @@ export default function Home() {
 
         <section
           id="command-center"
-          className={`h-[calc(100dvh-4rem)] scroll-mt-16 flex-col xl:flex xl:h-screen xl:min-h-0 xl:scroll-mt-4 xl:overflow-hidden ${
+          className={`h-[calc(100dvh-3.25rem)] scroll-mt-16 flex-col xl:flex xl:h-screen xl:min-h-0 xl:scroll-mt-4 xl:overflow-hidden ${
             activeMobileWorkspaceTab === "command" ? "flex" : "hidden"
           }`}
         >
-          <header className="shrink-0 border-b border-moss/15 bg-white/80 px-4 py-3 shadow-sm backdrop-blur xl:px-5">
-            <div className="flex flex-col gap-2 xl:flex-row xl:items-end xl:justify-between">
+          <header className="shrink-0 border-b border-moss/15 bg-white/80 px-4 py-2 shadow-sm backdrop-blur xl:px-5 xl:py-3">
+            <div className="flex flex-col gap-1 xl:flex-row xl:items-end xl:justify-between xl:gap-2">
               <div>
                 <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-copper xl:text-sm xl:font-medium xl:normal-case xl:tracking-normal">
+                  <p className="hidden text-xs font-semibold uppercase tracking-[0.16em] text-copper xl:block xl:text-sm xl:font-medium xl:normal-case xl:tracking-normal">
                     Active campaign
                   </p>
                   <span className="hidden text-moss/30 xl:inline">/</span>
@@ -2013,11 +2013,11 @@ export default function Home() {
                     {modeLabels[mode] ?? mode}
                   </span>
                 </div>
-                <h2 className="mt-1 truncate text-xl font-semibold leading-tight xl:text-2xl">{activeCampaign?.name ?? (hasLoadedCampaigns ? "No active campaign" : "Loading campaign...")}</h2>
-                <p className="mt-1 hidden max-w-4xl overflow-hidden text-sm leading-6 text-moss/75 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] xl:block">
+                <h2 className="mt-0.5 truncate text-lg font-semibold leading-tight xl:mt-1 xl:text-2xl">{activeCampaign?.name ?? (hasLoadedCampaigns ? "No active campaign" : "Loading campaign...")}</h2>
+                <p className="mt-1 hidden max-w-4xl overflow-hidden text-sm leading-6 text-moss/75 xl:[display:-webkit-box] xl:[-webkit-box-orient:vertical] xl:[-webkit-line-clamp:2]">
                   {activeCampaign?.description ?? (hasLoadedCampaigns ? "Create or restore a campaign to continue." : "Campaign context will appear here.")}
                 </p>
-                <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-moss/75 xl:hidden">
+                <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] font-semibold text-moss/75 xl:hidden">
                   <span>{party.length} PCs</span>
                   <span>{documents.reduce((sum, item) => sum + item.chunkCount, 0)} notes</span>
                   <span>{memory.npcs.length + memory.quests.length + memory.locations.length + memory.encounters.length} memory</span>
@@ -2058,8 +2058,8 @@ export default function Home() {
             </div>
           </header>
 
-          <details className="shrink-0 border-b border-moss/15 bg-white px-4 py-2 xl:hidden">
-            <summary className="cursor-pointer text-sm font-semibold text-moss marker:text-copper">Modes and context</summary>
+          <details className="shrink-0 border-b border-moss/15 bg-white px-4 py-1.5 xl:hidden">
+            <summary className="cursor-pointer text-xs font-semibold text-moss marker:text-copper">Modes and context</summary>
             <div className="mt-3 grid grid-cols-2 gap-2">
               {modes.map((item) => (
                 <button
@@ -2271,8 +2271,8 @@ export default function Home() {
             <div ref={timelineEndRef} />
           </div>
 
-          <form onSubmit={handleSubmit} className="sticky bottom-0 z-30 shrink-0 border-t border-moss/15 bg-white/95 p-1.5 shadow-2xl shadow-moss/10 xl:static xl:p-2">
-            <div className="rounded-md border border-moss/15 bg-ink p-2 shadow-inner">
+          <form onSubmit={handleSubmit} className="sticky bottom-0 z-30 shrink-0 border-t border-moss/15 bg-white/95 p-1 shadow-2xl shadow-moss/10 xl:static xl:p-2">
+            <div className="rounded-md border border-moss/15 bg-ink p-1.5 shadow-inner xl:p-2">
               <div className="mb-1 flex flex-col gap-1 px-1 sm:flex-row sm:items-center sm:justify-between">
                 <span className="hidden text-xs font-semibold uppercase tracking-[0.18em] text-mist/70 sm:inline">Command Console</span>
                 <div className="flex flex-wrap items-center gap-2">
@@ -2290,18 +2290,18 @@ export default function Home() {
                 </div>
               </div>
               {promptSuggestionError && <p className="mb-2 px-1 text-xs font-semibold text-ember">{promptSuggestionError}</p>}
-              <div className="flex flex-col gap-2 md:flex-row">
+              <div className="flex gap-2">
               <textarea
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
-                rows={2}
-                className="min-h-12 flex-1 resize-none rounded-md border border-white/10 bg-white px-3 py-2 text-sm leading-6 text-ink shadow-inner placeholder:text-moss/50 sm:min-h-16"
+                rows={1}
+                className="min-h-10 min-w-0 flex-1 resize-none rounded-md border border-white/10 bg-white px-3 py-2 text-sm leading-5 text-ink shadow-inner placeholder:text-moss/50 sm:min-h-16 sm:leading-6"
                 placeholder="Ask for a ruling, NPC, character, combat beat, campaign recap, session summary, or scene setup..."
               />
               <button
                 type="submit"
                 disabled={isSending || !campaignId}
-                className="rounded-md bg-copper px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-ember disabled:cursor-not-allowed disabled:opacity-50 md:w-28"
+                className="w-20 rounded-md bg-copper px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-ember disabled:cursor-not-allowed disabled:opacity-50 md:w-28"
               >
                 {isSending ? "Sending" : "Send"}
               </button>
@@ -3175,26 +3175,25 @@ function MobileEmptyChatState({
   isPreparingScene: boolean;
 }) {
   return (
-    <section className="rounded-md border border-moss/15 bg-white/90 p-3 shadow-sm xl:hidden">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-copper">Ready</p>
-      <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+    <section className="rounded-md border border-moss/15 bg-white/90 p-2 shadow-sm xl:hidden">
+      <div className="flex gap-2 overflow-x-auto pb-1">
         {quickPrompts.slice(0, 4).map((prompt) => (
           <button
             key={prompt.label}
             type="button"
             onClick={() => onPrompt(prompt)}
-            className="shrink-0 rounded-md border border-moss/15 bg-parchment px-3 py-2 text-sm font-semibold text-ink"
+            className="shrink-0 rounded-md border border-moss/15 bg-parchment px-3 py-1.5 text-sm font-semibold text-ink"
           >
             {prompt.label}
           </button>
         ))}
       </div>
-      <div className="mt-2 grid grid-cols-2 gap-2">
+      <div className="mt-1.5 grid grid-cols-2 gap-2">
         <button
           type="button"
           onClick={onPromptSuggestion}
           disabled={isGeneratingPromptSuggestion}
-          className="rounded-md border border-copper/30 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-copper disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-md border border-copper/30 bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-copper disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isGeneratingPromptSuggestion ? "Sparking" : "Spark Prompt"}
         </button>
@@ -3202,7 +3201,7 @@ function MobileEmptyChatState({
           type="button"
           onClick={onPreparedScene}
           disabled={!canPrepareScene || isPreparingScene}
-          className="rounded-md bg-copper px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-white disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-md bg-copper px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isPreparingScene ? "Preparing" : "Prepare Scene"}
         </button>
@@ -4919,23 +4918,204 @@ function inferCharacterFromPlainText(userMessage: string, answer: string, select
     return null;
   }
 
+  const sourceText = `${userMessage} ${answer}`;
+  const classAndSubclass = extractLabeledSection(answer, "Class/Subclass") || extractLabeledSection(answer, "Class") || inferCharacterClass(sourceText);
+  const explicitAbilityScores = abilityScoreMapFromPlainText(extractLabeledSection(answer, "Stats") || extractLabeledSection(answer, "Ability Scores"));
+  const abilityScores = Object.keys(explicitAbilityScores).length ? explicitAbilityScores : fallbackCharacterAbilityScores(sourceText, classAndSubclass);
   const name = extractNpcName(answer) || "Generated Character";
   const personalityTraits = splitStructuredText(extractLabeledSection(answer, "Personality Traits") || extractLabeledSection(answer, "Personality"));
   const equipment = splitStructuredText(extractLabeledSection(answer, "Equipment"));
+  const idealsBondsFlaws = inferCharacterIdealsBondsFlaws(sourceText, classAndSubclass);
   return {
     name,
-    ancestryOrSpecies: extractLabeledSection(answer, "Ancestry") || extractLabeledSection(answer, "Species") || extractLabeledSection(answer, "Race") || "Humanoid",
-    classAndSubclass: extractLabeledSection(answer, "Class") || extractLabeledSection(answer, "Class/Subclass") || "Adventurer",
+    ancestryOrSpecies: extractLabeledSection(answer, "Ancestry") || extractLabeledSection(answer, "Species") || extractLabeledSection(answer, "Race") || inferAncestryOrSpecies(sourceText),
+    classAndSubclass,
     level: extractCharacterLevel(userMessage) || extractCharacterLevel(answer) || 3,
-    background: extractLabeledSection(answer, "Background") || "Campaign-tied wanderer",
-    role: extractLabeledSection(answer, "Role") || extractNpcRole(answer) || "Backup adventurer",
-    statSummary: extractLabeledSection(answer, "Stats") || extractLabeledSection(answer, "Ability Scores") || "Use standard array tuned toward the character's class.",
-    personalityTraits: personalityTraits.length ? personalityTraits : ["Practical under pressure", "Curious about the party's current trouble"],
-    idealsBondsFlaws: extractLabeledSection(answer, "Ideals/Bonds/Flaws") || extractLabeledSection(answer, "Ideal") || "Ideal: Protect the vulnerable. Bond: Owes someone in the campaign. Flaw: Keeps one dangerous truth hidden.",
-    equipment: equipment.length ? equipment : ["Class gear", "travel kit", "one campaign clue"],
-    campaignTieIn: extractLabeledSection(answer, "Campaign Tie-In") || extractLabeledSection(answer, "Connection to Campaign") || "Tie this character to an unresolved campaign hook or faction.",
-    secretOrHook: extractLabeledSection(answer, "Secret") || extractLabeledSection(answer, "Hook") || extractSecretFromAnswer(answer) || "They are connected to a threat the party has not fully understood."
+    background: extractLabeledSection(answer, "Background") || inferCharacterBackground(sourceText, classAndSubclass),
+    role: extractLabeledSection(answer, "Role") || extractNpcRole(answer) || inferCharacterRole(userMessage),
+    abilityScores,
+    statSummary: extractLabeledSection(answer, "Stats") || extractLabeledSection(answer, "Ability Scores") || characterStatSummary(sourceText, classAndSubclass),
+    personalityTraits: personalityTraits.length ? personalityTraits : characterPersonalityTraits(sourceText, classAndSubclass),
+    idealsBondsFlaws: extractIdealsBondsFlaws(answer) || idealsBondsFlaws,
+    equipment: equipment.length ? equipment : inferCharacterEquipment(sourceText, classAndSubclass),
+    campaignTieIn: extractLabeledSection(answer, "Campaign Tie-In") || extractLabeledSection(answer, "Connection to Campaign") || characterCampaignTie(sourceText, classAndSubclass),
+    secretOrHook: extractLabeledSection(answer, "Secret") || extractLabeledSection(answer, "Hook") || extractSecretFromAnswer(answer) || characterSecretOrHook(sourceText, classAndSubclass)
   };
+}
+
+function inferCharacterRole(userMessage: string) {
+  if (/\brival\b/i.test(userMessage)) {
+    return "Rival adventurer";
+  }
+  if (/\bhireling|retainer\b/i.test(userMessage)) {
+    return "Hireling";
+  }
+  if (/\bally|companion|sidekick\b/i.test(userMessage)) {
+    return "Party ally";
+  }
+  if (/\bbackup\b/i.test(userMessage)) {
+    return "Backup PC";
+  }
+  return "Table-ready adventurer";
+}
+
+function inferAncestryOrSpecies(value: string) {
+  const patterns: Array<[RegExp, string]> = [
+    [/\belven?\b|\belf\b/i, "Elf"],
+    [/\bdwar(?:f|ven)\b/i, "Dwarf"],
+    [/\bhalfling\b/i, "Halfling"],
+    [/\bgnome\b/i, "Gnome"],
+    [/\btiefling\b/i, "Tiefling"],
+    [/\bdragonborn\b/i, "Dragonborn"],
+    [/\bhalf-orc\b/i, "Half-orc"],
+    [/\borc\b/i, "Orc"],
+    [/\bgoblin\b/i, "Goblin"],
+    [/\bkobold\b/i, "Kobold"],
+    [/\baasimar\b/i, "Aasimar"],
+    [/\bhuman\b/i, "Human"]
+  ];
+  return patterns.find(([pattern]) => pattern.test(value))?.[1] ?? "Humanoid";
+}
+
+function inferCharacterClass(value: string) {
+  const patterns: Array<[RegExp, string]> = [
+    [/\bbarbarian|rage|berserker\b/i, "Barbarian, Path of the Berserker"],
+    [/\bpaladin|oath|holy knight\b/i, "Paladin, Oath of Devotion"],
+    [/\branger|archer|bow|hunter|gloom\b/i, "Ranger, Hunter"],
+    [/\bmonk|unarmed|fists?|martial artist\b/i, "Monk, Way of the Open Hand"],
+    [/\bgauntlets?|fighter|sword|shield|soldier\b/i, "Fighter, Battle Master"],
+    [/\brogue|thief|assassin|scout|sneak\b/i, "Rogue, Scout"],
+    [/\bcleric|healer|priest|life domain\b/i, "Cleric, Life Domain"],
+    [/\bdruid|wild shape|warden\b/i, "Druid, Circle of the Land"],
+    [/\bwizard|mage|spellbook|arcane\b/i, "Wizard, School of Evocation"],
+    [/\bsorcerer|bloodline|wild magic\b/i, "Sorcerer, Draconic Bloodline"],
+    [/\bwarlock|patron|pact\b/i, "Warlock, Pact of the Tome"],
+    [/\bbard|performer|minstrel\b/i, "Bard, College of Lore"],
+    [/\bartificer|inventor|tinkerer\b/i, "Artificer, Battle Smith"]
+  ];
+  return patterns.find(([pattern]) => pattern.test(value))?.[1] ?? "Adventurer";
+}
+
+function inferCharacterBackground(value: string, classAndSubclass: string) {
+  const textValue = `${value} ${classAndSubclass}`;
+  if (/\bcriminal|thief|smuggler|underworld\b/i.test(textValue)) return "Criminal";
+  if (/\bnoble|court|aristocrat\b/i.test(textValue)) return "Noble";
+  if (/\bsoldier|fighter|guard|paladin\b/i.test(textValue)) return "Soldier";
+  if (/\branger|druid|wild|forest|outlander\b/i.test(textValue)) return "Outlander";
+  if (/\bwizard|sage|scholar|arcane|book\b/i.test(textValue)) return "Sage";
+  if (/\bcleric|healer|temple|acolyte\b/i.test(textValue)) return "Acolyte";
+  if (/\bbard|performer|entertainer\b/i.test(textValue)) return "Entertainer";
+  return "Faction Agent";
+}
+
+function fallbackCharacterAbilityScores(value: string, classAndSubclass: string): Record<string, number> {
+  const textValue = `${value} ${classAndSubclass}`;
+  if (/\bbarbarian|berserker\b/i.test(textValue)) return { str: 16, dex: 13, con: 15, int: 8, wis: 12, cha: 10 };
+  if (/\bpaladin\b/i.test(textValue)) return { str: 16, dex: 10, con: 14, int: 8, wis: 12, cha: 15 };
+  if (/\bgauntlets?|fighter|soldier|sword|shield\b/i.test(textValue)) return { str: 16, dex: 12, con: 15, int: 10, wis: 13, cha: 11 };
+  if (/\branger|archer|bow|hunter\b/i.test(textValue)) return { str: 10, dex: 16, con: 13, int: 11, wis: 15, cha: 9 };
+  if (/\brogue|thief|assassin|scout|sneak\b/i.test(textValue)) return { str: 8, dex: 16, con: 13, int: 14, wis: 12, cha: 10 };
+  if (/\bcleric|healer|priest\b/i.test(textValue)) return { str: 10, dex: 12, con: 14, int: 8, wis: 16, cha: 13 };
+  if (/\bdruid|wild shape|warden\b/i.test(textValue)) return { str: 8, dex: 13, con: 14, int: 10, wis: 16, cha: 12 };
+  if (/\bmonk|unarmed|fists?|martial artist\b/i.test(textValue)) return { str: 10, dex: 16, con: 13, int: 8, wis: 15, cha: 12 };
+  if (/\bwizard|mage|spellbook|arcane\b/i.test(textValue)) return { str: 8, dex: 13, con: 14, int: 16, wis: 12, cha: 10 };
+  if (/\bsorcerer|warlock|bard|performer|patron|pact\b/i.test(textValue)) return { str: 8, dex: 14, con: 13, int: 10, wis: 12, cha: 16 };
+  if (/\bartificer|inventor|tinkerer\b/i.test(textValue)) return { str: 10, dex: 14, con: 13, int: 16, wis: 12, cha: 8 };
+  return { str: 10, dex: 14, con: 13, int: 12, wis: 15, cha: 8 };
+}
+
+function abilityScoreMapFromPlainText(value: string): Record<string, number> {
+  const scores: Record<string, number> = {};
+  for (const key of ["str", "dex", "con", "int", "wis", "cha"]) {
+    const match = value.match(new RegExp(`\\b${key}\\w*\\s*(?:=|:)?\\s*(\\d{1,2})\\b`, "i"));
+    if (match) {
+      const parsed = Number.parseInt(match[1], 10);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        scores[key] = parsed;
+      }
+    }
+  }
+  return scores;
+}
+
+function characterStatSummary(value: string, classAndSubclass: string) {
+  const textValue = `${value} ${classAndSubclass}`;
+  if (/\bgauntlets?|fighter|barbarian|paladin\b/i.test(textValue)) return "Strength-forward front liner with enough Constitution to stay in the dangerous part of the fight.";
+  if (/\branger|rogue|archer|scout\b/i.test(textValue)) return "Dexterity-forward skirmisher with strong scouting instincts and reliable survival reads.";
+  if (/\bcleric|druid|healer\b/i.test(textValue)) return "Wisdom-forward support build with steady concentration and practical battlefield awareness.";
+  if (/\bwizard|artificer|arcane\b/i.test(textValue)) return "Intelligence-forward problem solver who trades raw toughness for preparation and control.";
+  if (/\bbard|sorcerer|warlock\b/i.test(textValue)) return "Charisma-forward face and spellcaster with enough Dexterity to stay mobile.";
+  return "Balanced adventurer stats adjusted toward the strongest cue in the requested concept.";
+}
+
+function characterPersonalityTraits(value: string, classAndSubclass: string) {
+  const textValue = `${value} ${classAndSubclass}`;
+  if (/\brival\b/i.test(textValue)) return ["Competitive when plans get risky", "Respects competence more than rank"];
+  if (/\bhireling|retainer\b/i.test(textValue)) return ["Asks clear terms before danger starts", "Keeps a calm voice when others panic"];
+  if (/\bwizard|sage|scholar\b/i.test(textValue)) return ["Collects small facts other people discard", "Explains danger like a puzzle already half-solved"];
+  if (/\brogue|spy|informant\b/i.test(textValue)) return ["Notices exits before introductions", "Answers personal questions with useful questions"];
+  return ["Steady under pressure", "Curious about the party's current trouble"];
+}
+
+function inferCharacterIdealsBondsFlaws(value: string, classAndSubclass: string) {
+  const textValue = `${value} ${classAndSubclass}`;
+  if (/\brival\b/i.test(textValue)) {
+    return { ideal: "Prove that skill and nerve matter more than reputation.", bond: "Shares a lead, mentor, or enemy with the party.", flaw: "Turns collaboration into a contest when pride is touched." };
+  }
+  if (/\bcleric|healer|priest|paladin\b/i.test(textValue)) {
+    return { ideal: "Mercy should still have teeth when innocent people are threatened.", bond: "Serves a shrine, oath, or patient endangered by the current plot.", flaw: "Takes responsibility for wounds they could not have prevented." };
+  }
+  if (/\brogue|thief|spy|informant\b/i.test(textValue)) {
+    return { ideal: "Information should free people from bad bargains.", bond: "Protects a source who knows too much about the current lead.", flaw: "Withholds the full truth until every exit is mapped." };
+  }
+  if (/\bwizard|sage|scholar|artificer\b/i.test(textValue)) {
+    return { ideal: "A dangerous truth is safer studied than buried.", bond: "Needs one recovered clue to finish a theory about the campaign threat.", flaw: "Treats urgent danger like a problem that can wait for one more note." };
+  }
+  if (/\bbarbarian|fighter|gauntlets?|soldier\b/i.test(textValue)) {
+    return { ideal: "Stand where the danger is thickest so someone weaker can move.", bond: "Owes loyalty to a unit, mentor, or survivor tied to the next lead.", flaw: "Answers pressure with force before asking who benefits." };
+  }
+  return { ideal: "Do right by people caught in larger schemes.", bond: "Owes a debt to someone tied to the campaign.", flaw: "Keeps secrets until trust is undeniable." };
+}
+
+function extractIdealsBondsFlaws(answer: string): Record<string, string> | string {
+  const combined = extractLabeledSection(answer, "Ideals/Bonds/Flaws");
+  const ideal = extractLabeledSection(answer, "Ideal") || extractPrefixedValue(combined, "Ideal");
+  const bond = extractLabeledSection(answer, "Bond") || extractPrefixedValue(combined, "Bond");
+  const flaw = extractLabeledSection(answer, "Flaw") || extractPrefixedValue(combined, "Flaw");
+  return ideal || bond || flaw ? { ideal, bond, flaw } : combined;
+}
+
+function extractPrefixedValue(value: string, label: string) {
+  const match = value.match(new RegExp(`\\b${escapeRegExp(label)}\\s*:\\s*([^.;]+)`, "i"));
+  return match?.[1]?.trim() ?? "";
+}
+
+function inferCharacterEquipment(value: string, classAndSubclass: string) {
+  const textValue = `${value} ${classAndSubclass}`;
+  if (/\bgauntlets?|unarmed|fists?|hand[- ]to[- ]hand\b/i.test(textValue)) return ["reinforced gauntlets", "travel kit", "one campaign clue"];
+  if (/\branger|archer|bow\b/i.test(textValue)) return ["longbow", "shortswords", "explorer's pack", "weathered map"];
+  if (/\bcleric|healer|priest\b/i.test(textValue)) return ["mace", "shield", "holy symbol", "healer's kit"];
+  if (/\brogue|thief|assassin|scout\b/i.test(textValue)) return ["rapier", "shortbow", "thieves' tools", "coded note"];
+  if (/\bwizard|mage|spellbook\b/i.test(textValue)) return ["spellbook", "component pouch", "dagger", "annotated clue"];
+  if (/\bbard|performer\b/i.test(textValue)) return ["rapier", "lute", "disguise kit", "rumor journal"];
+  if (/\bpaladin|fighter|soldier\b/i.test(textValue)) return ["longsword", "shield", "chain mail", "campaign token"];
+  return ["class gear", "travel kit", "one campaign clue"];
+}
+
+function characterCampaignTie(value: string, classAndSubclass: string) {
+  const textValue = `${value} ${classAndSubclass}`;
+  if (/\bcult|conspiracy\b/i.test(textValue)) return "Their trail crosses the same cult or conspiracy pressure currently troubling the campaign.";
+  if (/\brival\b/i.test(textValue)) return "They are chasing the same lead as the party and may turn cooperation into a contest.";
+  if (/\bhireling|retainer|ally|sidekick\b/i.test(textValue)) return "They can join the party for the next leg because their own problem points in the same direction.";
+  return "They are tied to a current faction, lead, or unresolved hook the party can actually follow.";
+}
+
+function characterSecretOrHook(value: string, classAndSubclass: string) {
+  const textValue = `${value} ${classAndSubclass}`;
+  if (/\bcult|conspiracy\b/i.test(textValue)) return "They recognize one symbol, courier, or safehouse connected to the campaign's current threat.";
+  if (/\bdebt|owed|blackmail\b/i.test(textValue)) return "Their help comes with an old debt that may surface at the worst possible time.";
+  if (/\brival\b/i.test(textValue)) return "They know part of the same lead but will only share it if the party earns or forces their respect.";
+  return "They carry one actionable clue that points toward the next campaign lead.";
 }
 
 function looksLikeCharacterRequest(prompt: string, mode: string) {
@@ -4944,6 +5124,7 @@ function looksLikeCharacterRequest(prompt: string, mode: string) {
   }
   return (
     /\b(?:playable|backup|player)\s+characters?\b/.test(prompt) ||
+    /\b(?:create|generate|make|draft|build)\s+(?:an?\s+)?(?:character|hero)\b/.test(prompt) ||
     /\b(?:backup pc|pc backup|player character)\b/.test(prompt) ||
     /\b(?:rival adventurer|adventuring rival|hireling|retainer)\b/.test(prompt) ||
     /\bgenerate\s+a\s+level\s+\d+\b/.test(prompt) ||

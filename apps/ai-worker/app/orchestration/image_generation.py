@@ -12,7 +12,7 @@ IMAGE_STYLE_PRESETS = {
     "cinematic": "cinematic fantasy concept art, dramatic but readable lighting, rich environment detail",
     "parchment sketch": "ink and watercolor parchment sketch, handout-ready, restrained color wash",
     "combat stance": (
-        "dynamic fantasy combat character art, action-ready pose, weapon or spell prepared, "
+        "dynamic fantasy combat character art, action-ready pose, signature fighting method or spell effect prepared, "
         "readable silhouette, clear gear details, dramatic but table-readable motion"
     ),
     "anime": (
@@ -23,7 +23,7 @@ IMAGE_STYLE_PRESETS = {
 
 SAFE_IMAGE_PROMPT_SUFFIX = (
     "Original fantasy art only. Do not reference copyrighted characters, logos, living artists, or imitation style names. "
-    "Keep all important characters, creatures, weapons, faces, and scene clues fully inside the frame with comfortable edge margins. "
+    "Keep all important characters, creatures, gear, faces, and scene clues fully inside the frame with comfortable edge margins. "
     "Use a pulled-back, centered composition with no subject touching the image edge and no cropped-off subjects. "
     "No readable text, no watermark, no UI, no gore."
 )
@@ -99,6 +99,7 @@ def build_image_prompt(output_type: str, data: dict[str, Any], style_preset: str
         )
 
     if output_type == "character":
+        equipment = _safe_list(data.get("equipment"), "class gear and travel kit")
         return _compact_prompt(
             "Create portrait-style fantasy character art for a tabletop RPG playable or near-playable character. "
             f"Style preset: {style_line}. "
@@ -108,7 +109,8 @@ def build_image_prompt(output_type: str, data: dict[str, Any], style_preset: str
             f"Level and role: level {_safe_text(data.get('level'), '1')} {_safe_text(data.get('role'), 'table-ready adventurer')}. "
             f"Background: {_safe_text(data.get('background'), 'campaign-tied wanderer')}. "
             f"Personality shown through pose and expression: {_safe_list(data.get('personalityTraits'), 'practical, capable, and memorable')}. "
-            f"Equipment to show: {_safe_list(data.get('equipment'), 'class gear and travel kit')}. "
+            f"Equipment to show: {equipment}. "
+            f"{_combat_equipment_constraint(data, equipment)}"
             f"Campaign mood: {_safe_text(data.get('campaignTieIn'), 'connected to the current campaign without revealing hidden secrets')}. "
             f"{SAFE_IMAGE_PROMPT_SUFFIX}",
             1200,
@@ -332,6 +334,22 @@ def _safe_list(value: Any, fallback: str) -> str:
     items = [_safe_text(item, "") for item in value[:5]]
     items = [item for item in items if item]
     return "; ".join(items) if items else fallback
+
+
+def _combat_equipment_constraint(data: dict[str, Any], equipment_text: str) -> str:
+    visual_text = " ".join(
+        _safe_text(value, "")
+        for value in [
+            equipment_text,
+            data.get("statSummary"),
+            data.get("role"),
+            data.get("classAndSubclass"),
+            data.get("description"),
+        ]
+    ).lower()
+    if re.search(r"\b(gauntlets?|unarmed|fists?|hand[- ]to[- ]hand|pugilist|brawler)\b", visual_text):
+        return "Combat method: unarmed or gauntlet-based; show empty hands or armored fists, and do not add swords, axes, polearms, bows, or other held weapons. "
+    return "Combat method: follow the listed equipment only; do not invent extra held weapons. "
 
 
 def _safe_text(value: Any, fallback: str) -> str:

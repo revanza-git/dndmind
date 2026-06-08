@@ -58,6 +58,19 @@ class StructuredOutputTests(unittest.TestCase):
 
         self.assertEqual(output["type"], "character")
 
+    def test_auto_character_request_with_not_npc_negation_is_character(self):
+        output = build_mock_structured_output(
+            request("Generate a character named teowulf not npc, he fights with two handed, he uses gauntlet", "Auto"),
+            [],
+        )
+
+        self.assertEqual(output["type"], "character")
+        character = CharacterOutput(**output["data"])
+        self.assertEqual(character.name, "Teowulf")
+        self.assertIn("gauntlet", " ".join(character.equipment).lower())
+        actions = build_suggested_actions(output)
+        self.assertEqual(actions[0]["action"], "saveCharacter")
+
     def test_rules_mode_npc_prompt_produces_npc_card(self):
         output = build_mock_structured_output(request("Generate a suspicious tavern keeper NPC", "Rules"), [])
 
@@ -164,6 +177,94 @@ Secret: Knows who paid Captain Vey.
         self.assertEqual(character.initiativeModifier, 3)
         self.assertEqual(character.passivePerception, 12)
         self.assertIn("Captain Vey", character.secretOrHook)
+
+    def test_real_provider_mismatched_npc_output_rebuilds_clear_character_request(self):
+        answer = "Teowulf is a muscular young man who fights with reinforced gauntlets."
+        chat_request = request("Generate a character named teowulf not npc, he fights with two handed, he uses gauntlet", "Auto")
+
+        with (
+            patch("app.orchestration.gemini_provider._ensure_gemini_provider"),
+            patch("app.orchestration.gemini_provider._retrieve_context", return_value=("", [])),
+            patch("app.orchestration.gemini_provider.run_provider_tool_loop", return_value=([], [])),
+            patch(
+                "app.orchestration.gemini_provider._call_gemini",
+                return_value={
+                    "answer": answer,
+                    "structuredOutput": {
+                        "type": "npc",
+                        "data": {
+                            "name": "Teowulf",
+                            "role": "NPC warrior",
+                            "raceOrSpecies": "Human",
+                            "description": "A warrior with gauntlets.",
+                            "personality": "Direct.",
+                            "motivation": "Win glory.",
+                            "secret": "None.",
+                            "relationshipToParty": "Potential ally.",
+                            "questHook": "Train before the next battle.",
+                        },
+                    },
+                    "suggestedActions": [{"label": "Save NPC", "action": "saveNPC", "payload": {"name": "Teowulf"}}],
+                },
+            ),
+        ):
+            response = real_chat_response(chat_request)
+
+        self.assertEqual(response["structuredOutput"]["type"], "character")
+        self.assertEqual(response["suggestedActions"][0]["action"], "saveCharacter")
+
+    def test_fallback_character_data_infers_gauntlets_from_request(self):
+        output = _fallback_structured_output(
+            request("Generate a character named teowulf not npc, he fights with two handed, he uses gauntlet", "Auto"),
+            "Teowulf is a muscular young man who fights with reinforced gauntlets.",
+            {
+                "type": "npc",
+                "data": {
+                    "name": "Teowulf",
+                    "role": "NPC warrior",
+                    "description": "A warrior with gauntlets.",
+                },
+            },
+        )
+
+        self.assertIsNotNone(output)
+        self.assertEqual(output["type"], "character")
+        character = CharacterOutput(**output["data"])
+        self.assertEqual(character.name, "Teowulf")
+        self.assertIn("gauntlet", " ".join(character.equipment).lower())
+
+    def test_fallback_character_stats_follow_requested_archetype(self):
+        wizard = _fallback_structured_output(
+            request("Generate a level 5 wizard named Sera who studies cult sigils.", "Character"),
+            "Sera is an arcane scholar with a spellbook full of copied cult signs.",
+            None,
+        )
+        fighter = _fallback_structured_output(
+            request("Generate a level 5 fighter named Brann who uses a shield.", "Character"),
+            "Brann is a veteran front liner with an old campaign token.",
+            None,
+        )
+
+        wizard_character = CharacterOutput(**wizard["data"])
+        fighter_character = CharacterOutput(**fighter["data"])
+        self.assertGreater(wizard_character.abilityScores["int"], wizard_character.abilityScores["str"])
+        self.assertGreater(fighter_character.abilityScores["str"], fighter_character.abilityScores["int"])
+        self.assertNotEqual(wizard_character.abilityScores, fighter_character.abilityScores)
+        self.assertEqual(wizard_character.background, "Sage")
+        self.assertIn("spellbook", " ".join(wizard_character.equipment).lower())
+
+    def test_fallback_npc_details_follow_requested_role(self):
+        output = _fallback_structured_output(
+            request("Generate a suspicious merchant NPC named Varo connected to a missing shipment.", "NPC"),
+            "Varo keeps smiling while asking who told the party about the missing shipment.",
+            None,
+        )
+
+        self.assertIsNotNone(output)
+        npc = NpcOutput(**output["data"])
+        self.assertEqual(npc.name, "Varo")
+        self.assertEqual(npc.role, "Merchant contact")
+        self.assertIn("shipment", npc.questHook.lower())
 
     def test_real_provider_encounter_mode_plain_answer_becomes_save_ready(self):
         answer = """
